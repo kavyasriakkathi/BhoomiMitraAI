@@ -123,3 +123,31 @@
   - *Phase 2:* Eradication (Patch vulnerability).
   - *Phase 3:* Recovery (Restore from clean backups).
 - **Implementation Strategy:** Annual tabletop exercises simulating ransomware or data breaches. Automated fallback to a static "System Maintenance" WhatsApp bot if the core AI engine fails.
+
+---
+
+## VII. Integration & External Security
+
+### 30. WhatsApp Business API Security Best Practices
+- **Purpose:** Protect the primary interface connecting the AI with farmers from hijacking, spoofing, or data leaks.
+- **Design:** Zero Trust approach for webhook validation and payload handling.
+- **Best Practices:** Never hardcode the WhatsApp Verify Token or API Token. Strictly validate the `X-Hub-Signature-256` header using the app secret.
+- **Implementation Strategy:** Use a dedicated API Gateway route strictly for the Meta webhook. Process all messages asynchronously to prevent timeout attacks. Periodically rotate the WhatsApp API token and monitor for unexpected IP origins.
+
+### 31. AI Model Security and Safe Prompting
+- **Purpose:** Prevent adversarial attacks and ensure the AI behaves deterministically within safe boundaries.
+- **Design:** Implement a robust LLM firewall and prompt sanitization layer.
+- **Best Practices:** Use constitutional AI constraints (e.g., "Never recommend unapproved pesticides"). Employ a strict output parser that fails closed if the AI generates malformed or unsafe responses.
+- **Implementation Strategy:** Isolate system prompts from user input using strict message role separation (`system` vs `user`). Pass all outgoing recommendations through a deterministic rule-engine checker before returning them to the farmer.
+
+### 32. Secure Third-Party API Integrations (Weather, Maps, Market)
+- **Purpose:** Ensure integrations with external services do not become attack vectors or leak farmer data.
+- **Design:** API egress gateways with strict timeouts and secret management.
+- **Best Practices:** Never forward raw PII (like exact farmer phone number) to third-party APIs. Proxy all requests through the backend.
+- **Implementation Strategy:** Store third-party API keys securely in Vault. Implement circuit breakers to prevent cascading failures if a third-party API goes down or is compromised.
+
+### 33. Secure Location Data Handling for Farmers and Agro Shops
+- **Purpose:** Protect exact geographic locations of users from unauthorized tracking or profiling.
+- **Design:** Geospatial data anonymization and access restriction.
+- **Best Practices:** Store location data using PostGIS with strict role-based access. Never return exact coordinates in client-facing APIs unless absolutely necessary (e.g., use distance or bounding boxes instead).
+- **Implementation Strategy:** Truncate or add "noise" to location coordinates before logging or using them in analytics. When searching for nearby shops, perform the spatial calculation strictly on the backend and return only the calculated distance and shop details to the frontend.
