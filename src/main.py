@@ -44,9 +44,8 @@ def create_app() -> FastAPI:
         }
 
     # ---- Register Modules ----
-    # Modules will be registered here as we build them:
-    # from src.gateway.router import router as gateway_router
-    # app.include_router(gateway_router, prefix="/webhook", tags=["WhatsApp"])
+    from src.gateway.router import router as gateway_router
+    app.include_router(gateway_router, prefix="/webhook", tags=["WhatsApp"])
 
     logger.info(f"Started {settings.app_name} in {settings.app_env} mode.")
     return app

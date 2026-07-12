@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # App
-    app_name: str = "krishimitra-ai"
+    app_name: str = "bhoomimitra-ai"
     app_env: str = "development"
     debug: bool = False
     log_level: str = "INFO"
@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     # WhatsApp
     whatsapp_verify_token: str = Field(default="")
     whatsapp_api_token: str = Field(default="")
+    whatsapp_app_secret: str = Field(default="")  # Used for HMAC-SHA256 signature verification
     whatsapp_phone_number_id: str = Field(default="")
     whatsapp_business_account_id: str = Field(default="")
 
