@@ -20,7 +20,7 @@ def test_create_farmer(mock_farmer_service):
     farmer_id = uuid4()
     mock_farmer = FarmerResponse(
         id=farmer_id,
-        phone_number="+1234567890",
+        phone_number="+11234567890",
         preferred_language="te",
         is_active=True,
         created_at="2023-01-01T00:00:00Z",
@@ -28,11 +28,11 @@ def test_create_farmer(mock_farmer_service):
     )
     mock_farmer_service.create_farmer.return_value = mock_farmer
 
-    response = client.post("/farmers", json={"phone_number": "+1234567890", "preferred_language": "te", "is_active": True})
+    response = client.post("/farmers", json={"phone_number": "+11234567890", "preferred_language": "te", "is_active": True})
     
     assert response.status_code == 201
     assert response.json()["id"] == str(farmer_id)
-    assert response.json()["phone_number"] == "+1234567890"
+    assert response.json()["phone_number"] == "+11234567890"
 
 def test_create_farmer_validation_error():
     response = client.post("/farmers", json={"phone_number": "invalid_phone"})
@@ -42,7 +42,7 @@ def test_get_farmer(mock_farmer_service):
     farmer_id = uuid4()
     mock_farmer = FarmerResponse(
         id=farmer_id,
-        phone_number="+1234567890",
+        phone_number="+11234567890",
         preferred_language="te",
         is_active=True,
         created_at="2023-01-01T00:00:00Z",
@@ -66,7 +66,7 @@ def test_update_farmer(mock_farmer_service):
     farmer_id = uuid4()
     mock_farmer = FarmerResponse(
         id=farmer_id,
-        phone_number="+9876543210",
+        phone_number="+19876543210",
         preferred_language="en",
         is_active=False,
         created_at="2023-01-01T00:00:00Z",
@@ -96,7 +96,7 @@ def test_update_farmer_valid_phone(mock_farmer_service):
     farmer_id = uuid4()
     mock_farmer = FarmerResponse(
         id=farmer_id,
-        phone_number="+919876543210",
+        phone_number="+919789658731",
         preferred_language="te",
         is_active=True,
         created_at="2023-01-01T00:00:00Z",
@@ -104,16 +104,32 @@ def test_update_farmer_valid_phone(mock_farmer_service):
     )
     mock_farmer_service.update_farmer.return_value = mock_farmer
 
-    response = client.put(f"/farmers/{farmer_id}", json={"phone_number": "+919876543210"})
+    response = client.put(f"/farmers/{farmer_id}", json={"phone_number": "+919789658731"})
 
     assert response.status_code == 200
-    assert response.json()["phone_number"] == "+919876543210"
+    assert response.json()["phone_number"] == "+919789658731"
 
 
 def test_update_farmer_invalid_phone_short():
-    """PUT /farmers/{id} with a short phone number like '150' should return 422."""
+    """PUT /farmers/{id} with '150' (too short, no '+') should return 422."""
     farmer_id = uuid4()
     response = client.put(f"/farmers/{farmer_id}", json={"phone_number": "150"})
+
+    assert response.status_code == 422
+
+
+def test_update_farmer_invalid_phone_too_short_with_plus():
+    """PUT /farmers/{id} with '+2015184' (too few digits) should return 422."""
+    farmer_id = uuid4()
+    response = client.put(f"/farmers/{farmer_id}", json={"phone_number": "+2015184"})
+
+    assert response.status_code == 422
+
+
+def test_update_farmer_invalid_phone_no_plus():
+    """PUT /farmers/{id} with '917896587312' (missing '+' prefix) should return 422."""
+    farmer_id = uuid4()
+    response = client.put(f"/farmers/{farmer_id}", json={"phone_number": "917896587312"})
 
     assert response.status_code == 422
 
@@ -131,4 +147,18 @@ def test_update_farmer_invalid_phone_empty():
     farmer_id = uuid4()
     response = client.put(f"/farmers/{farmer_id}", json={"phone_number": ""})
 
+    assert response.status_code == 422
+
+
+# --- Phone number validation tests for POST /farmers ---
+
+def test_create_farmer_invalid_phone_no_plus():
+    """POST /farmers with '917896587312' (missing '+' prefix) should return 422."""
+    response = client.post("/farmers", json={"phone_number": "917896587312"})
+    assert response.status_code == 422
+
+
+def test_create_farmer_invalid_phone_too_short():
+    """POST /farmers with '+2015184' (too few digits) should return 422."""
+    response = client.post("/farmers", json={"phone_number": "+2015184"})
     assert response.status_code == 422

@@ -4,11 +4,12 @@ from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator, ConfigDict
 
-# E.164: optional '+', first digit 1-9, then 6-14 more digits (7-15 total)
-PHONE_REGEX = r"^\+?[1-9]\d{6,14}$"
+# Strict E.164: mandatory '+', country code (1-3 digits), subscriber number
+# Total digits after '+': 10-15 (realistic for mobile numbers with country code)
+PHONE_REGEX = r"^\+[1-9]\d{9,14}$"
 
 class FarmerBase(BaseModel):
-    phone_number: str = Field(..., pattern=PHONE_REGEX, description="E.164 standard phone number format (7-15 digits)")
+    phone_number: str = Field(..., pattern=PHONE_REGEX, description="Strict E.164 phone number: must start with '+' followed by 10-15 digits")
     preferred_language: str = Field(default="te", max_length=10)
     is_active: bool = Field(default=True)
 
@@ -16,7 +17,10 @@ class FarmerBase(BaseModel):
     @classmethod
     def validate_phone_number(cls, v: str) -> str:
         if not re.match(PHONE_REGEX, v):
-            raise ValueError("Invalid phone number. Must be 7-15 digits in E.164 format (e.g. +919876543210).")
+            raise ValueError(
+                "Invalid phone number. Must start with '+' followed by 10-15 digits "
+                "including country code (e.g. +919876543210)."
+            )
         return v
 
 class FarmerCreate(FarmerBase):
@@ -31,7 +35,10 @@ class FarmerUpdate(BaseModel):
     @classmethod
     def validate_phone_number(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and not re.match(PHONE_REGEX, v):
-            raise ValueError("Invalid phone number. Must be 7-15 digits in E.164 format (e.g. +919876543210).")
+            raise ValueError(
+                "Invalid phone number. Must start with '+' followed by 10-15 digits "
+                "including country code (e.g. +919876543210)."
+            )
         return v
 
 class FarmerResponse(FarmerBase):
