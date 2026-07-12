@@ -93,7 +93,7 @@ krishimitra-ai/
 
 ```bash
 # Clone the repo
-git clone https://github.com/kavyasriakkathi/krishimitra-ai.git
+git clone https://github.com/kavyasriakkathi/bhoomimitra-ai-whatsapp.git
 cd krishimitra-ai
 
 # Create virtual environment
