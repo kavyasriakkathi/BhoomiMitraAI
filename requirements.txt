@@ -1,0 +1,44 @@
+# ============================================
+# KrishiMitra AI — Python Dependencies
+# ============================================
+
+# --- Core Framework ---
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+pydantic==2.9.0
+pydantic-settings==2.5.0
+
+# --- Database ---
+sqlalchemy[asyncio]==2.0.35
+asyncpg==0.29.0
+alembic==1.13.0
+redis==5.1.0
+
+# --- HTTP Client ---
+httpx==0.27.0
+
+# --- AI / LLM ---
+openai==1.50.0
+google-generativeai==0.8.0
+
+# --- Language Processing ---
+google-cloud-speech==2.27.0
+google-cloud-translate==3.16.0
+google-cloud-texttospeech==2.17.0
+
+# --- Media Processing ---
+pillow==10.4.0
+pydub==0.25.1
+
+# --- Security ---
+python-jose[cryptography]==3.3.0
+python-dotenv==1.0.1
+
+# --- Testing ---
+pytest==8.3.0
+pytest-asyncio==0.24.0
+httpx==0.27.0
+
+# --- Dev Tools ---
+ruff==0.6.0
+pre-commit==3.8.0
