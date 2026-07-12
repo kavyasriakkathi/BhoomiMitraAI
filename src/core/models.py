@@ -21,6 +21,7 @@ class Farmer(Base):
     conversations = relationship("Conversation", back_populates="farmer", cascade="all, delete-orphan")
     farms = relationship("Farm", back_populates="farmer", cascade="all, delete-orphan")
     crop_health_diagnoses = relationship("CropHealth", back_populates="farmer", cascade="all, delete-orphan")
+    advisories = relationship("Advisory", back_populates="farmer", cascade="all, delete-orphan")
 
 
 class FarmerProfile(Base):
@@ -143,3 +144,21 @@ class CropHealth(Base):
     # Relationships
     crop = relationship("Crop", back_populates="crop_health_diagnoses")
     farmer = relationship("Farmer", back_populates="crop_health_diagnoses")
+
+class Advisory(Base):
+    """Agricultural Advisory for the farmer"""
+    __tablename__ = "advisories"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    farmer_id = Column(UUID(as_uuid=True), ForeignKey("farmers.id"), index=True, nullable=False)
+
+    advisory_type = Column(String(50), nullable=True) # e.g. "Weather", "Pest", "Market"
+    message = Column(Text, nullable=False)
+    source = Column(String(100), nullable=True) # e.g. "AI", "Expert"
+    
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    farmer = relationship("Farmer", back_populates="advisories")
+
