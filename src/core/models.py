@@ -20,6 +20,7 @@ class Farmer(Base):
     profile = relationship("FarmerProfile", back_populates="farmer", uselist=False, cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="farmer", cascade="all, delete-orphan")
     farms = relationship("Farm", back_populates="farmer", cascade="all, delete-orphan")
+    crop_health_diagnoses = relationship("CropHealth", back_populates="farmer", cascade="all, delete-orphan")
 
 
 class FarmerProfile(Base):
@@ -119,3 +120,26 @@ class Crop(Base):
 
     # Relationships
     farm = relationship("Farm", back_populates="crops")
+    crop_health_diagnoses = relationship("CropHealth", back_populates="crop", cascade="all, delete-orphan")
+
+class CropHealth(Base):
+    """Crop health diagnosis records"""
+    __tablename__ = "crop_health"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    crop_id = Column(UUID(as_uuid=True), ForeignKey("crops.id"), index=True, nullable=False)
+    farmer_id = Column(UUID(as_uuid=True), ForeignKey("farmers.id"), index=True, nullable=False)
+
+    image_url = Column(String(500), nullable=True)
+    symptoms = Column(Text, nullable=False)
+    disease_name = Column(String(100), nullable=True)
+    diagnosis_result = Column(Text, nullable=False)
+    treatment_recommendation = Column(Text, nullable=False)
+    confidence_score = Column(Float, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    crop = relationship("Crop", back_populates="crop_health_diagnoses")
+    farmer = relationship("Farmer", back_populates="crop_health_diagnoses")
