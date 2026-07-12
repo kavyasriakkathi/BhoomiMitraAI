@@ -69,11 +69,13 @@ def create_app() -> FastAPI:
     from src.farmer_profiles.router import router as farmer_profiles_router
     from src.conversation.router import router as conversation_router
     from src.farms.router import router as farms_router
+    from src.crops.router import router as crops_router
     app.include_router(gateway_router, prefix="/webhook", tags=["WhatsApp"])
     app.include_router(farmers_router, prefix="/farmers", tags=["Farmers"])
     app.include_router(farmer_profiles_router, prefix="/farmer-profiles", tags=["Farmer Profiles"])
     app.include_router(conversation_router, prefix="/conversations", tags=["Conversations"])
     app.include_router(farms_router, prefix="/farms", tags=["Farms"])
+    app.include_router(crops_router, prefix="/crops", tags=["Crops"])
 
     logger.info(f"Started {settings.app_name} in {settings.app_env} mode.")
     return app

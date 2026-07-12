@@ -86,6 +86,7 @@ class Farm(Base):
 
     # Relationships
     farmer = relationship("Farmer", back_populates="farms")
+    crops = relationship("Crop", back_populates="farm", cascade="all, delete-orphan")
 
 
 class Expert(Base):
@@ -99,3 +100,22 @@ class Expert(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class Crop(Base):
+    """Crop details — a farm can have multiple crops"""
+    __tablename__ = "crops"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    farm_id = Column(UUID(as_uuid=True), ForeignKey("farms.id"), index=True, nullable=False)
+
+    crop_name = Column(String(100), nullable=False)
+    variety = Column(String(100), nullable=True)
+    sowing_date = Column(DateTime, nullable=True)
+    season = Column(String(50), nullable=True)
+    status = Column(String(50), nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    farm = relationship("Farm", back_populates="crops")
