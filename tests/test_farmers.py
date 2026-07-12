@@ -87,3 +87,48 @@ def test_delete_farmer(mock_farmer_service):
     response = client.delete(f"/farmers/{farmer_id}")
     
     assert response.status_code == 204
+
+
+# --- Phone number validation tests for PUT /farmers/{id} ---
+
+def test_update_farmer_valid_phone(mock_farmer_service):
+    """PUT /farmers/{id} with a valid E.164 phone number should succeed."""
+    farmer_id = uuid4()
+    mock_farmer = FarmerResponse(
+        id=farmer_id,
+        phone_number="+919876543210",
+        preferred_language="te",
+        is_active=True,
+        created_at="2023-01-01T00:00:00Z",
+        updated_at="2023-01-01T00:00:00Z"
+    )
+    mock_farmer_service.update_farmer.return_value = mock_farmer
+
+    response = client.put(f"/farmers/{farmer_id}", json={"phone_number": "+919876543210"})
+
+    assert response.status_code == 200
+    assert response.json()["phone_number"] == "+919876543210"
+
+
+def test_update_farmer_invalid_phone_short():
+    """PUT /farmers/{id} with a short phone number like '150' should return 422."""
+    farmer_id = uuid4()
+    response = client.put(f"/farmers/{farmer_id}", json={"phone_number": "150"})
+
+    assert response.status_code == 422
+
+
+def test_update_farmer_invalid_phone_alpha():
+    """PUT /farmers/{id} with alphabetic characters should return 422."""
+    farmer_id = uuid4()
+    response = client.put(f"/farmers/{farmer_id}", json={"phone_number": "abc"})
+
+    assert response.status_code == 422
+
+
+def test_update_farmer_invalid_phone_empty():
+    """PUT /farmers/{id} with an empty string phone number should return 422."""
+    farmer_id = uuid4()
+    response = client.put(f"/farmers/{farmer_id}", json={"phone_number": ""})
+
+    assert response.status_code == 422
