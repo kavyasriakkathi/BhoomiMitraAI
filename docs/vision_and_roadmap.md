@@ -19,7 +19,11 @@ We believe technology should adapt to the farmer, not the other way around. Ther
 
 ---
 
-## II. Feature Roadmap
+## II.ssive Database deployment
+- [ ] Advanced RLHF (Reinforcement Learning from Human Feedback) loop
+- [ ] Analytics and Reporting APIs for Government / NGO partnerships
+- [ ] Integration with IoT soil sensors (pilot program)
+ Feature Roadmap
 
 ### Phase 1: The Core Assistant (Months 1-3)
 *Focus: Establishing the foundational AI and conversational capabilities.*
@@ -47,7 +51,4 @@ We believe technology should adapt to the farmer, not the other way around. Ther
 
 ### Phase 4: Scale & Ecosystem (Months 10-12)
 *Focus: Hardening the infrastructure for nationwide deployment.*
-- [ ] Multi-region Active-Passive Database deployment
-- [ ] Advanced RLHF (Reinforcement Learning from Human Feedback) loop
-- [ ] Analytics and Reporting APIs for Government / NGO partnerships
-- [ ] Integration with IoT soil sensors (pilot program)
+- [ ] Multi-region Active-Pa
