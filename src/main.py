@@ -13,6 +13,25 @@ from src.core.exceptions import (
     global_exception_handler
 )
 
+from contextlib import asynccontextmanager
+from sqlalchemy import text
+from src.core.database import engine
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup validation
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text("SELECT 1"))
+        logger.info("Database connection validated successfully.")
+    except Exception as e:
+        logger.error(f"Failed to connect to the database: {e}")
+        raise e
+    yield
+    # Shutdown
+    await engine.dispose()
+    logger.info("Database connection closed.")
+
 def create_app() -> FastAPI:
     """Application factory — creates and configures the FastAPI instance."""
 
@@ -24,6 +43,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         docs_url="/docs" if settings.debug else None,
         redoc_url=None,
+        lifespan=lifespan,
     )
 
     # ---- Exception Handlers ----

@@ -22,6 +22,8 @@ config = context.config
 db_url = settings.database_url
 if db_url.startswith("postgresql://"):
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
+    if "?" in db_url:
+        db_url = db_url.split("?")[0]
 
 config.set_main_option("sqlalchemy.url", db_url)
 

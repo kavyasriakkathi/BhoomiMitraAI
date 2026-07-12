@@ -61,3 +61,16 @@ class Conversation(Base):
 
     # Relationships
     farmer = relationship("Farmer", back_populates="conversations")
+
+
+class Expert(Base):
+    """Agricultural Expert Model for Escalation"""
+    __tablename__ = "experts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(100), nullable=False)
+    phone_number = Column(String(20), unique=True, index=True, nullable=False)
+    specialty = Column(String(100), nullable=True) # e.g., "Pest Control", "Soil Health"
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
