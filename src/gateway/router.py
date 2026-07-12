@@ -23,6 +23,7 @@ from src.gateway.service import (
     is_duplicate_message,
     store_incoming_message,
 )
+from src.ai.service import process_text_message
 
 router = APIRouter()
 
@@ -126,8 +127,16 @@ async def receive_message(
                 )
 
                 # Step 6: Store conversation
-                await store_incoming_message(db, farmer, parsed)
+                conversation = await store_incoming_message(db, farmer, parsed)
                 messages_processed += 1
+
+                # Step 7: Generate AI response (text messages only for MVP)
+                if parsed.message_type == "text" and parsed.text_content:
+                    ai_response = await process_text_message(db, farmer, conversation)
+                    logger.info(
+                        f"AI replied to {parsed.phone_number}: "
+                        f"'{ai_response[:80]}...'"
+                    )
 
                 logger.info(
                     f"Processed message {parsed.message_id} "
