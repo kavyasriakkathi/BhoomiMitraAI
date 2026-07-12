@@ -19,6 +19,7 @@ class Farmer(Base):
     # Relationships
     profile = relationship("FarmerProfile", back_populates="farmer", uselist=False, cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="farmer", cascade="all, delete-orphan")
+    farms = relationship("Farm", back_populates="farmer", cascade="all, delete-orphan")
 
 
 class FarmerProfile(Base):
@@ -61,6 +62,30 @@ class Conversation(Base):
 
     # Relationships
     farmer = relationship("Farmer", back_populates="conversations")
+
+
+class Farm(Base):
+    """Farm details — a farmer can own multiple farms"""
+    __tablename__ = "farms"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    farmer_id = Column(UUID(as_uuid=True), ForeignKey("farmers.id"), index=True, nullable=False)
+
+    farm_name = Column(String(100), nullable=False)
+    land_size_acres = Column(Float, nullable=False)
+    soil_type = Column(String(50), nullable=True)        # e.g., 'Black', 'Red', 'Alluvial'
+    irrigation_type = Column(String(50), nullable=True)  # e.g., 'Drip', 'Canal', 'Rainfed'
+    village = Column(String(100), nullable=True)
+    district = Column(String(50), nullable=True, index=True)
+    state = Column(String(50), nullable=True, index=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    farmer = relationship("Farmer", back_populates="farms")
 
 
 class Expert(Base):
