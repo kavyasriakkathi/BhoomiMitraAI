@@ -24,6 +24,7 @@ from src.gateway.service import (
     store_incoming_message,
 )
 from src.ai.service import process_text_message
+from src.gateway.whatsapp_client import send_text_message, mark_message_as_read
 
 router = APIRouter()
 
@@ -68,14 +69,16 @@ async def receive_message(
     """
     Receives incoming WhatsApp messages from Meta's Cloud API.
 
-    Steps:
+    Full pipeline:
       1. Verify HMAC-SHA256 signature.
       2. Parse the nested JSON payload.
       3. Extract message fields into a flat ParsedIncomingMessage.
       4. Deduplicate by message_id.
       5. Upsert the farmer record.
       6. Store the conversation entry.
-      7. Return 200 OK immediately (AI processing will happen async later).
+      7. Generate AI response (text messages only).
+      8. Send AI response back to farmer via WhatsApp.
+      9. Mark incoming message as read (blue ticks).
     """
 
     # Step 1: Verify signature (returns raw body bytes)
@@ -87,7 +90,6 @@ async def receive_message(
         payload = WhatsAppWebhookPayload(**payload_dict)
     except Exception as e:
         logger.error(f"Failed to parse webhook payload: {e}")
-        # Still return 200 so Meta doesn't retry malformed payloads forever
         return {"status": "ignored", "reason": "parse_error"}
 
     # Step 3: Extract messages from the nested structure
@@ -100,16 +102,13 @@ async def receive_message(
 
             value = change.value
             if not value.messages:
-                # Status updates (delivered/read receipts) have no messages
                 continue
 
-            # Get sender name from contacts list
             sender_name = None
             if value.contacts:
                 sender_name = value.contacts[0].profile.name
 
             for msg in value.messages:
-                # Build the clean, flat message object
                 parsed = _extract_message(msg, sender_name)
 
                 if parsed is None:
@@ -133,10 +132,26 @@ async def receive_message(
                 # Step 7: Generate AI response (text messages only for MVP)
                 if parsed.message_type == "text" and parsed.text_content:
                     ai_response = await process_text_message(db, farmer, conversation)
-                    logger.info(
-                        f"AI replied to {parsed.phone_number}: "
-                        f"'{ai_response[:80]}...'"
+
+                    # Step 8: Send response back to farmer
+                    outbound_id = await send_text_message(
+                        to_phone=parsed.phone_number,
+                        message_text=ai_response,
                     )
+
+                    # Update delivery status in DB
+                    conversation.outbound_message_id = outbound_id
+                    conversation.delivery_status = "sent" if outbound_id else "failed"
+                    db.add(conversation)
+                    await db.commit()
+
+                    logger.info(
+                        f"Reply {'sent' if outbound_id else 'FAILED'} to "
+                        f"{parsed.phone_number} (outbound_id={outbound_id})"
+                    )
+
+                # Step 9: Mark incoming message as read (best-effort)
+                await mark_message_as_read(parsed.message_id)
 
                 logger.info(
                     f"Processed message {parsed.message_id} "

@@ -52,6 +52,10 @@ class Conversation(Base):
     ai_response = Column(Text, nullable=True)
     intent = Column(String(50), nullable=True)
     confidence_score = Column(Float, nullable=True)
+
+    # Outbound tracking
+    outbound_message_id = Column(String(100), nullable=True)  # Meta message ID for the sent reply
+    delivery_status = Column(String(20), default="pending")   # 'pending', 'sent', 'delivered', 'read', 'failed'
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
