@@ -80,10 +80,10 @@ async def generate_response(
         logger.info(f"Gemini response received ({len(ai_text)} chars)")
         return ai_text
 
-    except asyncio.TimeoutError:
+    except asyncio.TimeoutError as e:
         logger.error(f"Gemini API timed out after {timeout_seconds}s.")
-        return None
+        raise TimeoutError("Gemini API timed out") from e
 
     except Exception as e:
         logger.exception(f"Gemini API call failed: {e}")
-        return None
+        raise RuntimeError(f"Gemini SDK Error: {str(e)}") from e

@@ -4,9 +4,10 @@ KrishiMitra AI — Configuration Module
 Loads and validates all environment variables using Pydantic Settings.
 """
 
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from functools import lru_cache
+
 
 
 class Settings(BaseSettings):
@@ -46,11 +47,11 @@ class Settings(BaseSettings):
     expert_whatsapp_group_id: str = Field(default="")
     escalation_timeout_minutes: int = Field(default=30)
 
-    model_config = {
-        "env_file": ".env",
-        "env_file_encoding": "utf-8",
-        "case_sensitive": False,
-    }
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+    )
 
     @property
     def is_production(self) -> bool:

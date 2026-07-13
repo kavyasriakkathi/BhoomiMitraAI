@@ -72,7 +72,7 @@ class AIService:
             logger.exception(f"Error generating AI response: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="An unexpected error occurred while communicating with the AI provider."
+                detail=f"An unexpected error occurred while communicating with the AI provider: {str(e)}"
             )
 
 async def process_text_message(
