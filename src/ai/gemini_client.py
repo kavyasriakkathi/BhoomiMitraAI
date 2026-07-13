@@ -52,7 +52,7 @@ async def generate_response(
 
     try:
         model = genai.GenerativeModel(
-            model_name="gemini-pro",
+            model_name="gemini-2.5-flash",
             system_instruction=system_prompt,
             generation_config=genai.GenerationConfig(
                 temperature=0.4,        # Low temperature for factual farming advice
