@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     google_cloud_project_id: str = Field(default="")
     google_application_credentials: str = Field(default="")
 
+    # Speech-to-Text
+    stt_provider: str = Field(default="google")
+    stt_default_language: str = Field(default="te-IN")
+
     # Expert Escalation
     expert_whatsapp_group_id: str = Field(default="")
     escalation_timeout_minutes: int = Field(default=30)
