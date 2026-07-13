@@ -140,3 +140,97 @@ async def mark_message_as_read(message_id: str) -> None:
         logger.debug(f"Read receipt sent for message {message_id}")
     except Exception as e:
         logger.warning(f"Failed to send read receipt for {message_id}: {e}")
+
+
+async def download_media_bytes(media_id: str) -> Optional[tuple[bytes, str]]:
+    """
+    Downloads media from Meta Cloud API using a two-step process:
+    1. Resolve the media URL via the media_id.
+    2. Download the actual binary data from the resolved URL.
+    
+    Returns:
+        A tuple of (raw_bytes, mime_type) on success, or None on failure.
+    """
+    settings = get_settings()
+
+    if not settings.whatsapp_api_token:
+        logger.error("WhatsApp API credentials not configured.")
+        return None
+
+    # Step 1: Resolve Media URL
+    resolve_url = f"{META_BASE_URL}/{media_id}"
+    headers = {
+        "Authorization": f"Bearer {settings.whatsapp_api_token}",
+    }
+
+    media_url = None
+    mime_type = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(resolve_url, headers=headers)
+                
+            if response.status_code == 200:
+                data = response.json()
+                media_url = data.get("url")
+                mime_type = data.get("mime_type")
+                break
+                
+            if response.status_code == 404:
+                logger.error(f"Media {media_id} not found or expired.")
+                return None
+                
+            if response.status_code == 429:
+                import asyncio
+                await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+                continue
+                
+            logger.error(f"Failed to resolve media {media_id}: HTTP {response.status_code} - {response.text}")
+            return None
+            
+        except httpx.TimeoutException:
+            if attempt < MAX_RETRIES:
+                import asyncio
+                await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+                continue
+            return None
+        except Exception as e:
+            logger.exception(f"Unexpected error resolving media {media_id}: {e}")
+            return None
+
+    if not media_url:
+        logger.error(f"Failed to resolve media URL for {media_id} after {MAX_RETRIES} attempts.")
+        return None
+
+    # Step 2: Download Binary Data
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Meta requires the Bearer token even for the direct media URL download
+                media_response = await client.get(media_url, headers=headers)
+                
+            if media_response.status_code == 200:
+                logger.info(f"Successfully downloaded media {media_id} ({len(media_response.content)} bytes)")
+                return media_response.content, mime_type
+                
+            if media_response.status_code == 429:
+                import asyncio
+                await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+                continue
+                
+            logger.error(f"Failed to download media bytes for {media_id}: HTTP {media_response.status_code}")
+            return None
+            
+        except httpx.TimeoutException:
+            if attempt < MAX_RETRIES:
+                import asyncio
+                await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+                continue
+            return None
+        except Exception as e:
+            logger.exception(f"Unexpected error downloading media {media_id}: {e}")
+            return None
+
+    logger.error(f"Failed to download media bytes for {media_id} after {MAX_RETRIES} attempts.")
+    return None
