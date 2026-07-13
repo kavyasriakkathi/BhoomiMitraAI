@@ -1,10 +1,13 @@
 from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from src.core.models import Farmer, Conversation
 from src.core.logging import logger
 from src.ai.repository import AIRepository
 from src.ai.schemas import AIGenerateRequest, AIGenerateResponse
 from src.ai.prompts import (
     BHOOMIMITRA_SYSTEM_PROMPT,
     build_farmer_context,
+    get_fallback_response,
 )
 from src.ai.gemini_client import generate_response
 
@@ -71,3 +74,34 @@ class AIService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="An unexpected error occurred while communicating with the AI provider."
             )
+
+async def process_text_message(
+    db: AsyncSession,
+    farmer: Farmer,
+    conversation: Conversation,
+) -> str:
+    """
+    Backward compatibility wrapper for the gateway router.
+    Instantiates the new architecture components to fulfill legacy requests.
+    """
+    repo = AIRepository(db)
+    service = AIService(repo)
+    
+    request = AIGenerateRequest(
+        farmer_id=farmer.id,
+        conversation_id=conversation.id,
+        message=conversation.user_message or ""
+    )
+    
+    try:
+        response = await service.generate_ai_response(request)
+        ai_response_text = response.response_text
+    except HTTPException:
+        logger.warning(f"AI unavailable for farmer {farmer.id}. Using fallback.")
+        ai_response_text = get_fallback_response(farmer.preferred_language)
+        
+    conversation.ai_response = ai_response_text
+    db.add(conversation)
+    await db.commit()
+    
+    return ai_response_text
