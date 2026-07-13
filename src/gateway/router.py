@@ -7,7 +7,7 @@ Handles:
 """
 
 import json
-from fastapi import APIRouter, Query, Request, Depends, HTTPException
+from fastapi import APIRouter, Query, Request, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import get_settings
@@ -18,13 +18,7 @@ from src.gateway.schemas import (
     WhatsAppWebhookPayload,
     ParsedIncomingMessage,
 )
-from src.gateway.service import (
-    get_or_create_farmer,
-    is_duplicate_message,
-    store_incoming_message,
-)
-from src.ai.service import process_text_message
-from src.gateway.whatsapp_client import send_text_message, mark_message_as_read
+from src.gateway.service import process_message_pipeline
 
 router = APIRouter()
 
@@ -64,6 +58,7 @@ async def verify_webhook(
 @router.post("/whatsapp")
 async def receive_message(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -73,12 +68,8 @@ async def receive_message(
       1. Verify HMAC-SHA256 signature.
       2. Parse the nested JSON payload.
       3. Extract message fields into a flat ParsedIncomingMessage.
-      4. Deduplicate by message_id.
-      5. Upsert the farmer record.
-      6. Store the conversation entry.
-      7. Generate AI response (text messages only).
-      8. Send AI response back to farmer via WhatsApp.
-      9. Mark incoming message as read (blue ticks).
+      4. Queue the background processing pipeline.
+      5. Immediately return HTTP 200 OK to Meta to prevent timeouts.
     """
 
     # Step 1: Verify signature (returns raw body bytes)
@@ -92,8 +83,8 @@ async def receive_message(
         logger.error(f"Failed to parse webhook payload: {e}")
         return {"status": "ignored", "reason": "parse_error"}
 
-    # Step 3: Extract messages from the nested structure
-    messages_processed = 0
+    # Step 3: Extract messages and queue background tasks
+    messages_queued = 0
 
     for entry in payload.entry:
         for change in entry.changes:
@@ -115,51 +106,22 @@ async def receive_message(
                     logger.info(f"Unsupported message type: {msg.type}. Skipping.")
                     continue
 
-                # Step 4: Deduplicate
-                if await is_duplicate_message(db, parsed.message_id):
-                    logger.warning(f"Duplicate message {parsed.message_id}. Skipping.")
-                    continue
-
-                # Step 5: Upsert farmer
-                farmer = await get_or_create_farmer(
-                    db, parsed.phone_number, sender_name
+                # Step 4: Queue the background processing pipeline
+                background_tasks.add_task(
+                    process_message_pipeline,
+                    db=db,
+                    parsed=parsed,
+                    sender_name=sender_name
                 )
-
-                # Step 6: Store conversation
-                conversation = await store_incoming_message(db, farmer, parsed)
-                messages_processed += 1
-
-                # Step 7: Generate AI response (text messages only for MVP)
-                if parsed.message_type == "text" and parsed.text_content:
-                    ai_response = await process_text_message(db, farmer, conversation)
-
-                    # Step 8: Send response back to farmer
-                    outbound_id = await send_text_message(
-                        to_phone=parsed.phone_number,
-                        message_text=ai_response,
-                    )
-
-                    # Update delivery status in DB
-                    conversation.outbound_message_id = outbound_id
-                    conversation.delivery_status = "sent" if outbound_id else "failed"
-                    db.add(conversation)
-                    await db.commit()
-
-                    logger.info(
-                        f"Reply {'sent' if outbound_id else 'FAILED'} to "
-                        f"{parsed.phone_number} (outbound_id={outbound_id})"
-                    )
-
-                # Step 9: Mark incoming message as read (best-effort)
-                await mark_message_as_read(parsed.message_id)
+                messages_queued += 1
 
                 logger.info(
-                    f"Processed message {parsed.message_id} "
+                    f"Queued background processing for message {parsed.message_id} "
                     f"from {parsed.phone_number} (type={parsed.message_type})"
                 )
 
-    # Step 7: Always return 200 OK to Meta
-    return {"status": "ok", "messages_processed": messages_processed}
+    # Step 5: Always return 200 OK to Meta immediately
+    return {"status": "ok", "messages_queued": messages_queued}
 
 
 # ──────────────────────────────────────────────
