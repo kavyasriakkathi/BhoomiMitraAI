@@ -10,12 +10,13 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from src.core.models import Farmer, FarmerProfile, Conversation
+from src.core.database import AsyncSessionLocal
 from src.gateway.schemas import ParsedIncomingMessage
 from src.core.logging import logger
 
 from src.gateway.whatsapp_client import download_media_bytes, send_text_message, mark_message_as_read
 from src.language.dependencies import get_language_service
-from src.ai.service import process_text_message
+from src.ai.service import process_text_message, process_image_message
 
 
 async def get_or_create_farmer(
@@ -91,7 +92,6 @@ async def store_incoming_message(
 
 
 async def process_message_pipeline(
-    db: AsyncSession, 
     parsed: ParsedIncomingMessage, 
     sender_name: Optional[str] = None
 ) -> None:
@@ -108,68 +108,85 @@ async def process_message_pipeline(
     6. Outbound Dispatch
     """
     try:
-        # Step 1: Deduplication
-        if await is_duplicate_message(db, parsed.message_id):
-            logger.warning(f"Duplicate message {parsed.message_id}. Skipping processing.")
-            return
-
-        # Step 2: Audio Transcription (Voice Support)
-        if parsed.message_type == "audio" and parsed.media_id:
-            logger.info(f"Processing audio message {parsed.media_id} from {parsed.phone_number}")
-            
-            media_result = await download_media_bytes(parsed.media_id)
-            if not media_result:
-                logger.error(f"Failed to download audio {parsed.media_id}. Aborting pipeline.")
-                await send_text_message(
-                    to_phone=parsed.phone_number, 
-                    message_text="I'm sorry, I couldn't load your voice message due to a network issue. Could you please type your question?"
-                )
+        async with AsyncSessionLocal() as db:
+            # Step 1: Deduplication
+            if await is_duplicate_message(db, parsed.message_id):
+                logger.warning(f"Duplicate message {parsed.message_id}. Skipping processing.")
                 return
+
+            # Step 2: Audio Transcription (Voice Support)
+            if parsed.message_type == "audio" and parsed.media_id:
+                logger.info(f"Processing audio message {parsed.media_id} from {parsed.phone_number}")
                 
-            audio_bytes, mime_type = media_result
-            lang_service = get_language_service()
-            
-            try:
-                transcription = await lang_service.transcribe_audio(audio_bytes, mime_type)
-                # Mutate the parsed message so the rest of the pipeline treats it exactly like text
-                parsed.text_content = transcription.transcription_text
-                logger.info(f"Successfully transcribed audio: '{parsed.text_content}'")
-            except Exception as e:
-                logger.error(f"Failed to transcribe audio: {e}")
-                await send_text_message(
-                    to_phone=parsed.phone_number, 
-                    message_text="I'm sorry, I couldn't understand that voice message clearly. Could you please type your question?"
+                media_result = await download_media_bytes(parsed.media_id)
+                if not media_result:
+                    logger.error(f"Failed to download audio {parsed.media_id}. Aborting pipeline.")
+                    await send_text_message(
+                        to_phone=parsed.phone_number, 
+                        message_text="I'm sorry, I couldn't load your voice message due to a network issue. Could you please type your question?"
+                    )
+                    return
+                    
+                audio_bytes, mime_type = media_result
+                lang_service = get_language_service()
+                
+                try:
+                    transcription = await lang_service.transcribe_audio(audio_bytes, mime_type)
+                    # Mutate the parsed message so the rest of the pipeline treats it exactly like text
+                    parsed.text_content = transcription.transcription_text
+                    logger.info(f"Successfully transcribed audio: '{parsed.text_content}'")
+                except Exception as e:
+                    logger.error(f"Failed to transcribe audio: {e}")
+                    await send_text_message(
+                        to_phone=parsed.phone_number, 
+                        message_text="I'm sorry, I couldn't understand that voice message clearly. Could you please type your question?"
+                    )
+                    return
+
+            # Step 3 & 4: Ensure Farmer exists and Store Conversation
+            farmer = await get_or_create_farmer(db, parsed.phone_number, sender_name)
+            conversation = await store_incoming_message(db, farmer, parsed)
+
+            # Step 5: AI Processing
+            ai_response = None
+            if parsed.message_type == "image" and parsed.media_id:
+                logger.info(f"Processing image message {parsed.media_id} from {parsed.phone_number}")
+                media_result = await download_media_bytes(parsed.media_id)
+                if not media_result:
+                    logger.error(f"Failed to download image {parsed.media_id}. Aborting pipeline.")
+                    await send_text_message(
+                        to_phone=parsed.phone_number,
+                        message_text="I'm sorry, I couldn't load your image due to a network issue. Please try again."
+                    )
+                    return
+                
+                image_bytes, mime_type = media_result
+                ai_response = await process_image_message(db, farmer, conversation, image_bytes, mime_type)
+                
+            elif parsed.text_content:
+                # Handle text (or transcribed audio)
+                ai_response = await process_text_message(db, farmer, conversation)
+                
+            if ai_response:
+                # Step 6: Dispatch outbound reply to WhatsApp
+                outbound_id = await send_text_message(
+                    to_phone=parsed.phone_number,
+                    message_text=ai_response,
                 )
-                return
+                
+                # Update delivery status
+                conversation.outbound_message_id = outbound_id
+                conversation.delivery_status = "sent" if outbound_id else "failed"
+                db.add(conversation)
+                await db.commit()
+                
+                logger.info(
+                    f"Pipeline complete. Reply {'sent' if outbound_id else 'FAILED'} to "
+                    f"{parsed.phone_number} (outbound_id={outbound_id})"
+                )
 
-        # Step 3 & 4: Ensure Farmer exists and Store Conversation
-        farmer = await get_or_create_farmer(db, parsed.phone_number, sender_name)
-        conversation = await store_incoming_message(db, farmer, parsed)
-
-        # Step 5: AI Text Processing
-        # (Only process if we have text, either from a native text message or a transcribed audio message)
-        if parsed.text_content:
-            ai_response = await process_text_message(db, farmer, conversation)
-            
-            # Step 6: Dispatch outbound reply to WhatsApp
-            outbound_id = await send_text_message(
-                to_phone=parsed.phone_number,
-                message_text=ai_response,
-            )
-            
-            # Update delivery status
-            conversation.outbound_message_id = outbound_id
-            conversation.delivery_status = "sent" if outbound_id else "failed"
-            db.add(conversation)
-            await db.commit()
-            
-            logger.info(
-                f"Pipeline complete. Reply {'sent' if outbound_id else 'FAILED'} to "
-                f"{parsed.phone_number} (outbound_id={outbound_id})"
-            )
-
-        # Step 7: Best-effort mark incoming message as read
-        await mark_message_as_read(parsed.message_id)
+            # Step 7: Best-effort mark incoming message as read
+            await mark_message_as_read(parsed.message_id)
 
     except Exception as e:
         logger.exception(f"Fatal error in background message pipeline for {parsed.message_id}: {e}")

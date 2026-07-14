@@ -105,3 +105,64 @@ async def process_text_message(
     await db.commit()
     
     return ai_response_text
+
+
+async def process_image_message(
+    db: AsyncSession,
+    farmer: Farmer,
+    conversation: Conversation,
+    image_bytes: bytes,
+    mime_type: str,
+) -> str:
+    """
+    Multimodal pipeline: Takes an image and optional caption, queries Gemini Vision,
+    and returns agronomic advice.
+    """
+    repo = AIRepository(db)
+    
+    # 1. Fetch farmer profile
+    profile = await repo.get_farmer_profile(farmer.id)
+    farmer_context = build_farmer_context(
+        crop=profile.current_crop if profile else None,
+        district=profile.district if profile else None,
+        state=profile.state if profile else None,
+        land_size=profile.land_size_acres if profile else None,
+    )
+    
+    # Add a vision-specific system prompt instruction
+    full_system_prompt = f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\nThe user has uploaded an image of their crop. Diagnose any visible diseases, pests, or deficiencies and provide actionable agronomic advice.\n\n{farmer_context}"
+    
+    # 2. History
+    history_records = await repo.get_conversation_history(farmer.id)
+    history_records.reverse()
+    history = []
+    for record in history_records:
+        if record.user_message:
+            history.append({"role": "user", "parts": record.user_message})
+        if record.ai_response:
+            history.append({"role": "model", "parts": record.ai_response})
+            
+    # 3. Call Gemini Multimodal
+    from src.ai.gemini_client import generate_multimodal_response
+    
+    user_caption = conversation.user_message or "Please analyze this image."
+    
+    try:
+        ai_response_text = await generate_multimodal_response(
+            system_prompt=full_system_prompt,
+            conversation_history=history,
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+            user_message=user_caption
+        )
+        if not ai_response_text:
+            raise Exception("Empty response from AI")
+    except Exception as e:
+        logger.warning(f"AI Vision unavailable for farmer {farmer.id}: {e}")
+        ai_response_text = get_fallback_response(farmer.preferred_language)
+        
+    conversation.ai_response = ai_response_text
+    db.add(conversation)
+    await db.commit()
+    
+    return ai_response_text

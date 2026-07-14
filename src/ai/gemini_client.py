@@ -87,3 +87,57 @@ async def generate_response(
     except Exception as e:
         logger.exception(f"Gemini API call failed: {e}")
         raise RuntimeError(f"Gemini SDK Error: {str(e)}") from e
+
+
+async def generate_multimodal_response(
+    system_prompt: str,
+    conversation_history: List[Dict[str, str]],
+    image_bytes: bytes,
+    mime_type: str,
+    user_message: str = "",
+    timeout_seconds: int = 45,
+) -> Optional[str]:
+    """
+    Send an image and an optional text prompt to the Gemini Vision model.
+    """
+    _ensure_initialized()
+
+    try:
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash-latest",
+            system_instruction=system_prompt,
+            generation_config=genai.GenerationConfig(
+                temperature=0.4,
+                max_output_tokens=512,
+                top_p=0.9,
+            ),
+        )
+
+        history = []
+        for msg in conversation_history:
+            history.append({"role": msg["role"], "parts": [msg["parts"]]})
+
+        chat = model.start_chat(history=history)
+
+        logger.info(f"Sending multimodal message to Gemini (context_len={len(history)})")
+
+        message_parts = [{"mime_type": mime_type, "data": image_bytes}]
+        if user_message:
+            message_parts.append(user_message)
+
+        response = await asyncio.wait_for(
+            asyncio.to_thread(chat.send_message, message_parts),
+            timeout=timeout_seconds,
+        )
+
+        ai_text = response.text.strip()
+        logger.info(f"Gemini multimodal response received ({len(ai_text)} chars)")
+        return ai_text
+
+    except asyncio.TimeoutError as e:
+        logger.error(f"Gemini Multimodal API timed out after {timeout_seconds}s.")
+        raise TimeoutError("Gemini API timed out") from e
+
+    except Exception as e:
+        logger.exception(f"Gemini Multimodal API call failed: {e}")
+        raise RuntimeError(f"Gemini SDK Error: {str(e)}") from e
