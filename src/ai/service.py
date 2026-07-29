@@ -34,10 +34,17 @@ class AIService:
                 land_size=profile.land_size_acres if profile else None,
             )
 
-            # 3. Build system prompt
-            full_system_prompt = f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\n{farmer_context}"
+            # 3. Fetch farmer long-term memory context
+            from src.memory.service import FarmerMemoryService
+            from src.memory.repository import FarmerMemoryRepository
+            mem_repo = FarmerMemoryRepository(self.repository.session)
+            mem_service = FarmerMemoryService(mem_repo)
+            memory_context = await mem_service.format_memory_for_system_prompt(request.farmer_id)
 
-            # 4. Fetch conversation history
+            # 4. Build system prompt combining profile and memory engine
+            full_system_prompt = f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\n{farmer_context}\n\n{memory_context}"
+
+            # 5. Fetch conversation history
             history_records = await self.repository.get_conversation_history(request.farmer_id)
             
             # Gemini expects oldest first
@@ -49,7 +56,7 @@ class AIService:
                 if record.ai_response:
                     history.append({"role": "model", "parts": record.ai_response})
 
-            # 5. Call Gemini API
+            # 6. Call Gemini API
             logger.info(f"Processing AI request for farmer {request.farmer_id}: '{request.message[:80]}...'")
             
             ai_text = await generate_response(
@@ -64,7 +71,17 @@ class AIService:
                     detail="AI provider timed out or returned no response."
                 )
 
-            # 6. Return structured response
+            # 7. Automatic memory extraction from exchange
+            try:
+                await mem_service.extract_and_update_memory(
+                    farmer_id=request.farmer_id,
+                    user_message=request.message,
+                    ai_response=ai_text
+                )
+            except Exception as mem_err:
+                logger.warning(f"Automatic memory extraction warning for farmer {request.farmer_id}: {mem_err}")
+
+            # 8. Return structured response
             return AIGenerateResponse(
                 response_text=ai_text,
                 intent=None,
@@ -144,12 +161,18 @@ async def process_image_message(
         land_size=profile.land_size_acres if profile else None,
     )
     
+    from src.memory.service import FarmerMemoryService
+    from src.memory.repository import FarmerMemoryRepository
+    mem_repo = FarmerMemoryRepository(db)
+    mem_service = FarmerMemoryService(mem_repo)
+    memory_context = await mem_service.format_memory_for_system_prompt(farmer.id)
+
     # Add a vision-specific system prompt instruction enforcing JSON
     full_system_prompt = f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\nThe user has uploaded an image of their crop. Diagnose any visible diseases, pests, or deficiencies.\n" \
                          "You MUST return a strictly valid JSON object matching this exact schema:\n" \
                          '{"disease_name": "Name", "confidence_score": 0.95, "severity": "low/medium/high", "symptoms": "Visible symptoms", "treatment_recommendation": "Steps to fix", "friendly_whatsapp_reply": "Natural language reply for the farmer"}\n' \
                          "Provide actionable agronomic advice.\n\n" \
-                         f"{farmer_context}"
+                         f"{farmer_context}\n\n{memory_context}"
     
     # 2. History
     history_records = await repo.get_conversation_history(farmer.id)
@@ -212,6 +235,16 @@ async def process_image_message(
             )
             await crop_health_service.create_diagnosis(create_data)
             logger.info(f"Structured diagnosis saved to CropHealth for farmer {farmer.id}")
+
+        # Update Farmer Memory with diagnosis
+        try:
+            await mem_service.extract_and_update_memory(
+                farmer_id=farmer.id,
+                user_message=user_caption,
+                ai_response=f"Disease Diagnosed: {diagnosis_data.disease_name}. Treatment: {diagnosis_data.treatment_recommendation}"
+            )
+        except Exception as mem_err:
+            logger.warning(f"Memory update failed for image message: {mem_err}")
 
     except Exception as e:
         logger.warning(f"AI Vision unavailable or failed to parse for farmer {farmer.id}: {e}")

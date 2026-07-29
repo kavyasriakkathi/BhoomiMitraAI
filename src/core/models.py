@@ -4,6 +4,7 @@ from sqlalchemy import Column, String, Boolean, DateTime, Float, ForeignKey, Tex
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from src.core.database import Base
+from src.memory.models import FarmerMemory
 
 class Farmer(Base):
     """Core Farmer Identity Model"""
@@ -18,6 +19,7 @@ class Farmer(Base):
 
     # Relationships
     profile = relationship("FarmerProfile", back_populates="farmer", uselist=False, cascade="all, delete-orphan")
+    memory = relationship("FarmerMemory", back_populates="farmer", uselist=False, cascade="all, delete-orphan")
     conversations = relationship("Conversation", back_populates="farmer", cascade="all, delete-orphan")
     farms = relationship("Farm", back_populates="farmer", cascade="all, delete-orphan")
     crop_health_diagnoses = relationship("CropHealth", back_populates="farmer", cascade="all, delete-orphan")

@@ -90,6 +90,7 @@ def create_app() -> FastAPI:
     from src.inventory.router import router as inventory_router
     from src.orders.router import router as orders_router
     from src.schemes.router import router as schemes_router
+    from src.memory.router import router as memory_router
 
     app.include_router(gateway_router, prefix="/webhook", tags=["WhatsApp"])
     app.include_router(farmers_router, prefix="/farmers", tags=["Farmers"])
@@ -103,6 +104,7 @@ def create_app() -> FastAPI:
     app.include_router(inventory_router, prefix="/inventory", tags=["Inventory Management"])
     app.include_router(orders_router, prefix="/orders", tags=["Order Requests & Cart"])
     app.include_router(schemes_router, prefix="/schemes", tags=["Government Schemes"])
+    app.include_router(memory_router, prefix="/memory", tags=["Farmer Memory Profile"])
     app.include_router(ai_router)
 
     logger.info(f"Started {settings.app_name} in {settings.app_env} mode.")
