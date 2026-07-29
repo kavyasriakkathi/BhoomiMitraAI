@@ -1,5 +1,10 @@
+import sys
+import os
 import asyncio
 from logging.config import fileConfig
+
+# Ensure current working directory is in sys.path
+sys.path.insert(0, os.getcwd())
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection

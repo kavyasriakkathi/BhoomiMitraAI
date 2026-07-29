@@ -13,7 +13,7 @@ from src.core.models import Shop, Inventory
 async def seed_data():
     """Seed sample Agri Shop and Inventory into the database."""
     async with AsyncSessionLocal() as db:
-        print("🌱 Seeding sample Agri Shop data...")
+        print("[SEED] Seeding sample Agri Shop data...")
 
         # Check if shop already exists
         result = await db.execute(select(Shop).where(Shop.phone_number == "+91 9876543210"))
@@ -44,10 +44,10 @@ async def seed_data():
             )
             db.add(shop)
             await db.flush()
-            print(f"✅ Created Shop: {shop.shop_name} ({shop.id})")
+            print(f"[CREATED] Created Shop: {shop.shop_name} ({shop.id})")
         else:
             shop = existing_shop
-            print(f"ℹ️ Shop already exists: {shop.shop_name} ({shop.id})")
+            print(f"[EXISTS] Shop already exists: {shop.shop_name} ({shop.id})")
 
         # Inventory Items
         sample_items = [
@@ -112,12 +112,12 @@ async def seed_data():
                     **item_data
                 )
                 db.add(inventory_item)
-                print(f"  └─ Added Product: {item_data['product_name']} ({item_data['brand']}) - ₹{item_data['price']}")
+                print(f"  -> Added Product: {item_data['product_name']} ({item_data['brand']}) - RS {item_data['price']}")
             else:
-                print(f"  └─ Product already exists: {item_data['product_name']}")
+                print(f"  -> Product already exists: {item_data['product_name']}")
 
         await db.commit()
-        print("✨ Seeding completed successfully!")
+        print("[SUCCESS] Seeding completed successfully!")
 
 
 if __name__ == "__main__":

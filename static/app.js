@@ -135,10 +135,31 @@ async function loadNearbyShops() {
       return;
     }
 
-    container.innerHTML = shops.map(s => {
+    const cards = await Promise.all(shops.map(async (s) => {
       const mapsUrl = s.google_maps_link || `https://www.google.com/maps/search/?api=1&query=${s.latitude || 16.3067},${s.longitude || 80.4365}`;
       const statusBadge = s.status === 'active' ? '<span class="badge badge-open">Open</span>' : '<span class="badge badge-closed">Closed</span>';
       const deliveryBadge = s.delivery_available ? '<span class="badge badge-completed">Delivery Available</span>' : '<span class="badge badge-pending">Pick Up Only</span>';
+
+      let productsHtml = '<p style="font-size:0.85rem; color:var(--text-muted);">No products listed</p>';
+      try {
+        const invRes = await fetch(`/inventory/shop/${s.id}`);
+        if (invRes.ok) {
+          const invData = await invRes.json();
+          if (invData.items && invData.items.length > 0) {
+            productsHtml = `<div style="margin: 0.75rem 0; padding: 0.75rem; background: var(--bg-main); border-radius: var(--radius-sm);">
+              <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.35rem; color: var(--primary);">📦 Live Inventory:</div>
+              ${invData.items.map(item => `
+                <div style="display:flex; justify-content:space-between; font-size: 0.85rem; padding: 0.25rem 0; border-bottom: 1px dashed var(--border-color);">
+                  <span><strong>${item.product_name}</strong> (${item.brand})</span>
+                  <span>₹${item.price} | <strong>${item.quantity_in_stock} ${item.unit}s</strong></span>
+                </div>
+              `).join('')}
+            </div>`;
+          }
+        }
+      } catch (e) {
+        console.warn("Error loading shop products:", e);
+      }
 
       return `
         <div class="card">
@@ -149,15 +170,18 @@ async function loadNearbyShops() {
           <p><strong>Owner:</strong> ${s.owner_name}</p>
           <p><strong>Phone:</strong> ${s.phone_number}</p>
           <p><strong>Address:</strong> ${s.address}, ${s.district || ''}</p>
-          <p><strong>Distance:</strong> 📍 ${s.distance_km || 2.1} km</p>
-          <div style="margin-top: 0.5rem; margin-bottom: 1rem;">${deliveryBadge}</div>
-          <div style="display: flex; gap: 0.5rem;">
-            <a href="tel:${s.phone_number}" class="btn btn-secondary btn-sm" style="flex:1;">📞 Call</a>
-            <a href="${mapsUrl}" target="_blank" class="btn btn-primary btn-sm" style="flex:1;">🗺️ Directions</a>
+          <p><strong>Distance:</strong> 📍 ${s.distance_km !== undefined ? s.distance_km : 2.1} km</p>
+          <div style="margin-top: 0.5rem;">${deliveryBadge}</div>
+          ${productsHtml}
+          <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem;">
+            <a href="tel:${s.phone_number}" class="btn btn-secondary btn-sm" style="flex:1;">📞 Call Shop</a>
+            <a href="${mapsUrl}" target="_blank" class="btn btn-primary btn-sm" style="flex:1;">🗺️ Get Directions</a>
           </div>
         </div>
       `;
-    }).join('');
+    }));
+
+    container.innerHTML = cards.join('');
   } catch (err) {
     container.innerHTML = `<p style="color:red;">Error loading shops: ${err.message}</p>`;
   }
