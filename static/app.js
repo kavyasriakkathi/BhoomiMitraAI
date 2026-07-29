@@ -126,7 +126,7 @@ async function loadNearbyShops() {
   container.innerHTML = '<p>Loading nearby shops...</p>';
 
   try {
-    const res = await fetch('/shops/nearby?latitude=16.3067&longitude=80.4365&max_radius_km=50');
+    const res = await fetch('/shops/nearby?latitude=18.8206&longitude=78.7119&max_radius_km=50');
     if (!res.ok) throw new Error('Failed to fetch nearby shops');
     const shops = await res.json();
 
@@ -136,7 +136,7 @@ async function loadNearbyShops() {
     }
 
     const cards = await Promise.all(shops.map(async (s) => {
-      const mapsUrl = s.google_maps_link || `https://www.google.com/maps/search/?api=1&query=${s.latitude || 16.3067},${s.longitude || 80.4365}`;
+      const mapsUrl = s.google_maps_link || `https://www.google.com/maps/search/?api=1&query=${s.latitude || 18.8206},${s.longitude || 78.7119}`;
       const statusBadge = s.status === 'active' ? '<span class="badge badge-open">Open</span>' : '<span class="badge badge-closed">Closed</span>';
       const deliveryBadge = s.delivery_available ? '<span class="badge badge-completed">Delivery Available</span>' : '<span class="badge badge-pending">Pick Up Only</span>';
 
@@ -170,7 +170,7 @@ async function loadNearbyShops() {
           <p><strong>Owner:</strong> ${s.owner_name}</p>
           <p><strong>Phone:</strong> ${s.phone_number}</p>
           <p><strong>Address:</strong> ${s.address}, ${s.district || ''}</p>
-          <p><strong>Distance:</strong> 📍 ${s.distance_km !== undefined ? s.distance_km : 2.1} km</p>
+          <p><strong>Distance:</strong> 📍 ${s.distance_km !== undefined ? s.distance_km : 0} km</p>
           <div style="margin-top: 0.5rem;">${deliveryBadge}</div>
           ${productsHtml}
           <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem;">
@@ -193,7 +193,7 @@ async function executeFarmerProductSearch() {
   container.innerHTML = '<p>Searching inventory...</p>';
 
   try {
-    const res = await fetch(`/shops/farmer-search?query=${encodeURIComponent(query)}&latitude=16.3067&longitude=80.4365`);
+    const res = await fetch(`/shops/farmer-search?query=${encodeURIComponent(query)}&latitude=18.8206&longitude=78.7119`);
     if (!res.ok) throw new Error('Search failed');
     const data = await res.json();
 

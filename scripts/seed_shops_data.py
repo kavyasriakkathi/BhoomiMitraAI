@@ -5,41 +5,54 @@ import sys
 # Ensure project root is in sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from src.core.database import AsyncSessionLocal
 from src.core.models import Shop, Inventory
 
 
 async def seed_data():
-    """Seed sample Agri Shop and Inventory into the database."""
+    """Seed real Agri Shop 'Mallanna Fertilizer Seeds and Pesticides' and Inventory into database."""
     async with AsyncSessionLocal() as db:
-        print("[SEED] Seeding sample Agri Shop data...")
+        print("[SEED] Cleaning old sample shop data...")
 
-        # Check if shop already exists
-        result = await db.execute(select(Shop).where(Shop.phone_number == "+91 9876543210"))
+        # Remove old sample shops (e.g. Sri Lakshmi Agro Centre or old dummy numbers)
+        old_shops_res = await db.execute(
+            select(Shop).where(Shop.shop_name.ilike("%Sri Lakshmi%") | (Shop.phone_number == "+91 9876543210"))
+        )
+        old_shops = old_shops_res.scalars().all()
+        for old in old_shops:
+            await db.delete(old)
+        if old_shops:
+            await db.flush()
+            print(f"[CLEANUP] Removed {len(old_shops)} old sample shop record(s).")
+
+        print("[SEED] Seeding real shop 'Mallanna Fertilizer Seeds and Pesticides'...")
+
+        # Check if Mallanna shop already exists
+        result = await db.execute(select(Shop).where(Shop.phone_number == "8976547654"))
         existing_shop = result.scalar_one_or_none()
 
         if not existing_shop:
             shop = Shop(
-                shop_name="Sri Lakshmi Agro Centre",
-                owner_name="Ramesh Kumar",
-                phone_number="+91 9876543210",
-                email="contact@srilakshmiagro.com",
-                address="Main Road, Guntur",
-                village="Guntur Rural",
-                mandal="Guntur",
-                district="Guntur",
-                state="Andhra Pradesh",
-                pin_code="522001",
-                latitude=16.3067,
-                longitude=80.4365,
+                shop_name="Mallanna Fertilizer Seeds and Pesticides",
+                owner_name="Mallanna",
+                phone_number="8976547654",
+                email="contact@mallannaagri.com",
+                address="Kallur Road, Korutla",
+                village="Korutla",
+                mandal="Korutla",
+                district="Jagtial",
+                state="Telangana",
+                pin_code="505326",
+                latitude=18.8206,
+                longitude=78.7119,
                 opening_time="08:00 AM",
                 closing_time="08:00 PM",
                 delivery_available=True,
-                home_delivery_radius_km=15.0,
-                google_maps_link="https://maps.google.com/?q=16.3067,80.4365",
-                gst_number="37ABCDE1234F1Z5",
-                license_number="AP/GNT/AGRI/2026/089",
+                home_delivery_radius_km=25.0,
+                google_maps_link="https://www.google.com/maps/search/?api=1&query=18.8206,78.7119",
+                gst_number="36AAAPM1234F1Z9",
+                license_number="TS/JGT/AGRI/2026/102",
                 status="active",
             )
             db.add(shop)
@@ -47,7 +60,23 @@ async def seed_data():
             print(f"[CREATED] Created Shop: {shop.shop_name} ({shop.id})")
         else:
             shop = existing_shop
-            print(f"[EXISTS] Shop already exists: {shop.shop_name} ({shop.id})")
+            # Update existing shop details to ensure exact match
+            shop.shop_name = "Mallanna Fertilizer Seeds and Pesticides"
+            shop.owner_name = "Mallanna"
+            shop.address = "Kallur Road, Korutla"
+            shop.village = "Korutla"
+            shop.mandal = "Korutla"
+            shop.district = "Jagtial"
+            shop.state = "Telangana"
+            shop.latitude = 18.8206
+            shop.longitude = 78.7119
+            shop.opening_time = "08:00 AM"
+            shop.closing_time = "08:00 PM"
+            shop.delivery_available = True
+            shop.google_maps_link = "https://www.google.com/maps/search/?api=1&query=18.8206,78.7119"
+            db.add(shop)
+            await db.flush()
+            print(f"[UPDATED] Updated Shop: {shop.shop_name} ({shop.id})")
 
         # Inventory Items
         sample_items = [
@@ -114,10 +143,17 @@ async def seed_data():
                 db.add(inventory_item)
                 print(f"  -> Added Product: {item_data['product_name']} ({item_data['brand']}) - RS {item_data['price']}")
             else:
-                print(f"  -> Product already exists: {item_data['product_name']}")
+                existing_item.brand = item_data["brand"]
+                existing_item.price = item_data["price"]
+                existing_item.quantity_in_stock = item_data["quantity_in_stock"]
+                existing_item.category = item_data["category"]
+                existing_item.unit = item_data["unit"]
+                existing_item.available = True
+                db.add(existing_item)
+                print(f"  -> Updated Product: {item_data['product_name']} - RS {item_data['price']}")
 
         await db.commit()
-        print("[SUCCESS] Seeding completed successfully!")
+        print("[SUCCESS] Real shop seeding completed successfully!")
 
 
 if __name__ == "__main__":
