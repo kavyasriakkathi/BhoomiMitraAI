@@ -148,29 +148,33 @@ async def rebuild_index(
 @router.get(
     "/search",
     response_model=List[RAGSearchResult],
-    summary="Semantic Vector Search Over Agriculture Knowledge Engine",
+    summary="True Hybrid Search (Vector + Keyword + Metadata Re-Ranking) Over Knowledge Engine",
     tags=["RAG Knowledge Engine"],
 )
 async def search_knowledge(
     query: str = Query(..., min_length=2, description="Search query or farmer question"),
-    top_k: int = Query(5, ge=1, le=20, description="Top K results"),
+    top_k: int = Query(5, ge=1, le=20, description="Top K results to return (default 5)"),
     category: Optional[str] = Query(None, description="Filter category"),
     language: Optional[str] = Query(None, description="Filter language"),
     state: Optional[str] = Query(None, description="Filter state"),
     crop: Optional[str] = Query(None, description="Filter crop"),
+    source: Optional[str] = Query(None, description="Filter source"),
     service: RAGService = Depends(get_rag_service),
 ):
     """
-    Performs semantic vector search and returns Top K relevant text chunks with similarity scores.
+    Performs True Hybrid Search (Vector Cosine Similarity + Keyword TF-IDF + Metadata Re-Ranking)
+    and returns top K highest-ranked text chunks with scores and page metadata.
     """
-    return await service.search_knowledge(
+    return await service.hybrid_search_knowledge(
         query=query,
         top_k=top_k,
         category=category,
         language=language,
         state=state,
         crop=crop,
+        source=source,
     )
+
 
 
 @router.get(

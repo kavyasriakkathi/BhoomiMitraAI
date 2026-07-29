@@ -101,7 +101,7 @@ def test_rag_list_documents(mock_rag_service):
 
 
 def test_rag_search_knowledge(mock_rag_service):
-    mock_rag_service.search_knowledge.return_value = [
+    mock_results = [
         RAGSearchResult(
             chunk_id=uuid4(),
             document_id=uuid4(),
@@ -115,6 +115,9 @@ def test_rag_search_knowledge(mock_rag_service):
             similarity_score=0.92,
         )
     ]
+    mock_rag_service.search_knowledge.return_value = mock_results
+    mock_rag_service.hybrid_search_knowledge.return_value = mock_results
+
 
     response = client.get("/rag/search?query=chilli%20thrips&top_k=3")
     assert response.status_code == 200
@@ -211,3 +214,46 @@ def test_rag_service_unit_chunking_and_similarity():
 
     assert sim_same == pytest.approx(1.0, rel=1e-3)
     assert sim_same > sim_diff
+
+
+def test_hybrid_search_keyword_and_metadata_re_ranking():
+    """Unit test for TF-IDF keyword scoring and metadata match re-ranking."""
+    from src.rag.service import RAGService
+    service = RAGService(repository=None)
+
+    # Keyword scoring
+    kw_high = service.calculate_keyword_score("chilli thrips imidacloprid", "Apply Imidacloprid for controlling chilli thrips outbreak.")
+    kw_low = service.calculate_keyword_score("chilli thrips imidacloprid", "General rainfall forecast for paddy farmers.")
+
+    assert kw_high > kw_low
+    assert kw_high > 0.30
+
+    # Metadata scoring
+    m_match = service.calculate_metadata_score(
+        doc_crop="Chilli", doc_state="Telangana", doc_category="Pest Control", doc_language="te", doc_source="ICAR Publications",
+        farmer_crop="Chilli", farmer_state="Telangana", filter_category="Pest Control", filter_language="te", filter_source="ICAR Publications"
+    )
+    m_mismatch = service.calculate_metadata_score(
+        doc_crop="Wheat", doc_state="Punjab", doc_category="Soil Health", doc_language="en", doc_source="Private",
+        farmer_crop="Chilli", farmer_state="Telangana", filter_category="Pest Control", filter_language="te", filter_source="ICAR Publications"
+    )
+
+    assert m_match > m_mismatch
+    assert m_match == pytest.approx(1.0, abs=0.01)
+
+
+def test_page_extraction_and_chunking():
+    """Unit test for page extraction and page number retention in chunking."""
+    from src.rag.service import RAGService
+    service = RAGService(repository=None)
+
+    pages = [
+        (1, "Page 1 content: ICAR Chilli Advisory."),
+        (2, "Page 2 content: Recommended dosage for imidacloprid."),
+    ]
+    chunk_records = service.chunk_pages(pages, max_chunk_size=100)
+
+    assert len(chunk_records) >= 2
+    assert chunk_records[0]["page_number"] == 1
+    assert chunk_records[-1]["page_number"] == 2
+

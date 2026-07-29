@@ -97,9 +97,11 @@ class RAGRepository:
                 id=chunk_id,
                 document_id=doc_id,
                 chunk_index=item["chunk_index"],
+                page_number=item.get("page_number", 1),
                 chunk_text=item["chunk_text"],
                 embedding_id=embedding_id,
             )
+
             self.session.add(chunk)
 
             emb_meta = EmbeddingMetadata(

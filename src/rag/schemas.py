@@ -36,6 +36,7 @@ class KnowledgeChunkResponse(BaseModel):
     id: UUID
     document_id: UUID
     chunk_index: int
+    page_number: Optional[int] = 1
     chunk_text: str
     embedding_id: Optional[str] = None
     created_at: datetime
@@ -54,7 +55,7 @@ class RAGSearchQuery(BaseModel):
 
 
 class RAGSearchResult(BaseModel):
-    """SearchResult schema containing chunk text, source, document title, and similarity score."""
+    """SearchResult schema containing chunk text, metadata, page, and hybrid scores."""
     chunk_id: UUID
     document_id: UUID
     document_title: str
@@ -63,10 +64,16 @@ class RAGSearchResult(BaseModel):
     language: str
     state: Optional[str] = None
     crop: Optional[str] = None
+    page: Optional[int] = 1
+    page_number: Optional[int] = 1
     chunk_text: str
     similarity_score: float
+    vector_score: Optional[float] = None
+    keyword_score: Optional[float] = None
+    metadata_score: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)
+
 
 
 class RAGGenerateRequest(BaseModel):

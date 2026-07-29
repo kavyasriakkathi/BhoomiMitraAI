@@ -39,10 +39,12 @@ class KnowledgeChunk(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     document_id = Column(UUID(as_uuid=True), ForeignKey("knowledge_documents.id"), nullable=False, index=True)
     chunk_index = Column(Integer, nullable=False)
+    page_number = Column(Integer, default=1)
     chunk_text = Column(Text, nullable=False)
     embedding_id = Column(String(100), nullable=True, index=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
 
     # Relationships
     document = relationship("KnowledgeDocument", back_populates="chunks")
