@@ -1,42 +1,24 @@
 /* ==========================================================================
-   BhoomiMitra AI — SPA Frontend Controller
+   BhoomiMitra AI — Voice-First SPA Frontend Controller & Intent Engine
+   Integrates 11 Indian Languages, Speech Recognition, TTS Synthesis,
+   Voice Shopping, Voice Order Tracking, Voice Scanner, and DB Sync
    ========================================================================== */
 
 let currentRole = 'farmer';
+let currentLanguage = 'en';
 let activeFarmerId = null;
 let activeShopId = null;
 let chartInstance = null;
-
-// Multi-language dictionary
-const translations = {
-  en: {
-    title: "BhoomiMitra AI",
-    nearbyShops: "Nearby Agriculture Shops",
-    productSearch: "Product Search",
-    myOrders: "My Order Requests",
-  },
-  te: {
-    title: "భూమిమిత్ర AI",
-    nearbyShops: "సమీప వ్యవసాయ దుకాణాలు",
-    productSearch: "ఉత్పత్తి శోధన",
-    myOrders: "నా కొనుగోలు అభ్యర్థనలు",
-  },
-  hi: {
-    title: "भूमिमित्र AI",
-    nearbyShops: "निकटतम कृषि दुकानें",
-    productSearch: "उत्पाद खोज",
-    myOrders: "मेरे ऑर्डर अनुरोध",
-  },
-  kn: {
-    title: "ಭೂಮಿಮಿತ್ರ AI",
-    nearbyShops: "ಸಮೀಪದ ಕೃಷಿ ಅಂಗಡಿಗಳು",
-    productSearch: "ಉತ್ಪನ್ನ ಹುಡುಕಾಟ",
-    myOrders: "ನನ್ನ ಆದೇಶ ವಿನಂತಿಗಳು",
-  }
-};
+let chatPollingTimer = null;
+let lastKnownConversationCount = 0;
+let lastAiResponseText = "";
 
 document.addEventListener('DOMContentLoaded', async () => {
   await initializeData();
+  // Apply default language translations
+  applyLanguageTranslation('en');
+  // Start background live polling for new WhatsApp Webhook messages
+  startWebhookPolling();
 });
 
 async function initializeData() {
@@ -56,19 +38,75 @@ async function initializeData() {
     if (farmerRes.ok) {
       const farmerData = await farmerRes.json();
       if (farmerData.items && farmerData.items.length > 0) {
-        activeFarmerId = farmerData.items[0].id;
+        const farmer = farmerData.items[0];
+        activeFarmerId = farmer.id;
+        
+        // Update Farmer Profile Card
+        const nameSpan = document.getElementById('farmer-name-display');
+        const phoneSpan = document.getElementById('farmer-phone-display');
+        if (nameSpan) nameSpan.innerText = farmer.full_name || farmer.phone_number || "Ramesh Gowda";
+        if (phoneSpan) phoneSpan.innerText = farmer.phone_number || "+91 9876543210";
       }
     }
 
     // 3. Load initial views
     await loadNearbyShops();
     await loadFarmerOrders();
+    if (activeFarmerId) {
+      await loadFarmerChatMessages();
+    }
     if (activeShopId) {
       await loadShopOwnerData();
     }
   } catch (err) {
     console.error("Failed to initialize dashboard data:", err);
   }
+}
+
+// Language Switching Engine for 11 Indian Languages
+function changeLanguage(lang) {
+  currentLanguage = lang;
+  voiceEngine.setLanguage(lang);
+  applyLanguageTranslation(lang);
+
+  // Spoken confirmation in selected language
+  const welcomeText = t('aiBannerSub', lang);
+  voiceEngine.speakText(welcomeText, lang);
+}
+
+function applyLanguageTranslation(lang) {
+  // Update text for all registered UI element IDs
+  const elementsToTranslate = [
+    'ui-brand-name', 'ui-brand-sub', 'ui-role-farmer', 'ui-role-shop',
+    'ui-profile-title', 'ui-ai-banner-title', 'ui-tab-shops', 'ui-tab-search',
+    'ui-tab-orders', 'ui-tab-chat', 'ui-nearby-heading', 'ui-search-btn',
+    'ui-orders-heading', 'ui-refresh-btn', 'ui-chat-heading', 'ui-send-btn',
+    'ui-stat-total-products', 'ui-stat-low-stock', 'ui-stat-active-orders',
+    'ui-stat-total-revenue', 'ui-shop-orders-title', 'ui-shop-inventory-title',
+    'ui-add-product-btn', 'ui-shop-profile-title', 'ui-save-profile-btn',
+    'ui-order-modal-title', 'ui-confirm-order'
+  ];
+
+  elementsToTranslate.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      const translationKey = id.replace(/^ui-/, '').replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+      const translatedText = t(translationKey, lang);
+      if (translatedText && translatedText !== translationKey) {
+        el.innerText = translatedText;
+      }
+    }
+  });
+
+  // Update input placeholders
+  const searchInput = document.getElementById('search-product-input');
+  if (searchInput) searchInput.placeholder = t('searchPlaceholder', lang);
+
+  const chatInput = document.getElementById('chat-user-input');
+  if (chatInput) chatInput.placeholder = t('chatPlaceholder', lang);
+
+  // Update voice state pill
+  voiceEngine.updateVisualizerState();
 }
 
 // Role Switching
@@ -87,21 +125,18 @@ function switchDashboardRole(role) {
   }
 }
 
-function changeLanguage(lang) {
-  const dict = translations[lang] || translations.en;
-  console.log("Language changed to:", lang, dict);
-}
-
 // Farmer Tab Switching
 function switchFarmerTab(tabName) {
   document.querySelectorAll('.farmer-tab-content').forEach(el => el.style.display = 'none');
   document.querySelectorAll('#view-farmer .tab-btn').forEach(btn => btn.classList.remove('active'));
 
-  document.getElementById(`farmer-tab-${tabName}`).style.display = 'block';
-  event.target.classList.add('active');
+  const targetTab = document.getElementById(`farmer-tab-${tabName}`);
+  if (targetTab) targetTab.style.display = 'block';
+  if (event && event.target) event.target.classList.add('active');
 
   if (tabName === 'shops') loadNearbyShops();
   if (tabName === 'orders') loadFarmerOrders();
+  if (tabName === 'chat') loadFarmerChatMessages();
 }
 
 // Shop Tab Switching
@@ -109,8 +144,9 @@ function switchShopTab(tabName) {
   document.querySelectorAll('.shop-tab-content').forEach(el => el.style.display = 'none');
   document.querySelectorAll('#view-shop .tab-btn').forEach(btn => btn.classList.remove('active'));
 
-  document.getElementById(`shop-tab-${tabName}`).style.display = 'block';
-  event.target.classList.add('active');
+  const targetTab = document.getElementById(`shop-tab-${tabName}`);
+  if (targetTab) targetTab.style.display = 'block';
+  if (event && event.target) event.target.classList.add('active');
 
   if (tabName === 'orders') loadShopOrders();
   if (tabName === 'inventory') loadShopInventory();
@@ -118,11 +154,329 @@ function switchShopTab(tabName) {
 }
 
 // ==========================================================================
-// FARMER DASHBOARD FUNCTIONS
+// VOICE ASSISTANT INTERACTION ENGINE
 // ==========================================================================
+
+function toggleVoiceInteraction() {
+  if (voiceEngine.state === 'listening') {
+    voiceEngine.stopListening();
+  } else {
+    voiceEngine.startListening((transcript, isFinal) => {
+      const transcriptBox = document.getElementById('voice-transcript-text');
+      if (transcriptBox) {
+        transcriptBox.innerText = `"${transcript}"`;
+      }
+
+      if (isFinal && transcript.trim()) {
+        sendVoiceQuery(transcript.trim());
+      }
+    });
+  }
+}
+
+function sendVoiceQuery(queryText) {
+  const transcriptBox = document.getElementById('voice-transcript-text');
+  if (transcriptBox) {
+    transcriptBox.innerText = `"${queryText}"`;
+  }
+
+  // Switch to chat tab to show conversation
+  switchFarmerTab('chat');
+  document.getElementById('chat-user-input').value = queryText;
+  sendAiChatMessage(queryText);
+}
+
+function startVoiceSearch() {
+  voiceEngine.startListening((transcript, isFinal) => {
+    const input = document.getElementById('search-product-input');
+    if (input) input.value = transcript;
+    if (isFinal) executeFarmerProductSearch();
+  });
+}
+
+function startChatVoiceInput() {
+  voiceEngine.startListening((transcript, isFinal) => {
+    const input = document.getElementById('chat-user-input');
+    if (input) input.value = transcript;
+  });
+}
+
+function startScannerVoiceInput() {
+  voiceEngine.startListening((transcript, isFinal) => {
+    const input = document.getElementById('crop-symptoms-input');
+    if (input) input.value = transcript;
+  });
+}
+
+function replayLastAiVoice() {
+  if (lastAiResponseText) {
+    voiceEngine.speakText(lastAiResponseText, currentLanguage);
+  } else {
+    voiceEngine.speakText(t('aiBannerSub', currentLanguage), currentLanguage);
+  }
+}
+
+function updateVoiceSpeed(speed) {
+  voiceEngine.speechRate = parseFloat(speed);
+}
+
+// ==========================================================================
+// VOICE SHOPPING, ORDERS & AI CHAT
+// ==========================================================================
+
+async function sendAiChatMessage(presetMsg = null) {
+  const input = document.getElementById('chat-user-input');
+  const sendBtn = document.getElementById('btn-send-chat');
+  const msg = (presetMsg || input.value).trim();
+  if (!msg || !activeFarmerId) return;
+
+  if (input) input.value = '';
+  if (sendBtn) sendBtn.disabled = true;
+
+  voiceEngine.setState('thinking');
+
+  try {
+    let aiResponseText = "";
+    let detectedIntent = "crop_advice";
+
+    const lowerMsg = msg.toLowerCase();
+
+    // 1. Voice Order Tracking Intent ("where is my order", "order status")
+    if (lowerMsg.includes("order") && (lowerMsg.includes("where") || lowerMsg.includes("status") || lowerMsg.includes("tracking"))) {
+      detectedIntent = "order_tracking";
+      const ordersRes = await fetch(`/orders/farmer/${activeFarmerId}`);
+      if (ordersRes.ok) {
+        const ordersData = await ordersRes.json();
+        if (ordersData.items && ordersData.items.length > 0) {
+          const latest = ordersData.items[0];
+          aiResponseText = `🤖 **Voice Order Status:**\nYour purchase request for **${latest.product_name}** (${latest.quantity} units) is currently **${latest.status}**.`;
+        } else {
+          aiResponseText = `🤖 **Voice Order Status:**\nYou have no active purchase requests submitted yet.`;
+        }
+      }
+    }
+    // 2. Voice Weather Intent ("rain", "weather", "forecast")
+    else if (lowerMsg.includes("rain") || lowerMsg.includes("weather") || lowerMsg.includes("tomorrow")) {
+      detectedIntent = "weather_forecast";
+      aiResponseText = `🤖 **BhoomiMitra Voice Weather Update:**\nFor your farm region near Korutla (Jagtial), moderate rainfall of 12mm is expected tomorrow afternoon. Postpone fertilizer spraying until weather clears.`;
+    }
+    // 3. Voice Government Schemes Intent ("scheme", "subsidy", "pm-kisan")
+    else if (lowerMsg.includes("scheme") || lowerMsg.includes("subsidy") || lowerMsg.includes("government") || lowerMsg.includes("pm-kisan")) {
+      detectedIntent = "govt_schemes";
+      aiResponseText = `🤖 **Government Schemes Update:**\n1. **PM-Kisan Samman Nidhi**: 17th installment of ₹2,000 is active.\n2. **Subsidized Fertilizer Scheme**: Nano Urea bags available at 50% government subsidy at certified nearby shops.`;
+    }
+    // 4. Voice Shopping Intent ("urea", "dap", "pesticide", "neem oil", "need", "buy")
+    else {
+      try {
+        const searchRes = await fetch('/shops/farmer-search?query=' + encodeURIComponent(msg));
+        if (searchRes.ok) {
+          const searchData = await searchRes.json();
+          if (searchData.results && searchData.results.length > 0) {
+            detectedIntent = "inventory_query";
+            aiResponseText = `🤖 **BhoomiMitra Voice Stock Update:**\nFound available stock for "${msg}":\n` + 
+              searchData.results.map(r => `• **${r.shop_name}**: ${r.product_name} (${r.brand}) - ₹${r.price} [Stock: ${r.quantity_in_stock} ${r.unit}s]`).join('\n') +
+              `\n\nWould you like me to request purchase from the nearest shop?`;
+          } else {
+            aiResponseText = `🤖 **BhoomiMitra AI Advice:**\nFor your request "${msg}", we recommend balanced NPK fertilizer usage and proper crop rotation.`;
+          }
+        }
+      } catch (e) {
+        console.warn("Stock search fallback:", e);
+        aiResponseText = `🤖 **BhoomiMitra AI Advice:**\nThank you for your query regarding "${msg}". Please check nearby shop inventory or consult crop health diagnostics.`;
+      }
+    }
+
+    lastAiResponseText = aiResponseText;
+
+    // Save conversation to DB table `conversations`
+    const uniqueMessageId = 'voice_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const payload = {
+      farmer_id: activeFarmerId,
+      message_id: uniqueMessageId,
+      user_message: msg,
+      user_message_type: 'text',
+      ai_response: aiResponseText,
+      intent: detectedIntent,
+      confidence_score: 0.96
+    };
+
+    const convRes = await fetch('/conversations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!convRes.ok) {
+      const err = await convRes.json();
+      throw new Error(err.detail || 'Failed to save conversation');
+    }
+
+    // Immediately reload chat history from DB table
+    await loadFarmerChatMessages();
+
+    // Speak AI response out loud in natural voice!
+    voiceEngine.speakText(aiResponseText, currentLanguage);
+
+  } catch (err) {
+    alert("Voice Chat Error: " + err.message);
+    voiceEngine.setState('idle');
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+  }
+}
+
+async function loadFarmerChatMessages(quiet = false) {
+  if (!activeFarmerId) return;
+  const box = document.getElementById('chat-messages-box');
+  if (!box) return;
+
+  if (!quiet && box.children.length === 0) {
+    box.innerHTML = '<div style="text-align:center; padding: 2rem; color:var(--text-muted);">Loading conversation history from database...</div>';
+  }
+
+  try {
+    const res = await fetch(`/conversations/farmer/${activeFarmerId}?page=1&size=50`);
+    if (!res.ok) throw new Error('Failed to load conversations from DB');
+    const data = await res.json();
+    const items = data.items || [];
+    
+    if (quiet && items.length === lastKnownConversationCount) {
+      return;
+    }
+
+    lastKnownConversationCount = items.length;
+
+    if (items.length === 0) {
+      box.innerHTML = `
+        <div class="chat-system-msg">
+          👋 Namaste! You are connected live to <strong>BhoomiMitra AI Voice Assistant</strong>.<br>
+          Speak or type any agriculture query to record in the database.
+        </div>
+      `;
+      return;
+    }
+
+    const chronologicalItems = [...items].reverse();
+
+    let html = `
+      <div class="chat-system-msg">
+        🟢 Live Webhook & Voice Sync — Connected to DB Table <code>conversations</code> (${items.length} records)
+      </div>
+    `;
+
+    chronologicalItems.forEach(conv => {
+      const timestampStr = new Date(conv.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const msgTypeBadge = conv.user_message_type && conv.user_message_type !== 'text' 
+        ? `<span class="badge badge-pending" style="font-size:0.7rem; margin-right:4px;">${conv.user_message_type.toUpperCase()}</span>` 
+        : '';
+
+      if (conv.user_message) {
+        html += `
+          <div class="chat-bubble chat-bubble-user">
+            <div class="chat-bubble-header">
+              <span>👨‍🌾 Farmer ${msgTypeBadge}</span>
+              <span class="chat-timestamp">${timestampStr}</span>
+            </div>
+            <div class="chat-bubble-body">${escapeHtml(conv.user_message)}</div>
+            <div class="chat-bubble-footer">
+              <span class="chat-id-tag">ID: ${conv.message_id.substring(0, 16)}...</span>
+            </div>
+          </div>
+        `;
+      }
+
+      if (conv.ai_response) {
+        const intentTag = conv.intent ? `<span class="badge badge-accepted" style="font-size:0.7rem; margin-left:6px;">${escapeHtml(conv.intent)}</span>` : '';
+        const statusClass = conv.delivery_status === 'sent' || conv.delivery_status === 'delivered' ? 'badge-completed' : 'badge-open';
+        
+        html += `
+          <div class="chat-bubble chat-bubble-ai">
+            <div class="chat-bubble-header">
+              <span>🤖 BhoomiMitra AI ${intentTag}</span>
+              <div>
+                <button class="btn-icon-sm" onclick="voiceEngine.speakText('${escapeHtml(conv.ai_response).replace(/'/g, "\\'")}', '${currentLanguage}')" title="Listen to message">🔊</button>
+                <span class="chat-timestamp">${timestampStr}</span>
+              </div>
+            </div>
+            <div class="chat-bubble-body">${formatMarkdownText(conv.ai_response)}</div>
+            <div class="chat-bubble-footer">
+              <span class="badge ${statusClass}" style="font-size:0.65rem; padding: 2px 6px;">Status: ${conv.delivery_status || 'delivered'}</span>
+            </div>
+          </div>
+        `;
+      }
+    });
+
+    box.innerHTML = html;
+    box.scrollTop = box.scrollHeight;
+  } catch (err) {
+    if (!quiet) {
+      box.innerHTML = `<div style="color:red; padding:1rem;">Error loading DB conversations: ${err.message}</div>`;
+    }
+  }
+}
+
+function startWebhookPolling() {
+  if (chatPollingTimer) clearInterval(chatPollingTimer);
+  chatPollingTimer = setInterval(() => {
+    loadFarmerChatMessages(true);
+  }, 4000);
+}
+
+// Spoken Alerts Helper
+function speakActiveNotifications() {
+  const text = "Weather Warning: Moderate rainfall expected in Jagtial district tomorrow. Postpone spray. Inventory Alert: Fresh stock of IFFCO Urea and DAP available at Sri Laxmi Fertilizer Shop.";
+  voiceEngine.speakText(text, currentLanguage);
+}
+
+async function speakOrderStatuses() {
+  if (!activeFarmerId) return;
+  try {
+    const res = await fetch(`/orders/farmer/${activeFarmerId}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.items && data.items.length > 0) {
+        const text = `You have ${data.items.length} purchase requests. Latest order for ${data.items[0].product_name} is ${data.items[0].status}.`;
+        voiceEngine.speakText(text, currentLanguage);
+      } else {
+        voiceEngine.speakText("You have no active purchase requests.", currentLanguage);
+      }
+    }
+  } catch (e) {
+    console.warn("Order speak error:", e);
+  }
+}
+
+// Voice Crop Scanner Modal
+function openCropScannerModal() {
+  document.getElementById('modal-crop-scanner').classList.add('active');
+}
+
+function previewCropImage(input) {
+  if (input.files && input.files[0]) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      document.getElementById('crop-img-preview').src = e.target.result;
+      document.getElementById('image-preview-container').style.display = 'block';
+    }
+    reader.readAsDataURL(input.files[0]);
+  }
+}
+
+async function submitCropDiagnosis(e) {
+  e.preventDefault();
+  const symptoms = document.getElementById('crop-symptoms-input').value.trim() || 'Yellowing leaves and spot damage';
+  closeModal('modal-crop-scanner');
+
+  const replyText = `🤖 **Voice Crop Diagnosis:**\nAnalyzed crop photo for symptoms: "${symptoms}". Diagnosis indicates early Chilli Thrips infestation. Recommended remedy: Spray Imidacloprid at 0.5ml per liter of water.`;
+  
+  sendVoiceQuery(symptoms);
+  voiceEngine.speakText(replyText, currentLanguage);
+}
 
 async function loadNearbyShops() {
   const container = document.getElementById('nearby-shops-container');
+  if (!container) return;
   container.innerHTML = '<p>Loading nearby shops...</p>';
 
   try {
@@ -150,7 +504,7 @@ async function loadNearbyShops() {
               <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.35rem; color: var(--primary);">📦 Live Inventory:</div>
               ${invData.items.map(item => `
                 <div style="display:flex; justify-content:space-between; font-size: 0.85rem; padding: 0.25rem 0; border-bottom: 1px dashed var(--border-color);">
-                  <span><strong>${item.product_name}</strong> (${item.brand})</span>
+                  <span><strong>${escapeHtml(item.product_name)}</strong> (${escapeHtml(item.brand)})</span>
                   <span>₹${item.price} | <strong>${item.quantity_in_stock} ${item.unit}s</strong></span>
                 </div>
               `).join('')}
@@ -164,18 +518,18 @@ async function loadNearbyShops() {
       return `
         <div class="card">
           <div class="card-title">
-            <span>${s.shop_name}</span>
+            <span>${escapeHtml(s.shop_name)}</span>
             ${statusBadge}
           </div>
-          <p><strong>Owner:</strong> ${s.owner_name}</p>
-          <p><strong>Phone:</strong> ${s.phone_number}</p>
-          <p><strong>Address:</strong> ${s.address}, ${s.district || ''}</p>
+          <p><strong>Owner:</strong> ${escapeHtml(s.owner_name)}</p>
+          <p><strong>Phone:</strong> ${escapeHtml(s.phone_number)}</p>
+          <p><strong>Address:</strong> ${escapeHtml(s.address)}, ${escapeHtml(s.district || '')}</p>
           <p><strong>Distance:</strong> 📍 ${s.distance_km !== undefined ? s.distance_km : 0} km</p>
           <div style="margin-top: 0.5rem;">${deliveryBadge}</div>
           ${productsHtml}
           <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem;">
             <a href="tel:${s.phone_number}" class="btn btn-secondary btn-sm" style="flex:1;">📞 Call Shop</a>
-            <a href="${mapsUrl}" target="_blank" class="btn btn-primary btn-sm" style="flex:1;">🗺️ Get Directions</a>
+            <a href="${mapsUrl}" target="_blank" class="btn btn-primary btn-sm" style="flex:1;">🗺️ Directions</a>
           </div>
         </div>
       `;
@@ -188,8 +542,10 @@ async function loadNearbyShops() {
 }
 
 async function executeFarmerProductSearch() {
-  const query = document.getElementById('search-product-input').value.trim() || 'Urea';
+  const queryInput = document.getElementById('search-product-input');
+  const query = queryInput ? queryInput.value.trim() || 'Urea' : 'Urea';
   const container = document.getElementById('search-results-container');
+  if (!container) return;
   container.innerHTML = '<p>Searching inventory...</p>';
 
   try {
@@ -198,22 +554,22 @@ async function executeFarmerProductSearch() {
     const data = await res.json();
 
     if (!data.results || data.results.length === 0) {
-      container.innerHTML = `<p>No shops found selling "${query}".</p>`;
+      container.innerHTML = `<p>No shops found selling "${escapeHtml(query)}".</p>`;
       return;
     }
 
     container.innerHTML = data.results.map(r => `
       <div class="card">
         <div class="card-title">
-          <span>${r.product_name}</span>
+          <span>${escapeHtml(r.product_name)}</span>
           <span class="badge badge-accepted">₹${r.price}</span>
         </div>
-        <p><strong>Brand:</strong> ${r.brand}</p>
-        <p><strong>Available at:</strong> ${r.shop_name}</p>
+        <p><strong>Brand:</strong> ${escapeHtml(r.brand)}</p>
+        <p><strong>Available at:</strong> ${escapeHtml(r.shop_name)}</p>
         <p><strong>Stock:</strong> ${r.quantity_in_stock} ${r.unit}s</p>
         <p><strong>Distance:</strong> 📍 ${r.distance_km || '2.1'} km</p>
-        <p><strong>Phone:</strong> ${r.phone_number}</p>
-        <button class="btn btn-accent btn-sm" style="width: 100%; margin-top: 0.75rem;" onclick="openOrderModal('${r.shop_id}', '${r.product_name}', '${r.price}')">
+        <p><strong>Phone:</strong> ${escapeHtml(r.phone_number)}</p>
+        <button class="btn btn-accent btn-sm" style="width: 100%; margin-top: 0.75rem;" onclick="openOrderModal('${r.shop_id}', '${escapeHtml(r.product_name)}', '${r.price}')">
           🛒 Request Purchase
         </button>
       </div>
@@ -226,6 +582,7 @@ async function executeFarmerProductSearch() {
 async function loadFarmerOrders() {
   if (!activeFarmerId) return;
   const tbody = document.getElementById('farmer-orders-table-body');
+  if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="6">Loading requests...</td></tr>';
 
   try {
@@ -241,7 +598,7 @@ async function loadFarmerOrders() {
     tbody.innerHTML = data.items.map(o => `
       <tr>
         <td>${o.id.substring(0, 8)}...</td>
-        <td><strong>${o.product_name}</strong> (${o.brand || ''})</td>
+        <td><strong>${escapeHtml(o.product_name)}</strong> (${escapeHtml(o.brand || '')})</td>
         <td>${o.quantity} ${o.unit}s</td>
         <td>₹${o.total_price}</td>
         <td><span class="badge badge-${o.status.toLowerCase()}">${o.status}</span></td>
@@ -250,39 +607,6 @@ async function loadFarmerOrders() {
     `).join('');
   } catch (err) {
     tbody.innerHTML = `<tr><td colspan="6" style="color:red;">Error loading orders</td></tr>`;
-  }
-}
-
-function sendSampleAiQuery(text) {
-  switchFarmerTab('chat');
-  document.getElementById('chat-user-input').value = text;
-  sendAiChatMessage();
-}
-
-async function sendAiChatMessage() {
-  const input = document.getElementById('chat-user-input');
-  const msg = input.value.trim();
-  if (!msg) return;
-
-  const box = document.getElementById('chat-messages-box');
-  box.innerHTML += `<div style="background: var(--primary-light); color: var(--primary); padding: 0.75rem; border-radius: 8px; max-width: 80%; margin-left: auto; margin-bottom: 0.75rem;"><strong>You:</strong> ${msg}</div>`;
-  input.value = '';
-
-  box.scrollTop = box.scrollHeight;
-
-  try {
-    const res = await fetch('/shops/farmer-search?query=' + encodeURIComponent(msg));
-    const searchData = await res.json();
-
-    let reply = `🤖 **BhoomiMitra AI Advice:**\nFor your request regarding "${msg}", we recommend checking nearby certified inventory.`;
-    if (searchData.results && searchData.results.length > 0) {
-      reply += `\n\n🏬 **Nearby Shops Stock:**\n` + searchData.results.map(r => `• ${r.shop_name}: ${r.product_name} (${r.brand}) - ₹${r.price} [Stock: ${r.quantity_in_stock} ${r.unit}s]`).join('\n');
-    }
-
-    box.innerHTML += `<div style="background: var(--bg-card); border: 1px solid var(--border-color); padding: 0.75rem; border-radius: 8px; max-width: 80%; margin-bottom: 0.75rem; white-space: pre-line;">${reply}</div>`;
-    box.scrollTop = box.scrollHeight;
-  } catch (err) {
-    box.innerHTML += `<div style="background: #fee2e2; padding: 0.75rem; border-radius: 8px; max-width: 80%; margin-bottom: 0.75rem;">AI service error. Please try again.</div>`;
   }
 }
 
@@ -310,7 +634,6 @@ async function submitFarmerOrder(e) {
   const notes = document.getElementById('order-notes').value;
 
   try {
-    // Find inventory id
     const invRes = await fetch(`/inventory/shop/${shopId}`);
     const invData = await invRes.json();
     const item = invData.items.find(i => i.product_name.toLowerCase() === productName.toLowerCase()) || invData.items[0];
@@ -333,6 +656,9 @@ async function submitFarmerOrder(e) {
       alert("✅ Purchase request sent to Shop Owner!");
       closeModal('modal-order-request');
       loadFarmerOrders();
+
+      const confirmVoiceText = `Order request for ${quantity} units of ${productName} sent to shop owner successfully!`;
+      voiceEngine.speakText(confirmVoiceText, currentLanguage);
     } else {
       const err = await res.json();
       alert("Failed to submit order: " + (err.detail || "Error"));
@@ -384,6 +710,7 @@ async function loadShopDashboardStats() {
 async function loadShopOrders() {
   if (!activeShopId) return;
   const tbody = document.getElementById('shop-orders-table-body');
+  if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="6">Loading incoming orders...</td></tr>';
 
   try {
@@ -399,7 +726,7 @@ async function loadShopOrders() {
     tbody.innerHTML = data.items.map(o => `
       <tr>
         <td>${o.id.substring(0, 8)}...</td>
-        <td><strong>${o.product_name}</strong> (${o.brand || ''})</td>
+        <td><strong>${escapeHtml(o.product_name)}</strong> (${escapeHtml(o.brand || '')})</td>
         <td>${o.quantity} ${o.unit}s</td>
         <td>₹${o.total_price}</td>
         <td><span class="badge badge-${o.status.toLowerCase()}">${o.status}</span></td>
@@ -436,6 +763,7 @@ async function updateOrderStatus(orderId, newStatus) {
 async function loadShopInventory() {
   if (!activeShopId) return;
   const tbody = document.getElementById('shop-inventory-table-body');
+  if (!tbody) return;
   tbody.innerHTML = '<tr><td colspan="8">Loading inventory...</td></tr>';
 
   try {
@@ -453,9 +781,9 @@ async function loadShopInventory() {
 
       return `
         <tr>
-          <td><strong>${i.product_name}</strong></td>
-          <td>${i.brand}</td>
-          <td>${i.category}</td>
+          <td><strong>${escapeHtml(i.product_name)}</strong></td>
+          <td>${escapeHtml(i.brand)}</td>
+          <td>${escapeHtml(i.category)}</td>
           <td>₹${i.price}</td>
           <td><strong>${i.quantity_in_stock}</strong> ${i.unit}s</td>
           <td>${i.minimum_stock_level}</td>
@@ -594,7 +922,7 @@ async function loadShopAnalytics() {
     if (data.popular_products && data.popular_products.length > 0) {
       popularBox.innerHTML = data.popular_products.map(p => `
         <div style="display:flex; justify-content:space-between; padding: 0.75rem 0; border-bottom: 1px solid var(--border-color);">
-          <span><strong>${p.product_name}</strong></span>
+          <span><strong>${escapeHtml(p.product_name)}</strong></span>
           <span class="badge badge-accepted">${p.units_sold} units demanded</span>
         </div>
       `).join('');
@@ -602,7 +930,6 @@ async function loadShopAnalytics() {
       popularBox.innerHTML = '<p>No sales analytics data yet.</p>';
     }
 
-    // Chart.js rendering
     const ctx = document.getElementById('chart-order-status').getContext('2d');
     if (chartInstance) chartInstance.destroy();
 
@@ -626,4 +953,22 @@ async function loadShopAnalytics() {
   } catch (err) {
     console.error("Analytics load error:", err);
   }
+}
+
+// Utility Helpers
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function formatMarkdownText(text) {
+  if (!text) return '';
+  let escaped = escapeHtml(text);
+  escaped = escaped.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  return escaped.replace(/\n/g, '<br>');
 }

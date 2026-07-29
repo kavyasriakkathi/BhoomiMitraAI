@@ -41,7 +41,7 @@ def create_app() -> FastAPI:
         title="BhoomiMitra AI",
         description="AI-powered WhatsApp Farming Assistant MVP",
         version="0.1.0",
-        docs_url="/docs" if settings.debug else None,
+        docs_url="/docs",
         redoc_url=None,
         lifespan=lifespan,
     )
@@ -63,21 +63,16 @@ def create_app() -> FastAPI:
             }
         }
 
-    # ---- Static Files & Web Dashboard ----
+    # ---- Static Files & Web Dashboard Router ----
     import os
     from fastapi.staticfiles import StaticFiles
-    from fastapi.responses import FileResponse
 
     static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
     if os.path.exists(static_dir):
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-        @app.get("/", tags=["Dashboard"], include_in_schema=False)
-        @app.get("/dashboard", tags=["Dashboard"])
-        @app.get("/farmer", tags=["Dashboard"], include_in_schema=False)
-        @app.get("/shop", tags=["Dashboard"], include_in_schema=False)
-        async def serve_dashboard():
-            return FileResponse(os.path.join(static_dir, "index.html"))
+    from src.dashboard.router import router as dashboard_router
+    app.include_router(dashboard_router)
 
     # ---- Register Modules ----
     from src.gateway.router import router as gateway_router

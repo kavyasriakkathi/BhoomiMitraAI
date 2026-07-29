@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BhoomiMitra AI — Voice-First Multilingual Agriculture Platform</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header class="navbar">
+    <a href="/" class="brand">
+      <span class="brand-icon">🌾</span>
+      <div class="brand-text">
+        <span class="brand-name" id="ui-brand-name">BhoomiMitra AI</span>
+        <span class="brand-tagline" id="ui-brand-sub">Voice-First Agriculture AI Platform</span>
+      </div>
+    </a>
+
+    <div class="nav-controls">
+      <!-- Role Switcher -->
+      <div class="role-switcher">
+        <button class="role-btn active" id="btn-role-farmer" onclick="switchDashboardRole('farmer')">
+          <span id="ui-role-farmer">👨‍🌾 Farmer Dashboard</span>
+        </button>
+        <button class="role-btn" id="btn-role-shop" onclick="switchDashboardRole('shop')">
+          <span id="ui-role-shop">🏬 Shop Owner Dashboard</span>
+        </button>
+      </div>
+
+      <!-- Developer Portal Quick Access -->
+      <a href="/docs" target="_blank" class="dev-docs-link" title="Open Swagger API Documentation">
+        ⚡ API Docs (/docs)
+      </a>
+
+      <!-- 11 Indian Languages Selector -->
+      <div class="lang-selector-wrapper">
+        <span class="lang-icon">🌐</span>
+        <select class="lang-select" id="lang-select" onchange="changeLanguage(this.value)">
+          <option value="en">English (India)</option>
+          <option value="te">తెలుగు (Telugu)</option>
+          <option value="hi">हिन्दी (Hindi)</option>
+          <option value="ta">தமிழ் (Tamil)</option>
+          <option value="kn">ಕನ್ನಡ (Kannada)</option>
+          <option value="ml">മലയാളം (Malayalam)</option>
+          <option value="mr">मराठी (Marathi)</option>
+          <option value="gu">ગુજરાતી (Gujarati)</option>
+          <option value="bn">বাংলা (Bengali)</option>
+          <option value="pa">ਪੰਜਾਬੀ (Punjabi)</option>
+          <option value="or">ଓଡ଼ିଆ (Odia)</option>
+        </select>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-container">
+
+    <!-- ==================================================================== -->
+    <!-- HERO VOICE ASSISTANT BAR (ChatGPT Voice + Google Assistant Style)    -->
+    <!-- ==================================================================== -->
+    <section class="voice-hero-card">
+      <div class="voice-hero-header">
+        <div class="voice-hero-title">
+          <span class="sparkle">✨</span>
+          <span id="ui-ai-banner-title">BhoomiMitra AI Voice Assistant</span>
+        </div>
+        <div class="voice-state-pill" id="voice-state-pill">
+          <span class="pulse-dot green"></span>
+          <span id="voice-state-text">Tap Mic to Speak in English</span>
+        </div>
+      </div>
+
+      <!-- Main Animated Microphone Button & Waveform -->
+      <div class="voice-interaction-area">
+        <button class="main-mic-btn" id="main-mic-btn" onclick="toggleVoiceInteraction()" title="Tap to Speak with BhoomiMitra AI">
+          <span class="mic-icon">🎤</span>
+          <span class="mic-ripple"></span>
+        </button>
+
+        <!-- Dynamic Audio Waveform Animation -->
+        <div class="voice-waveform-container" id="voice-waveform-container">
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+        </div>
+      </div>
+
+      <!-- Speech Transcript Feedback -->
+      <div class="voice-transcript-box" id="voice-transcript-box">
+        <span class="transcript-placeholder" id="voice-transcript-text">"Ask anything like: 'I need 2 bags of Urea' or 'Will it rain tomorrow?'"</span>
+      </div>
+
+      <!-- Voice Playback Controls -->
+      <div class="voice-playback-controls">
+        <button class="btn btn-secondary btn-sm" onclick="voiceEngine.resumeSpeaking()">▶️ Play</button>
+        <button class="btn btn-secondary btn-sm" onclick="voiceEngine.pauseSpeaking()">⏸️ Pause</button>
+        <button class="btn btn-secondary btn-sm" onclick="replayLastAiVoice()">🔄 Replay</button>
+        <button class="btn btn-secondary btn-sm" onclick="voiceEngine.stopSpeaking()">⏹️ Stop</button>
+        <div class="voice-speed-control">
+          <span>⚡ Speed:</span>
+          <select id="voice-speed-select" onchange="updateVoiceSpeed(this.value)">
+            <option value="0.85">0.85x (Slow)</option>
+            <option value="1.0" selected>1.0x (Normal)</option>
+            <option value="1.25">1.25x (Fast)</option>
+          </select>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quick Voice Actions Grid -->
+    <section class="quick-voice-grid">
+      <button class="voice-quick-card" onclick="sendVoiceQuery('I need 2 bags of Urea fertilizer')">
+        <span class="quick-icon">🛒</span>
+        <div class="quick-info">
+          <strong>Voice Shopping</strong>
+          <span>"I need 2 bags of Urea"</span>
+        </div>
+      </button>
+
+      <button class="voice-quick-card" onclick="openCropScannerModal()">
+        <span class="quick-icon">📷</span>
+        <div class="quick-info">
+          <strong>Crop Scanner</strong>
+          <span>Photo + Voice Diagnosis</span>
+        </div>
+      </button>
+
+      <button class="voice-quick-card" onclick="sendVoiceQuery('Where is my purchase request?')">
+        <span class="quick-icon">📦</span>
+        <div class="quick-info">
+          <strong>Order Tracker</strong>
+          <span>"Where is my order?"</span>
+        </div>
+      </button>
+
+      <button class="voice-quick-card" onclick="sendVoiceQuery('Will it rain in my village tomorrow?')">
+        <span class="quick-icon">🌦</span>
+        <div class="quick-info">
+          <strong>Weather Forecast</strong>
+          <span>"Will it rain tomorrow?"</span>
+        </div>
+      </button>
+
+      <button class="voice-quick-card" onclick="sendVoiceQuery('What pesticide to use for chilli thrips?')">
+        <span class="quick-icon">🌱</span>
+        <div class="quick-info">
+          <strong>Crop Doctor</strong>
+          <span>"Chilli thrips remedy"</span>
+        </div>
+      </button>
+
+      <button class="voice-quick-card" onclick="sendVoiceQuery('Tell me active government schemes and subsidies for farmers')">
+        <span class="quick-icon">💰</span>
+        <div class="quick-info">
+          <strong>Govt Schemes</strong>
+          <span>"PM-Kisan & Subsidies"</span>
+        </div>
+      </button>
+    </section>
+
+    <!-- ==================================================================== -->
+    <!-- 1. FARMER DASHBOARD                                                  -->
+    <!-- ==================================================================== -->
+    <div id="view-farmer" class="dashboard-view active">
+      
+      <!-- Profile & Spoken Notifications Banner -->
+      <div class="grid-2" style="margin-bottom: 2rem;">
+        
+        <!-- Farmer Profile Card -->
+        <div class="card profile-card">
+          <div class="card-title">
+            <span id="ui-profile-title">👤 Active Farmer Profile</span>
+            <span class="badge badge-open" id="farmer-active-badge">Active</span>
+          </div>
+          <div id="farmer-profile-content">
+            <p><strong>Name:</strong> <span id="farmer-name-display">Loading...</span></p>
+            <p><strong>Phone:</strong> <span id="farmer-phone-display">Loading...</span></p>
+            <p><strong>Location:</strong> <span id="farmer-location-display">Korutla, Jagtial, Telangana</span></p>
+            <p><strong>Primary Crops:</strong> Chilli, Cotton, Paddy</p>
+            <p><strong>Farm Size:</strong> 5.0 Acres (Black Soil)</p>
+          </div>
+        </div>
+
+        <!-- Voice Alerts & Notifications Banner -->
+        <div class="card notification-banner-card">
+          <div class="card-title">
+            <span>🔔 Voice Alerts & Notifications</span>
+            <button class="btn btn-secondary btn-sm" onclick="speakActiveNotifications()">🔊 Listen All Alerts</button>
+          </div>
+          <div class="alerts-list" id="voice-alerts-list">
+            <div class="alert-item">
+              <span class="alert-icon">🌦</span>
+              <div class="alert-text">
+                <strong>Weather Warning:</strong> Moderate rainfall expected in Jagtial district tomorrow. Postpone spray.
+              </div>
+              <button class="btn-icon" onclick="voiceEngine.speakText('Weather Warning: Moderate rainfall expected in Jagtial district tomorrow. Postpone spray.')">🔊</button>
+            </div>
+            <div class="alert-item">
+              <span class="alert-icon">📦</span>
+              <div class="alert-text">
+                <strong>Inventory Alert:</strong> Fresh stock of IFFCO Urea & DAP available at Sri Laxmi Fertilizer Shop.
+              </div>
+              <button class="btn-icon" onclick="voiceEngine.speakText('Inventory Alert: Fresh stock of IFFCO Urea and DAP available at Sri Laxmi Fertilizer Shop.')">🔊</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Farmer Navigation Tabs -->
+      <div class="tab-nav">
+        <button class="tab-btn active" onclick="switchFarmerTab('shops')"><span id="ui-tab-shops">🏬 Nearby Agri Shops</span></button>
+        <button class="tab-btn" onclick="switchFarmerTab('search')"><span id="ui-tab-search">🔍 Product & Stock Search</span></button>
+        <button class="tab-btn" onclick="switchFarmerTab('orders')"><span id="ui-tab-orders">📦 My Order Requests</span></button>
+        <button class="tab-btn" onclick="switchFarmerTab('chat')"><span id="ui-tab-chat">💬 Voice & DB Conversation</span></button>
+      </div>
+
+      <!-- Tab Content 1: Nearby Agri Shops -->
+      <div id="farmer-tab-shops" class="farmer-tab-content active">
+        <h3 style="margin-bottom: 1rem;" id="ui-nearby-heading">Nearby Agriculture Shops & Live Stock</h3>
+        <div id="nearby-shops-container" class="grid-3">
+          <!-- Populated dynamically via app.js -->
+        </div>
+      </div>
+
+      <!-- Tab Content 2: Product & Stock Search -->
+      <div id="farmer-tab-search" class="farmer-tab-content" style="display: none;">
+        <div class="card" style="margin-bottom: 1.5rem;">
+          <div style="display: flex; gap: 1rem;">
+            <input type="text" id="search-product-input" class="form-control" placeholder="Search product (e.g. Urea, DAP, Imidacloprid)..." onkeypress="if(event.key === 'Enter') executeFarmerProductSearch()">
+            <button class="btn btn-primary" onclick="executeFarmerProductSearch()"><span id="ui-search-btn">Search Inventory</span></button>
+            <button class="btn btn-secondary" onclick="startVoiceSearch()">🎤 Voice Search</button>
+          </div>
+        </div>
+        <div id="search-results-container" class="grid-3">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+
+      <!-- Tab Content 3: My Order Requests -->
+      <div id="farmer-tab-orders" class="farmer-tab-content" style="display: none;">
+        <div class="card">
+          <div class="card-title">
+            <span id="ui-orders-heading">My Purchase Requests</span>
+            <div>
+              <button class="btn btn-secondary btn-sm" onclick="speakOrderStatuses()">🔊 Read Statuses Aloud</button>
+              <button class="btn btn-secondary btn-sm" onclick="loadFarmerOrders()"><span id="ui-refresh-btn">🔄 Refresh</span></button>
+            </div>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Order ID</th>
+                  <th>Product</th>
+                  <th>Quantity</th>
+                  <th>Total Price</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody id="farmer-orders-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab Content 4: Voice & DB Conversation History -->
+      <div id="farmer-tab-chat" class="farmer-tab-content" style="display: none;">
+        <div class="card chat-card">
+          <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <span id="ui-chat-heading">💬 Voice & WhatsApp AI Conversation</span>
+              <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted); margin-left: 0.5rem;">
+                (Connected directly to <code style="background:var(--bg-main); padding:2px 6px; border-radius:4px;">conversations</code> DB table)
+              </span>
+            </div>
+            <div style="display:flex; align-items:center; gap:0.5rem;">
+              <span class="live-status-pill" id="live-chat-status">
+                <span class="pulse-dot"></span> Webhook Live Syncing
+              </span>
+              <button class="btn btn-secondary btn-sm" onclick="loadFarmerChatMessages()">🔄 Refresh DB</button>
+            </div>
+          </div>
+
+          <div id="chat-messages-box" class="chat-messages-box">
+            <!-- Loaded dynamically from /conversations/farmer/{farmer_id} -->
+          </div>
+
+          <div class="chat-input-wrapper">
+            <button class="btn btn-accent" onclick="startChatVoiceInput()" title="Speak Message">🎤</button>
+            <input type="text" id="chat-user-input" class="form-control" placeholder="Type or speak message..." onkeypress="if(event.key === 'Enter') sendAiChatMessage()">
+            <button class="btn btn-primary" onclick="sendAiChatMessage()" id="btn-send-chat">
+              <span id="ui-send-btn">Send</span> 🚀
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ==================================================================== -->
+    <!-- 2. SHOP OWNER DASHBOARD                                              -->
+    <!-- ==================================================================== -->
+    <div id="view-shop" class="dashboard-view">
+
+      <!-- Low Stock Alert Banner -->
+      <div id="low-stock-alert-banner" class="alert-banner" style="display: none;">
+        <div>
+          <strong>⚠️ Low Stock Alert:</strong>
+          <span id="low-stock-alert-text">Some products are below minimum stock level!</span>
+        </div>
+        <button class="btn btn-sm btn-secondary" onclick="switchShopTab('inventory')">Manage Inventory</button>
+      </div>
+
+      <!-- Stat Cards Grid -->
+      <div class="grid-4" style="margin-bottom: 2rem;">
+        <div class="card stat-card">
+          <div class="stat-icon">📦</div>
+          <div>
+            <div class="stat-value" id="stat-total-products">0</div>
+            <div class="stat-label" id="ui-stat-total-products">Total Products</div>
+          </div>
+        </div>
+        <div class="card stat-card">
+          <div class="stat-icon warning">⚠️</div>
+          <div>
+            <div class="stat-value" id="stat-low-stock">0</div>
+            <div class="stat-label" id="ui-stat-low-stock">Low Stock Alerts</div>
+          </div>
+        </div>
+        <div class="card stat-card">
+          <div class="stat-icon accent">🛒</div>
+          <div>
+            <div class="stat-value" id="stat-active-orders">0</div>
+            <div class="stat-label" id="ui-stat-active-orders">Incoming Orders</div>
+          </div>
+        </div>
+        <div class="card stat-card">
+          <div class="stat-icon">💰</div>
+          <div>
+            <div class="stat-value" id="stat-total-revenue">₹0</div>
+            <div class="stat-label" id="ui-stat-total-revenue">Total Revenue</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shop Navigation Tabs -->
+      <div class="tab-nav">
+        <button class="tab-btn active" onclick="switchShopTab('orders')">📋 Orders Fulfillment</button>
+        <button class="tab-btn" onclick="switchShopTab('inventory')">📦 Inventory Management</button>
+        <button class="tab-btn" onclick="switchShopTab('profile')">🏬 Shop Profile</button>
+        <button class="tab-btn" onclick="switchShopTab('analytics')">📊 Sales Analytics</button>
+      </div>
+
+      <!-- Shop Tab 1: Orders Fulfillment -->
+      <div id="shop-tab-orders" class="shop-tab-content active">
+        <div class="card">
+          <div class="card-title">
+            <span id="ui-shop-orders-title">Incoming Farmer Purchase Orders</span>
+            <button class="btn btn-secondary btn-sm" onclick="loadShopOrders()">🔄 Refresh Orders</button>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Order ID</th>
+                  <th>Product</th>
+                  <th>Qty</th>
+                  <th>Total</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="shop-orders-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shop Tab 2: Inventory Management -->
+      <div id="shop-tab-inventory" class="shop-tab-content" style="display: none;">
+        <div class="card">
+          <div class="card-title">
+            <span id="ui-shop-inventory-title">Inventory Items</span>
+            <button class="btn btn-primary btn-sm" onclick="openAddProductModal()"><span id="ui-add-product-btn">+ Add New Product</span></button>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Product</th>
+                  <th>Brand</th>
+                  <th>Category</th>
+                  <th>Price</th>
+                  <th>Stock</th>
+                  <th>Min Level</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="shop-inventory-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Shop Tab 3: Shop Profile -->
+      <div id="shop-tab-profile" class="shop-tab-content" style="display: none;">
+        <div class="card" style="max-width: 700px;">
+          <div class="card-title" id="ui-shop-profile-title">Shop Profile Settings</div>
+          <form id="form-shop-profile" onsubmit="saveShopProfile(event)">
+            <div class="form-group">
+              <label class="form-label">Shop Name</label>
+              <input type="text" id="shop-name-input" class="form-control" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Owner Name</label>
+              <input type="text" id="shop-owner-input" class="form-control" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Phone Number</label>
+              <input type="text" id="shop-phone-input" class="form-control" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Address</label>
+              <input type="text" id="shop-address-input" class="form-control" required>
+            </div>
+            <div style="display: flex; gap: 1rem;">
+              <div class="form-group" style="flex:1;">
+                <label class="form-label">Opening Time</label>
+                <input type="text" id="shop-opening-input" class="form-control" placeholder="08:00 AM">
+              </div>
+              <div class="form-group" style="flex:1;">
+                <label class="form-label">Closing Time</label>
+                <input type="text" id="shop-closing-input" class="form-control" placeholder="08:00 PM">
+              </div>
+            </div>
+            <button type="submit" class="btn btn-primary"><span id="ui-save-profile-btn">Save Profile Changes</span></button>
+          </form>
+        </div>
+      </div>
+
+      <!-- Shop Tab 4: Sales Analytics -->
+      <div id="shop-tab-analytics" class="shop-tab-content" style="display: none;">
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-title">Order Status Distribution</div>
+            <canvas id="chart-order-status" style="max-height: 260px;"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-title">Popular Product Demand</div>
+            <div id="popular-products-list">
+              <!-- Populated dynamically -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- ==================================================================== -->
+  <!-- MODALS                                                               -->
+  <!-- ==================================================================== -->
+
+  <!-- Voice Crop Scanner Modal (Image + Voice Question) -->
+  <div id="modal-crop-scanner" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>📷 Voice Crop Scanner & Diagnosis</h3>
+        <button class="modal-close" onclick="closeModal('modal-crop-scanner')">&times;</button>
+      </div>
+      <form onsubmit="submitCropDiagnosis(event)">
+        <div class="form-group">
+          <label class="form-label">Upload Crop Leaf Photo</label>
+          <input type="file" id="crop-image-input" class="form-control" accept="image/*" onchange="previewCropImage(this)">
+        </div>
+        <div id="image-preview-container" style="display:none; text-align:center; margin-bottom:1rem;">
+          <img id="crop-img-preview" src="" style="max-width:100%; max-height:200px; border-radius:8px; border:1px solid var(--border-color);">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Voice Question / Symptoms</label>
+          <div style="display:flex; gap:0.5rem;">
+            <input type="text" id="crop-symptoms-input" class="form-control" placeholder="e.g. 'What disease is causing yellow spots on leaf?'">
+            <button type="button" class="btn btn-accent" onclick="startScannerVoiceInput()">🎤</button>
+          </div>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">🔍 Diagnose Crop & Speak Remedy</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Order Request Modal -->
+  <div id="modal-order-request" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="ui-order-modal-title">Submit Purchase Request</h3>
+        <button class="modal-close" onclick="closeModal('modal-order-request')">&times;</button>
+      </div>
+      <form onsubmit="submitFarmerOrder(event)">
+        <input type="hidden" id="order-shop-id">
+        <input type="hidden" id="order-inventory-id">
+        <div class="form-group">
+          <label class="form-label">Product Name</label>
+          <input type="text" id="order-product-name" class="form-control" readonly>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Quantity</label>
+          <input type="number" id="order-quantity" class="form-control" value="1" min="1" required>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Delivery Notes / Phone</label>
+          <textarea id="order-notes" class="form-control" placeholder="Provide delivery address or instructions..."></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;"><span id="ui-confirm-order">Confirm & Send Order</span></button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Inventory Product Modal -->
+  <div id="modal-inventory-product" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-product-title">Add Inventory Product</h3>
+        <button class="modal-close" onclick="closeModal('modal-inventory-product')">&times;</button>
+      </div>
+      <form onsubmit="saveInventoryProduct(event)">
+        <input type="hidden" id="prod-id">
+        <div class="form-group">
+          <label class="form-label">Product Name</label>
+          <input type="text" id="prod-name" class="form-control" required placeholder="e.g. Urea, DAP, Neem Oil">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Brand</label>
+          <input type="text" id="prod-brand" class="form-control" required placeholder="e.g. IFFCO, Bayer, Coromandel">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Category</label>
+          <select id="prod-category" class="form-control">
+            <option value="Fertilizers">Fertilizers</option>
+            <option value="Pesticides">Pesticides</option>
+            <option value="Seeds">Seeds</option>
+            <option value="Fungicides">Fungicides</option>
+            <option value="Herbicides">Herbicides</option>
+            <option value="Micronutrients">Micronutrients</option>
+            <option value="Organic Products">Organic Products</option>
+            <option value="Farm Equipment">Farm Equipment</option>
+          </select>
+        </div>
+        <div style="display: flex; gap: 1rem;">
+          <div class="form-group" style="flex:1;">
+            <label class="form-label">Price (₹)</label>
+            <input type="number" step="0.01" id="prod-price" class="form-control" required>
+          </div>
+          <div class="form-group" style="flex:1;">
+            <label class="form-label">Stock Quantity</label>
+            <input type="number" id="prod-stock" class="form-control" required>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Minimum Stock Level (Alert Threshold)</label>
+          <input type="number" id="prod-min-stock" class="form-control" value="5" required>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Save Product</button>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/i18n.js"></script>
+  <script src="/static/voice.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
