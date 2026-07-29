@@ -162,3 +162,63 @@ class Advisory(Base):
     # Relationships
     farmer = relationship("Farmer", back_populates="advisories")
 
+
+class Shop(Base):
+    """Agri Shop Registry Model"""
+    __tablename__ = "shops"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shop_name = Column(String(150), nullable=False, index=True)
+    owner_name = Column(String(100), nullable=False)
+    phone_number = Column(String(20), nullable=False, index=True)
+    email = Column(String(100), nullable=True)
+    address = Column(Text, nullable=False)
+    village = Column(String(100), nullable=True)
+    mandal = Column(String(100), nullable=True)
+    district = Column(String(100), nullable=True, index=True)
+    state = Column(String(100), nullable=True, index=True)
+    pin_code = Column(String(20), nullable=True)
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    opening_time = Column(String(20), default="08:00")
+    closing_time = Column(String(20), default="20:00")
+    delivery_available = Column(Boolean, default=False)
+    home_delivery_radius_km = Column(Float, nullable=True)
+    google_maps_link = Column(String(500), nullable=True)
+    gst_number = Column(String(50), nullable=True)
+    license_number = Column(String(50), nullable=True)
+    status = Column(String(20), default="active", index=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    inventory_items = relationship("Inventory", back_populates="shop", cascade="all, delete-orphan")
+
+
+class Inventory(Base):
+    """Agri Shop Inventory Product Model"""
+    __tablename__ = "inventory"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id"), index=True, nullable=False)
+
+    product_name = Column(String(150), nullable=False, index=True)
+    category = Column(String(100), nullable=False, index=True)
+    brand = Column(String(100), nullable=False, index=True)
+    product_description = Column(Text, nullable=True)
+    unit = Column(String(50), nullable=False, default="Unit")
+    price = Column(Float, nullable=False)
+    discount_price = Column(Float, nullable=True)
+    quantity_in_stock = Column(Integer, default=0, nullable=False)
+    minimum_stock_level = Column(Integer, default=5, nullable=False)
+    available = Column(Boolean, default=True, index=True)
+    expiry_date = Column(DateTime, nullable=True)
+
+    last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    shop = relationship("Shop", back_populates="inventory_items")
+

@@ -73,6 +73,9 @@ def create_app() -> FastAPI:
     from src.crop_health.router import router as crop_health_router
     from src.advisory.router import router as advisory_router
     from src.ai.router import router as ai_router
+    from src.shops.router import router as shops_router
+    from src.inventory.router import router as inventory_router
+
     app.include_router(gateway_router, prefix="/webhook", tags=["WhatsApp"])
     app.include_router(farmers_router, prefix="/farmers", tags=["Farmers"])
     app.include_router(farmer_profiles_router, prefix="/farmer-profiles", tags=["Farmer Profiles"])
@@ -81,6 +84,8 @@ def create_app() -> FastAPI:
     app.include_router(crops_router, prefix="/crops", tags=["Crops"])
     app.include_router(crop_health_router, prefix="/crop-health", tags=["Crop Health"])
     app.include_router(advisory_router, prefix="/advisories", tags=["Advisories"])
+    app.include_router(shops_router, prefix="/shops", tags=["Agri Shops"])
+    app.include_router(inventory_router, prefix="/inventory", tags=["Inventory Management"])
     app.include_router(ai_router)
 
     logger.info(f"Started {settings.app_name} in {settings.app_env} mode.")

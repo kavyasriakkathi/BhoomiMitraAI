@@ -59,7 +59,6 @@ async def verify_webhook(
 async def receive_message(
     request: Request,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db),
 ):
     """
     Receives incoming WhatsApp messages from Meta's Cloud API.
@@ -72,8 +71,12 @@ async def receive_message(
       5. Immediately return HTTP 200 OK to Meta to prevent timeouts.
     """
 
+    logger.info("========== WEBHOOK HIT ==========")
+
     # Step 1: Verify signature (returns raw body bytes)
     body_bytes = await verify_webhook_signature(request)
+
+    logger.info(body_bytes.decode())
 
     # Step 2: Parse payload
     try:
@@ -109,7 +112,6 @@ async def receive_message(
                 # Step 4: Queue the background processing pipeline
                 background_tasks.add_task(
                     process_message_pipeline,
-                    db=db,
                     parsed=parsed,
                     sender_name=sender_name
                 )

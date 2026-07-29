@@ -108,8 +108,9 @@ async def generate_multimodal_response(
             system_instruction=system_prompt,
             generation_config=genai.GenerationConfig(
                 temperature=0.4,
-                max_output_tokens=512,
+                max_output_tokens=1024,
                 top_p=0.9,
+                response_mime_type="application/json",
             ),
         )
 

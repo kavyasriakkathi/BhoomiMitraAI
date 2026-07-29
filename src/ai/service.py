@@ -1,9 +1,15 @@
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from src.core.models import Farmer, Conversation
+from sqlalchemy import select
+from src.core.models import Farmer, Conversation, Crop, Farm
 from src.core.logging import logger
 from src.ai.repository import AIRepository
-from src.ai.schemas import AIGenerateRequest, AIGenerateResponse
+from src.ai.schemas import AIGenerateRequest, AIGenerateResponse, MultimodalDiagnosisResponse
+from src.crop_health.service import CropHealthService
+from src.crop_health.repository import CropHealthRepository
+from src.crop_health.schemas import CropHealthCreate
+from src.crops.repository import CropRepository
+from src.farmers.repository import FarmerRepository
 from src.ai.prompts import (
     BHOOMIMITRA_SYSTEM_PROMPT,
     build_farmer_context,
@@ -99,11 +105,20 @@ async def process_text_message(
     except HTTPException:
         logger.warning(f"AI unavailable for farmer {farmer.id}. Using fallback.")
         ai_response_text = get_fallback_response(farmer.preferred_language)
-        
+
+    # Enrich with nearby shop inventory recommendations if products match
+    try:
+        from src.shops.service import enrich_response_with_shops
+        ai_response_text = await enrich_response_with_shops(
+            db, conversation.user_message or "", ai_response_text
+        )
+    except Exception as err:
+        logger.warning(f"Failed to enrich response with shops: {err}")
+
     conversation.ai_response = ai_response_text
     db.add(conversation)
     await db.commit()
-    
+
     return ai_response_text
 
 
@@ -129,8 +144,12 @@ async def process_image_message(
         land_size=profile.land_size_acres if profile else None,
     )
     
-    # Add a vision-specific system prompt instruction
-    full_system_prompt = f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\nThe user has uploaded an image of their crop. Diagnose any visible diseases, pests, or deficiencies and provide actionable agronomic advice.\n\n{farmer_context}"
+    # Add a vision-specific system prompt instruction enforcing JSON
+    full_system_prompt = f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\nThe user has uploaded an image of their crop. Diagnose any visible diseases, pests, or deficiencies.\n" \
+                         "You MUST return a strictly valid JSON object matching this exact schema:\n" \
+                         '{"disease_name": "Name", "confidence_score": 0.95, "severity": "low/medium/high", "symptoms": "Visible symptoms", "treatment_recommendation": "Steps to fix", "friendly_whatsapp_reply": "Natural language reply for the farmer"}\n' \
+                         "Provide actionable agronomic advice.\n\n" \
+                         f"{farmer_context}"
     
     # 2. History
     history_records = await repo.get_conversation_history(farmer.id)
@@ -144,6 +163,7 @@ async def process_image_message(
             
     # 3. Call Gemini Multimodal
     from src.ai.gemini_client import generate_multimodal_response
+    import json
     
     user_caption = conversation.user_message or "Please analyze this image."
     
@@ -157,12 +177,48 @@ async def process_image_message(
         )
         if not ai_response_text:
             raise Exception("Empty response from AI")
+            
+        # Parse the structured JSON output
+        parsed_json = json.loads(ai_response_text)
+        diagnosis_data = MultimodalDiagnosisResponse(**parsed_json)
+        reply_text = diagnosis_data.friendly_whatsapp_reply
+
+        # 4. Save to Crop Health Module
+        # Attempt to find the farmer's most recent crop to link the diagnosis
+        result = await db.execute(
+            select(Crop.id)
+            .join(Farm)
+            .where(Farm.farmer_id == farmer.id)
+            .order_by(Crop.created_at.desc())
+            .limit(1)
+        )
+        crop_id = result.scalar_one_or_none()
+
+        if crop_id:
+            crop_health_service = CropHealthService(
+                repository=CropHealthRepository(db),
+                crop_repository=CropRepository(db),
+                farmer_repository=FarmerRepository(db)
+            )
+            create_data = CropHealthCreate(
+                crop_id=crop_id,
+                farmer_id=farmer.id,
+                image_url=None, # Media ID is handled via Conversation temporarily
+                symptoms=diagnosis_data.symptoms,
+                disease_name=diagnosis_data.disease_name,
+                diagnosis_result=diagnosis_data.friendly_whatsapp_reply,
+                treatment_recommendation=diagnosis_data.treatment_recommendation,
+                confidence_score=diagnosis_data.confidence_score,
+            )
+            await crop_health_service.create_diagnosis(create_data)
+            logger.info(f"Structured diagnosis saved to CropHealth for farmer {farmer.id}")
+
     except Exception as e:
-        logger.warning(f"AI Vision unavailable for farmer {farmer.id}: {e}")
-        ai_response_text = get_fallback_response(farmer.preferred_language)
+        logger.warning(f"AI Vision unavailable or failed to parse for farmer {farmer.id}: {e}")
+        reply_text = get_fallback_response(farmer.preferred_language)
         
-    conversation.ai_response = ai_response_text
+    conversation.ai_response = reply_text
     db.add(conversation)
     await db.commit()
     
-    return ai_response_text
+    return reply_text
