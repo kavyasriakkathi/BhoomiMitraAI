@@ -63,6 +63,22 @@ def create_app() -> FastAPI:
             }
         }
 
+    # ---- Static Files & Web Dashboard ----
+    import os
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse
+
+    static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
+    if os.path.exists(static_dir):
+        app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+        @app.get("/", tags=["Dashboard"], include_in_schema=False)
+        @app.get("/dashboard", tags=["Dashboard"])
+        @app.get("/farmer", tags=["Dashboard"], include_in_schema=False)
+        @app.get("/shop", tags=["Dashboard"], include_in_schema=False)
+        async def serve_dashboard():
+            return FileResponse(os.path.join(static_dir, "index.html"))
+
     # ---- Register Modules ----
     from src.gateway.router import router as gateway_router
     from src.farmers.router import router as farmers_router
@@ -75,6 +91,7 @@ def create_app() -> FastAPI:
     from src.ai.router import router as ai_router
     from src.shops.router import router as shops_router
     from src.inventory.router import router as inventory_router
+    from src.orders.router import router as orders_router
 
     app.include_router(gateway_router, prefix="/webhook", tags=["WhatsApp"])
     app.include_router(farmers_router, prefix="/farmers", tags=["Farmers"])
@@ -86,6 +103,7 @@ def create_app() -> FastAPI:
     app.include_router(advisory_router, prefix="/advisories", tags=["Advisories"])
     app.include_router(shops_router, prefix="/shops", tags=["Agri Shops"])
     app.include_router(inventory_router, prefix="/inventory", tags=["Inventory Management"])
+    app.include_router(orders_router, prefix="/orders", tags=["Order Requests & Cart"])
     app.include_router(ai_router)
 
     logger.info(f"Started {settings.app_name} in {settings.app_env} mode.")

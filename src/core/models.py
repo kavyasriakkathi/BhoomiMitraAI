@@ -22,6 +22,7 @@ class Farmer(Base):
     farms = relationship("Farm", back_populates="farmer", cascade="all, delete-orphan")
     crop_health_diagnoses = relationship("CropHealth", back_populates="farmer", cascade="all, delete-orphan")
     advisories = relationship("Advisory", back_populates="farmer", cascade="all, delete-orphan")
+    order_requests = relationship("OrderRequest", back_populates="farmer", cascade="all, delete-orphan")
 
 
 class FarmerProfile(Base):
@@ -194,6 +195,7 @@ class Shop(Base):
 
     # Relationships
     inventory_items = relationship("Inventory", back_populates="shop", cascade="all, delete-orphan")
+    order_requests = relationship("OrderRequest", back_populates="shop", cascade="all, delete-orphan")
 
 
 class Inventory(Base):
@@ -221,4 +223,33 @@ class Inventory(Base):
 
     # Relationships
     shop = relationship("Shop", back_populates="inventory_items")
+    order_requests = relationship("OrderRequest", back_populates="inventory_item", cascade="all, delete-orphan")
+
+
+class OrderRequest(BaseModel if False else Base):
+    """Farmer Cart & Shop Purchase Order Request Model"""
+    __tablename__ = "order_requests"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    farmer_id = Column(UUID(as_uuid=True), ForeignKey("farmers.id"), index=True, nullable=False)
+    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id"), index=True, nullable=False)
+    inventory_id = Column(UUID(as_uuid=True), ForeignKey("inventory.id"), index=True, nullable=False)
+
+    product_name = Column(String(150), nullable=False)
+    brand = Column(String(100), nullable=True)
+    unit = Column(String(50), nullable=False, default="Unit")
+    unit_price = Column(Float, nullable=False)
+    quantity = Column(Integer, nullable=False, default=1)
+    total_price = Column(Float, nullable=False)
+
+    status = Column(String(20), default="Pending", index=True) # Pending, Accepted, Ready, Completed, Cancelled
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    farmer = relationship("Farmer", back_populates="order_requests")
+    shop = relationship("Shop", back_populates="order_requests")
+    inventory_item = relationship("Inventory", back_populates="order_requests")
 
