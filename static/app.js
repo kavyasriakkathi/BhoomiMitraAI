@@ -113,17 +113,38 @@ function applyLanguageTranslation(lang) {
 function switchDashboardRole(role) {
   currentRole = role;
   document.querySelectorAll('.role-btn').forEach(btn => btn.classList.remove('active'));
-  document.querySelectorAll('.dashboard-view').forEach(view => view.classList.remove('active'));
+  document.querySelectorAll('.dashboard-view').forEach(view => {
+    view.classList.remove('active');
+    view.style.display = 'none';
+  });
 
   if (role === 'farmer') {
     document.getElementById('btn-role-farmer').classList.add('active');
-    document.getElementById('view-farmer').classList.add('active');
-  } else {
+    const farmerView = document.getElementById('view-farmer');
+    if (farmerView) {
+      farmerView.classList.add('active');
+      farmerView.style.display = 'block';
+    }
+  } else if (role === 'shop') {
     document.getElementById('btn-role-shop').classList.add('active');
-    document.getElementById('view-shop').classList.add('active');
+    const shopView = document.getElementById('view-shop');
+    if (shopView) {
+      shopView.classList.add('active');
+      shopView.style.display = 'block';
+    }
     loadShopOwnerData();
+  } else if (role === 'rag') {
+    const ragBtn = document.getElementById('btn-role-rag');
+    if (ragBtn) ragBtn.classList.add('active');
+    const ragView = document.getElementById('view-rag');
+    if (ragView) {
+      ragView.classList.add('active');
+      ragView.style.display = 'block';
+    }
+    loadRagDocuments();
   }
 }
+
 
 // Farmer Tab Switching
 function switchFarmerTab(tabName) {
@@ -1063,4 +1084,167 @@ async function applyForGovernmentScheme(schemeId) {
     alert("Error: " + err.message);
   }
 }
+
+/* ==========================================================================
+   RAG KNOWLEDGE ENGINE FRONTEND CONTROLLERS
+   ========================================================================== */
+
+async function loadRagDocuments() {
+  const tbody = document.getElementById('rag-documents-table-body');
+  const countBadge = document.getElementById('rag-doc-count-badge');
+  if (!tbody) return;
+
+  try {
+    const res = await fetch('/rag/documents');
+    if (!res.ok) throw new Error("Failed to fetch documents");
+    const docs = await res.json();
+
+    if (countBadge) countBadge.innerText = `${docs.length} Documents`;
+
+    if (docs.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:1.5rem; color:var(--text-muted);">No knowledge documents uploaded yet. Upload a PDF or advisory manual above.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = docs.map(doc => {
+      const createdDate = new Date(doc.created_at).toLocaleDateString();
+      const stateCrop = `${doc.state || 'All India'} / ${doc.crop || 'All Crops'}`;
+
+      return `
+        <tr>
+          <td><strong>${escapeHtml(doc.title)}</strong></td>
+          <td><span class="badge badge-pending">${escapeHtml(doc.source)}</span></td>
+          <td>${escapeHtml(doc.category)}</td>
+          <td><code>${escapeHtml(doc.language)}</code></td>
+          <td>${escapeHtml(stateCrop)}</td>
+          <td><span class="badge badge-completed">${doc.chunk_count} Chunks</span></td>
+          <td>${createdDate}</td>
+          <td>
+            <button class="btn btn-danger btn-sm" onclick="deleteRagDocument('${doc.id}')">🗑️ Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="8" style="color:red; text-align:center; padding:1rem;">Error: ${err.message}</td></tr>`;
+  }
+}
+
+async function handleRagDocumentUpload(event) {
+  event.preventDefault();
+  const titleInput = document.getElementById('rag-upload-title');
+  const sourceSelect = document.getElementById('rag-upload-source');
+  const categorySelect = document.getElementById('rag-upload-category');
+  const langSelect = document.getElementById('rag-upload-language');
+  const stateInput = document.getElementById('rag-upload-state');
+  const cropInput = document.getElementById('rag-upload-crop');
+  const fileInput = document.getElementById('rag-upload-file');
+
+  if (!fileInput.files || fileInput.files.length === 0) {
+    alert("Please select a file to upload.");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  formData.append('title', titleInput.value.trim());
+  formData.append('source', sourceSelect.value);
+  formData.append('category', categorySelect.value);
+  formData.append('language', langSelect.value);
+  if (stateInput.value.trim()) formData.append('state', stateInput.value.trim());
+  if (cropInput.value.trim()) formData.append('crop', cropInput.value.trim());
+
+  try {
+    const res = await fetch('/rag/upload', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      alert(`✅ Document "${data.title}" uploaded & indexed successfully (${data.chunk_count} chunks)!`);
+      document.getElementById('form-rag-upload').reset();
+      loadRagDocuments();
+    } else {
+      const err = await res.json();
+      alert("Upload Error: " + (err.detail || "Failed to upload document"));
+    }
+  } catch (err) {
+    alert("Upload Exception: " + err.message);
+  }
+}
+
+async function deleteRagDocument(docId) {
+  if (!confirm("Are you sure you want to delete this document and all its indexed vector chunks?")) return;
+
+  try {
+    const res = await fetch(`/rag/document/${docId}`, { method: 'DELETE' });
+    if (res.ok) {
+      alert("✅ Document deleted successfully.");
+      loadRagDocuments();
+    } else {
+      const err = await res.json();
+      alert("Delete Error: " + (err.detail || "Failed to delete document"));
+    }
+  } catch (err) {
+    alert("Error deleting document: " + err.message);
+  }
+}
+
+async function rebuildRagVectorIndex() {
+  try {
+    const res = await fetch('/rag/rebuild', { method: 'POST' });
+    if (res.ok) {
+      const result = await res.json();
+      alert(`✅ Vector Index Rebuilt!\nProcessed: ${result.documents_processed} documents\nTotal Chunks: ${result.total_chunks}`);
+      loadRagDocuments();
+    } else {
+      const err = await res.json();
+      alert("Rebuild Error: " + (err.detail || "Failed to rebuild index"));
+    }
+  } catch (err) {
+    alert("Rebuild Error: " + err.message);
+  }
+}
+
+async function executeRagSearch() {
+  const input = document.getElementById('rag-search-input');
+  const resultsBox = document.getElementById('rag-search-results-box');
+  if (!input || !resultsBox) return;
+
+  const query = input.value.trim();
+  if (!query) {
+    alert("Please enter a query to search.");
+    return;
+  }
+
+  resultsBox.innerHTML = `<p style="color:var(--text-muted); text-align:center;">Performing semantic vector similarity search...</p>`;
+
+  try {
+    const res = await fetch(`/rag/search?query=${encodeURIComponent(query)}&top_k=5`);
+    if (!res.ok) throw new Error("Vector search failed");
+    const results = await res.json();
+
+    if (results.length === 0) {
+      resultsBox.innerHTML = `<p style="color:var(--text-muted); text-align:center;">No matching chunks found for query "${escapeHtml(query)}".</p>`;
+      return;
+    }
+
+    resultsBox.innerHTML = results.map((r, i) => `
+      <div style="background:var(--bg-card); padding:0.75rem; border-radius:6px; margin-bottom:0.75rem; border-left:4px solid #10b981;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+          <strong style="font-size:0.9rem; color:var(--text-main);">#${i+1} ${escapeHtml(r.document_title)}</strong>
+          <span class="badge badge-completed" style="font-size:0.75rem;">Sim Score: ${r.similarity_score}</span>
+        </div>
+        <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.4rem;">
+          Source: <strong>${escapeHtml(r.source)}</strong> | Category: <strong>${escapeHtml(r.category)}</strong> | State: <strong>${escapeHtml(r.state || 'All India')}</strong>
+        </div>
+        <p style="font-size:0.85rem; color:var(--text-main); margin:0; line-height:1.4;">${escapeHtml(r.chunk_text)}</p>
+      </div>
+    `).join('');
+  } catch (err) {
+    resultsBox.innerHTML = `<p style="color:red; text-align:center;">Search Error: ${err.message}</p>`;
+  }
+}
+
 

@@ -28,6 +28,10 @@
         <button class="role-btn" id="btn-role-shop" onclick="switchDashboardRole('shop')">
           <span id="ui-role-shop">🏬 Shop Owner Dashboard</span>
         </button>
+        <button class="role-btn" id="btn-role-rag" onclick="switchDashboardRole('rag')">
+          <span id="ui-role-rag">📚 Admin Knowledge Center (RAG)</span>
+        </button>
+
       </div>
 
       <!-- Developer Portal Quick Access -->
@@ -484,9 +488,134 @@
             </div>
           </div>
         </div>
+      <!-- ==================================================================== -->
+      <!-- 3. ADMIN KNOWLEDGE CENTER (RAG ENGINE)                               -->
+      <!-- ==================================================================== -->
+      <div id="view-rag" class="dashboard-view" style="display: none;">
+        
+        <!-- Header Banner -->
+        <div class="card" style="margin-bottom: 1.5rem; background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border: 1px solid #a7f3d0;">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <h2 style="color: #065f46; margin-bottom: 0.25rem;">📚 Admin Knowledge Center — RAG Engine</h2>
+              <p style="color: #047857; font-size: 0.95rem; margin: 0;">
+                Manage verified agricultural sources (ICAR, KVK, Govt PDFs, University Research, Fertilizer/Pesticide manuals).
+              </p>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="rebuildRagVectorIndex()">🔄 Rebuild Vector Index</button>
+          </div>
+        </div>
+
+        <div class="grid-2" style="margin-bottom: 2rem;">
+          
+          <!-- Upload PDF Form Card -->
+          <div class="card">
+            <div class="card-title">📤 Upload Agricultural PDF / Manual</div>
+            <form id="form-rag-upload" onsubmit="handleRagDocumentUpload(event)">
+              <div class="form-group">
+                <label class="form-label">Document Title</label>
+                <input type="text" id="rag-upload-title" class="form-control" placeholder="e.g., ICAR Chilli Pest Advisory 2026" required>
+              </div>
+              <div class="grid-2" style="gap: 0.75rem;">
+                <div class="form-group">
+                  <label class="form-label">Source</label>
+                  <select id="rag-upload-source" class="form-control" required>
+                    <option value="ICAR Publications">ICAR Publications</option>
+                    <option value="KVK Advisories">KVK Advisories</option>
+                    <option value="Government Agriculture PDFs">Government Agriculture PDFs</option>
+                    <option value="Agriculture University Research">Agriculture University Research</option>
+                    <option value="Fertilizer Manuals">Fertilizer Manuals</option>
+                    <option value="Pesticide Labels">Pesticide Labels</option>
+                    <option value="Crop Calendars">Crop Calendars</option>
+                    <option value="Weather Advisories">Weather Advisories</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Category</label>
+                  <select id="rag-upload-category" class="form-control" required>
+                    <option value="Pest Control">Pest Control</option>
+                    <option value="Fertilizer Management">Fertilizer Management</option>
+                    <option value="Disease Diagnosis">Disease Diagnosis</option>
+                    <option value="Government Advisory">Government Advisory</option>
+                    <option value="Crop Calendar">Crop Calendar</option>
+                    <option value="Weather Warning">Weather Warning</option>
+                  </select>
+                </div>
+              </div>
+              <div class="grid-3" style="gap: 0.75rem;">
+                <div class="form-group">
+                  <label class="form-label">Language</label>
+                  <select id="rag-upload-language" class="form-control">
+                    <option value="te">Telugu (te)</option>
+                    <option value="hi">Hindi (hi)</option>
+                    <option value="en">English (en)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">State</label>
+                  <input type="text" id="rag-upload-state" class="form-control" placeholder="Telangana / All India">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Crop</label>
+                  <input type="text" id="rag-upload-crop" class="form-control" placeholder="Chilli / All Crops">
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Select File (.pdf, .txt)</label>
+                <input type="file" id="rag-upload-file" class="form-control" accept=".pdf,.txt" required>
+              </div>
+              <button type="submit" class="btn btn-primary" style="width: 100%;">🚀 Upload & Index Document</button>
+            </form>
+          </div>
+
+          <!-- Live Semantic Vector Search Card -->
+          <div class="card">
+            <div class="card-title">🔍 Live Semantic Vector Search</div>
+            <div class="form-group">
+              <input type="text" id="rag-search-input" class="form-control" placeholder="Enter query (e.g., how to treat chilli thrips)..." onkeypress="if(event.key==='Enter') executeRagSearch()">
+            </div>
+            <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+              <button class="btn btn-primary btn-sm" onclick="executeRagSearch()">Search Knowledge Base</button>
+              <button class="btn btn-secondary btn-sm" onclick="loadRagDocuments()">🔄 Refresh List</button>
+            </div>
+            <div id="rag-search-results-box" style="max-height: 280px; overflow-y: auto; background: var(--bg-main); padding: 0.75rem; border-radius: 8px; border: 1px solid var(--border-color);">
+              <p style="color: var(--text-muted); font-size: 0.9rem; text-align: center;">Enter a search query to test RAG vector retrieval scores.</p>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Document Table Card -->
+        <div class="card">
+          <div class="card-title">
+            <span>📄 Indexed Agricultural Knowledge Documents</span>
+            <span class="badge badge-open" id="rag-doc-count-badge">0 Documents</span>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Source</th>
+                  <th>Category</th>
+                  <th>Language</th>
+                  <th>State / Crop</th>
+                  <th>Chunks</th>
+                  <th>Uploaded At</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="rag-documents-table-body">
+                <!-- Populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
 
     </div>
+
 
   </main>
 

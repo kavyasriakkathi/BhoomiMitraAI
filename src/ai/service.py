@@ -41,8 +41,30 @@ class AIService:
             mem_service = FarmerMemoryService(mem_repo)
             memory_context = await mem_service.format_memory_for_system_prompt(request.farmer_id)
 
-            # 4. Build system prompt combining profile and memory engine
+            # 3.5 Retrieve trusted agricultural RAG knowledge
+            rag_context_text = ""
+            try:
+                from src.rag.service import RAGService
+                from src.rag.repository import RAGRepository
+                rag_repo = RAGRepository(self.repository.session)
+                rag_service = RAGService(rag_repo)
+                rag_results = await rag_service.search_knowledge(
+                    query=request.message,
+                    top_k=3,
+                    state=profile.state if profile else None,
+                    crop=profile.current_crop if profile else None,
+                )
+                if rag_results:
+                    rag_snippets = [f"• Document: {r.document_title} ({r.source}): {r.chunk_text}" for r in rag_results]
+                    rag_context_text = "=== RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE (GROUND TRUTH) ===\n" + "\n".join(rag_snippets)
+            except Exception as rag_err:
+                logger.warning(f"RAG knowledge retrieval warning: {rag_err}")
+
+            # 4. Build system prompt combining profile, memory engine, and RAG ground truth
             full_system_prompt = f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\n{farmer_context}\n\n{memory_context}"
+            if rag_context_text:
+                full_system_prompt += f"\n\n{rag_context_text}"
+
 
             # 5. Fetch conversation history
             history_records = await self.repository.get_conversation_history(request.farmer_id)

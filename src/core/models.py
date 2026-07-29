@@ -5,6 +5,8 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from src.core.database import Base
 from src.memory.models import FarmerMemory
+from src.rag.models import KnowledgeDocument, KnowledgeChunk, EmbeddingMetadata
+
 
 class Farmer(Base):
     """Core Farmer Identity Model"""
