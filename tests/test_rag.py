@@ -75,6 +75,28 @@ def test_rag_upload_empty_file(mock_rag_service):
     assert response.status_code == 400
 
 
+def test_rag_upload_missing_file_422(mock_rag_service):
+    """Missing file parameter returns HTTP 422 Unprocessable Entity."""
+    data = {
+        "title": "No File Doc",
+        "category": "general",
+    }
+    response = client.post("/rag/upload", data=data)
+    assert response.status_code == 422
+
+
+def test_rag_upload_unsupported_file_type_400(mock_rag_service):
+    """Unsupported binary file returns HTTP 400 Bad Request."""
+    files = {"file": ("script.exe", io.BytesIO(b"\x7fELF\x01\x01\x01"), "application/octet-stream")}
+    data = {
+        "category": "general",
+    }
+    response = client.post("/rag/upload", data=data, files=files)
+    assert response.status_code == 400
+    assert "Unsupported file type" in response.json()["detail"]
+
+
+
 def test_rag_list_documents(mock_rag_service):
     doc_id = uuid4()
     mock_doc = KnowledgeDocumentResponse(

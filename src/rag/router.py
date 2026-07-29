@@ -1,8 +1,6 @@
-import base64
-import re
 from uuid import UUID
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, UploadFile, Form, HTTPException, Query, status
 from src.rag.schemas import (
     KnowledgeDocumentResponse,
     RAGSearchResult,
@@ -16,44 +14,6 @@ from src.rag.dependencies import get_rag_service
 router = APIRouter()
 
 
-def _parse_multipart_form(body_bytes: bytes, content_type: str):
-    """
-    Native zero-dependency multipart/form-data boundary parser.
-    Avoids requiring third-party python-multipart library.
-    """
-    fields = {}
-    file_bytes = b""
-    filename = "document.pdf"
-
-    if "boundary=" not in content_type:
-        return fields, file_bytes, filename
-
-    boundary = content_type.split("boundary=")[-1].strip().strip('"').encode()
-    parts = body_bytes.split(b"--" + boundary)
-
-    for part in parts:
-        if not part or part.startswith(b"--"):
-            continue
-        if b"\r\n\r\n" in part:
-            header_bytes, content_bytes = part.split(b"\r\n\r\n", 1)
-            if content_bytes.endswith(b"\r\n"):
-                content_bytes = content_bytes[:-2]
-
-            header_str = header_bytes.decode("utf-8", errors="ignore")
-            name_match = re.search(r'name="([^"]+)"', header_str)
-            filename_match = re.search(r'filename="([^"]+)"', header_str)
-
-            if name_match:
-                field_name = name_match.group(1)
-                if filename_match:
-                    filename = filename_match.group(1)
-                    file_bytes = content_bytes
-                else:
-                    fields[field_name] = content_bytes.decode("utf-8", errors="ignore")
-
-    return fields, file_bytes, filename
-
-
 @router.post(
     "/upload",
     response_model=KnowledgeDocumentResponse,
@@ -62,60 +22,49 @@ def _parse_multipart_form(body_bytes: bytes, content_type: str):
     tags=["RAG Knowledge Engine"],
 )
 async def upload_document(
-    request: Request,
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    source: str = Form("ICAR Publications"),
+    category: str = Form("general"),
+    language: str = Form("en"),
+    state: Optional[str] = Form(None),
+    crop: Optional[str] = Form(None),
     service: RAGService = Depends(get_rag_service),
 ):
     """
     Ingests an agricultural PDF or text file through the Document Pipeline.
-    Supports both multipart/form-data file uploads and application/json requests.
+    Accepts multipart/form-data file uploads with metadata fields.
+    Renders 'Choose File' button in FastAPI Swagger UI.
     """
-    content_type = request.headers.get("content-type", "")
+    filename = file.filename or "document.pdf"
+    content_type = file.content_type or ""
 
-    title = None
-    source = "ICAR Publications"
-    category = "Pest Control"
-    language = "te"
-    state = None
-    crop = None
-    file_bytes = b""
-    filename = "document.pdf"
+    is_pdf_ext = filename.lower().endswith(".pdf")
+    is_txt_ext = filename.lower().endswith(".txt")
+    is_pdf_type = "pdf" in content_type.lower()
+    is_txt_type = "text" in content_type.lower() or "plain" in content_type.lower()
 
-    if "application/json" in content_type:
-        try:
-            json_body = await request.json()
-            title = json_body.get("title")
-            source = json_body.get("source", "ICAR Publications")
-            category = json_body.get("category", "Pest Control")
-            language = json_body.get("language", "te")
-            state = json_body.get("state")
-            crop = json_body.get("crop")
-            filename = json_body.get("filename", "document.pdf")
-            
-            if "file_base64" in json_body:
-                file_bytes = base64.b64decode(json_body["file_base64"])
-            elif "file_content" in json_body:
-                file_bytes = json_body["file_content"].encode("utf-8")
-        except Exception as json_err:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid JSON request body: {json_err}"
-            )
-    else:
-        body_bytes = await request.body()
-        fields, file_bytes, filename = _parse_multipart_form(body_bytes, content_type)
+    if not (is_pdf_ext or is_txt_ext or is_pdf_type or is_txt_type):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unsupported file type. Please upload a PDF or text file."
+        )
 
-        title = fields.get("title")
-        source = fields.get("source", source)
-        category = fields.get("category", category)
-        language = fields.get("language", language)
-        state = fields.get("state")
-        crop = fields.get("crop")
-
+    file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Uploaded file is empty or missing."
+            detail="Uploaded file is empty."
         )
+
+    if not (file_bytes.startswith(b"%PDF") or is_pdf_ext or is_txt_ext):
+        try:
+            file_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported binary file format. Please upload a valid PDF or text document."
+            )
 
     document_title = title or filename or "Untitled Agricultural Document"
     return await service.upload_and_index_document(
@@ -174,7 +123,6 @@ async def search_knowledge(
         crop=crop,
         source=source,
     )
-
 
 
 @router.get(
