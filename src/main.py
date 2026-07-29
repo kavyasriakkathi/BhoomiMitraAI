@@ -21,9 +21,11 @@ from src.core.database import engine
 async def lifespan(app: FastAPI):
     # Startup validation
     try:
+        from src.core.models import Base
         async with engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
-        logger.info("Database connection validated successfully.")
+            await conn.run_sync(Base.metadata.create_all)
+        logger.info("Database connection validated and tables created successfully.")
     except Exception as e:
         logger.error(f"Failed to connect to the database: {e}")
         raise e
@@ -87,6 +89,7 @@ def create_app() -> FastAPI:
     from src.shops.router import router as shops_router
     from src.inventory.router import router as inventory_router
     from src.orders.router import router as orders_router
+    from src.schemes.router import router as schemes_router
 
     app.include_router(gateway_router, prefix="/webhook", tags=["WhatsApp"])
     app.include_router(farmers_router, prefix="/farmers", tags=["Farmers"])
@@ -99,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(shops_router, prefix="/shops", tags=["Agri Shops"])
     app.include_router(inventory_router, prefix="/inventory", tags=["Inventory Management"])
     app.include_router(orders_router, prefix="/orders", tags=["Order Requests & Cart"])
+    app.include_router(schemes_router, prefix="/schemes", tags=["Government Schemes"])
     app.include_router(ai_router)
 
     logger.info(f"Started {settings.app_name} in {settings.app_env} mode.")

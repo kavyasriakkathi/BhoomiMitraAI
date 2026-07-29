@@ -23,6 +23,7 @@ class Farmer(Base):
     crop_health_diagnoses = relationship("CropHealth", back_populates="farmer", cascade="all, delete-orphan")
     advisories = relationship("Advisory", back_populates="farmer", cascade="all, delete-orphan")
     order_requests = relationship("OrderRequest", back_populates="farmer", cascade="all, delete-orphan")
+    scheme_applications = relationship("SchemeApplication", back_populates="farmer", cascade="all, delete-orphan")
 
 
 class FarmerProfile(Base):
@@ -252,4 +253,52 @@ class OrderRequest(BaseModel if False else Base):
     farmer = relationship("Farmer", back_populates="order_requests")
     shop = relationship("Shop", back_populates="order_requests")
     inventory_item = relationship("Inventory", back_populates="order_requests")
+
+
+class GovernmentScheme(Base):
+    """National and State Level Government Agriculture Schemes & Subsidies"""
+    __tablename__ = "government_schemes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    scheme_name = Column(String(200), nullable=False, index=True)
+    scheme_code = Column(String(50), nullable=False, unique=True, index=True) # e.g. PM_KISAN, PMFBY, KCC, SOLAR_PUMP
+    category = Column(String(100), nullable=False, index=True)               # Financial Assistance, Crop Insurance, Subsidies, etc.
+    state = Column(String(100), default="All India", index=True)              # 'All India' or specific state like 'Telangana'
+    district = Column(String(100), nullable=True, index=True)
+    crop_type = Column(String(100), default="All Crops", index=True)
+    min_land_acres = Column(Float, default=0.0)
+    max_land_acres = Column(Float, nullable=True)                            # None means no upper limit
+    description = Column(Text, nullable=False)
+    benefits_summary = Column(Text, nullable=False)
+    eligibility_criteria = Column(Text, nullable=False)
+    required_documents = Column(Text, nullable=False)
+    application_deadline = Column(DateTime, nullable=True)
+    official_portal_url = Column(String(500), nullable=True)
+    is_active = Column(Boolean, default=True, index=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    applications = relationship("SchemeApplication", back_populates="scheme", cascade="all, delete-orphan")
+
+
+class SchemeApplication(Base):
+    """Farmer Applications & Tracking for Government Schemes"""
+    __tablename__ = "scheme_applications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    farmer_id = Column(UUID(as_uuid=True), ForeignKey("farmers.id"), index=True, nullable=False)
+    scheme_id = Column(UUID(as_uuid=True), ForeignKey("government_schemes.id"), index=True, nullable=False)
+
+    status = Column(String(50), default="Eligible", index=True) # Eligible, Applied, Under Review, Approved, Disbursed
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    farmer = relationship("Farmer", back_populates="scheme_applications")
+    scheme = relationship("GovernmentScheme", back_populates="applications")
+
 

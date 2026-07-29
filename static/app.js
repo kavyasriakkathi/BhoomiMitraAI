@@ -136,6 +136,7 @@ function switchFarmerTab(tabName) {
 
   if (tabName === 'shops') loadNearbyShops();
   if (tabName === 'orders') loadFarmerOrders();
+  if (tabName === 'schemes') loadFarmerSchemeEligibility();
   if (tabName === 'chat') loadFarmerChatMessages();
 }
 
@@ -972,3 +973,94 @@ function formatMarkdownText(text) {
   escaped = escaped.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   return escaped.replace(/\n/g, '<br>');
 }
+
+// ==========================================================================
+// AI GOVERNMENT SCHEMES & ELIGIBILITY ADVISOR FUNCTIONS
+// ==========================================================================
+
+async function loadFarmerSchemeEligibility() {
+  if (!activeFarmerId) return;
+  const container = document.getElementById('schemes-list-container');
+  if (!container) return;
+  container.innerHTML = '<p style="padding:1rem; grid-column:1/-1;">Evaluating profile & querying government schemes database...</p>';
+
+  try {
+    const res = await fetch(`/schemes/eligibility/${activeFarmerId}`);
+    if (!res.ok) throw new Error("Failed to evaluate eligibility");
+    const data = await res.json();
+
+    if (!data.schemes || data.schemes.length === 0) {
+      container.innerHTML = '<p style="padding:1rem; grid-column:1/-1;">No government schemes found.</p>';
+      return;
+    }
+
+    container.innerHTML = data.schemes.map(item => {
+      const s = item.scheme;
+      const statusBadge = item.is_eligible 
+        ? `<span class="badge badge-completed">✅ Eligible (${item.match_score_percentage}% Match)</span>`
+        : `<span class="badge badge-cancelled">⚠️ Not Eligible</span>`;
+
+      const deadlineText = s.application_deadline ? new Date(s.application_deadline).toLocaleDateString() : 'Continuous / No Deadline';
+
+      return `
+        <div class="card" style="border-top: 4px solid ${item.is_eligible ? '#059669' : '#d97706'}; flex-direction:column; justify-content:space-between;">
+          <div>
+            <div class="card-title" style="margin-bottom:0.5rem;">
+              <span>${escapeHtml(s.scheme_name)}</span>
+              ${statusBadge}
+            </div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.75rem;">
+              🏷️ Category: <strong>${escapeHtml(s.category)}</strong> | 📍 Region: <strong>${escapeHtml(s.state)}</strong>
+            </div>
+            <p style="font-size:0.9rem; margin-bottom:0.75rem;">${escapeHtml(s.description)}</p>
+            <div style="background:var(--bg-main); padding:0.75rem; border-radius:8px; margin-bottom:0.75rem; font-size:0.85rem;">
+              <p><strong>💰 Benefits:</strong> ${escapeHtml(s.benefits_summary)}</p>
+              <p><strong>📑 Eligibility Check:</strong> ${escapeHtml(item.eligibility_reason)}</p>
+              <p><strong>📄 Required Documents:</strong> ${escapeHtml(s.required_documents)}</p>
+              <p><strong>⏳ Application Deadline:</strong> ${deadlineText}</p>
+            </div>
+          </div>
+          <div>
+            <div style="display:flex; gap:0.5rem; margin-top:0.75rem;">
+              <button class="btn btn-secondary btn-sm" style="flex:1;" onclick="voiceEngine.speakText('${escapeHtml(item.voice_explanation).replace(/'/g, "\\'")}', currentLanguage)">
+                🔊 Listen Explanation
+              </button>
+              <button class="btn btn-primary btn-sm" style="flex:1;" onclick="applyForGovernmentScheme('${s.id}')">
+                📝 Apply / Bookmark Scheme
+              </button>
+            </div>
+            ${s.official_portal_url ? `<a href="${s.official_portal_url}" target="_blank" style="display:block; font-size:0.8rem; text-align:center; margin-top:0.5rem; color:var(--primary); font-weight:600;">🔗 Visit Official Portal</a>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  } catch (err) {
+    container.innerHTML = `<p style="color:red; padding:1rem; grid-column:1/-1;">Error loading schemes: ${err.message}</p>`;
+  }
+}
+
+async function applyForGovernmentScheme(schemeId) {
+  if (!activeFarmerId) return;
+  try {
+    const res = await fetch('/schemes/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        farmer_id: activeFarmerId,
+        scheme_id: schemeId,
+        notes: "Applied via BhoomiMitra AI Advisor"
+      })
+    });
+
+    if (res.ok) {
+      alert("✅ Scheme application registered in your profile! Status: Applied");
+      voiceEngine.speakText("Scheme application registered successfully! You can track application status in your profile.", currentLanguage);
+    } else {
+      const err = await res.json();
+      alert("Application Error: " + (err.detail || "Failed to submit application"));
+    }
+  } catch (err) {
+    alert("Error: " + err.message);
+  }
+}
+
