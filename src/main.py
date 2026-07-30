@@ -60,8 +60,7 @@ def create_app() -> FastAPI:
             "success": True,
             "data": {
                 "status": "healthy",
-                "service": settings.app_name,
-                "environment": settings.app_env
+                "service": "bhoomimitra-ai"
             }
         }
 

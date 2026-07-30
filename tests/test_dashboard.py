@@ -30,3 +30,4 @@ async def test_health_check_endpoint():
         data = response.json()
         assert data["success"] is True
         assert data["data"]["status"] == "healthy"
+        assert data["data"]["service"] == "bhoomimitra-ai"
