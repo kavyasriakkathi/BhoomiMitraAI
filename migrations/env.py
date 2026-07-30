@@ -14,7 +14,7 @@ from alembic import context
 
 # Import our models and settings
 from src.config import get_settings
-from src.core.database import Base
+from src.core.database import Base, get_async_db_config
 import src.core.models  # Ensures models are registered in Base.metadata
 
 settings = get_settings()
@@ -24,11 +24,7 @@ settings = get_settings()
 config = context.config
 
 # Overwrite the sqlalchemy.url from the env variables instead of alembic.ini
-db_url = settings.database_url
-if db_url.startswith("postgresql://"):
-    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
-    if "?" in db_url:
-        db_url = db_url.split("?")[0]
+db_url, connect_args = get_async_db_config(settings.database_url)
 
 config.set_main_option("sqlalchemy.url", db_url)
 
@@ -67,6 +63,7 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=connect_args,
     )
 
     async with connectable.connect() as connection:
