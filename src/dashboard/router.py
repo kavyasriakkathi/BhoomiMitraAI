@@ -40,14 +40,16 @@ async def serve_unified_dashboard(request: Request):
     )
 
 
-@router.get("/data-deletion", response_class=HTMLResponse, tags=["Legal"])
-@router.get("/data-deletion.html", response_class=HTMLResponse, tags=["Legal"], include_in_schema=False)
+@router.api_route("/data-deletion", methods=["GET", "HEAD"], response_class=HTMLResponse, tags=["Legal"])
+@router.api_route("/data-deletion.html", methods=["GET", "HEAD"], response_class=HTMLResponse, tags=["Legal"], include_in_schema=False)
 async def serve_data_deletion_page(request: Request):
     """
     Renders the public Data Deletion Instructions for Meta/WhatsApp Business Compliance.
+    Supports both GET and HEAD requests without requiring authentication or cookies.
     """
     return templates.TemplateResponse(
         request=request,
         name="data-deletion.html",
     )
+
 

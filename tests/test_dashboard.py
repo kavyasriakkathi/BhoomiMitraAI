@@ -33,25 +33,33 @@ async def test_health_check_endpoint():
         assert data["data"]["service"] == "bhoomimitra-ai"
 
 @pytest.mark.asyncio
-async def test_data_deletion_page_serves_html():
-    """Verify data deletion instructions route serves HTML with required email and instructions."""
+async def test_data_deletion_get_and_head_methods():
+    """Verify GET /data-deletion and HEAD /data-deletion both return HTTP 200 for Meta crawler validation."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
-        # Test /data-deletion.html
-        res1 = await client.get("/data-deletion.html")
-        assert res1.status_code == 200
-        assert "text/html" in res1.headers["content-type"]
-        assert "Data Deletion Instructions" in res1.text
-        assert "kavyasriakkathi@gmail.com" in res1.text
+        # GET /data-deletion
+        res_get = await client.get("/data-deletion")
+        assert res_get.status_code == 200
+        assert "text/html" in res_get.headers["content-type"]
+        assert "BhoomiMitra AI - User Data Deletion Instructions" in res_get.text
+        assert "kavyasriakkathi@gmail.com" in res_get.text
 
-        # Test /data-deletion
-        res2 = await client.get("/data-deletion")
-        assert res2.status_code == 200
-        assert "text/html" in res2.headers["content-type"]
-        assert "Data Deletion Instructions" in res2.text
+        # HEAD /data-deletion (Meta Dashboard crawler check)
+        res_head = await client.head("/data-deletion")
+        assert res_head.status_code == 200
+        assert "text/html" in res_head.headers["content-type"]
 
-        # Test /static/data-deletion.html
-        res3 = await client.get("/static/data-deletion.html")
-        assert res3.status_code == 200
-        assert "Data Deletion Instructions" in res3.text
+        # GET /data-deletion.html
+        res_get_html = await client.get("/data-deletion.html")
+        assert res_get_html.status_code == 200
+        assert "text/html" in res_get_html.headers["content-type"]
+
+        # HEAD /data-deletion.html
+        res_head_html = await client.head("/data-deletion.html")
+        assert res_head_html.status_code == 200
+
+        # Static fallback
+        res_static = await client.get("/static/data-deletion.html")
+        assert res_static.status_code == 200
+
 
 
