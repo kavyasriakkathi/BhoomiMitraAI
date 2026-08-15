@@ -17,10 +17,36 @@ from contextlib import asynccontextmanager
 from sqlalchemy import text
 from src.core.database import engine
 
+def audit_environment_variables():
+    """Logs the presence/absence and key values of environment variables on startup."""
+    settings = get_settings()
+    
+    def _status(val: str) -> str:
+        if not val:
+            return "MISSING / NOT SET"
+        return f"PRESENT (len={len(str(val))})"
+
+    logger.info("=" * 70)
+    logger.info("BHOOMIMITRA AI — ENVIRONMENT AUDIT ON SERVER BOOT")
+    logger.info("=" * 70)
+    logger.info(f"APP_ENV                   : {settings.app_env}")
+    logger.info(f"WHATSAPP_PHONE_NUMBER_ID  : {settings.whatsapp_phone_number_id or 'NOT SET'} (RUNTIME LOADED VALUE)")
+    logger.info(f"WHATSAPP_API_TOKEN        : {_status(settings.whatsapp_api_token)}")
+    logger.info(f"WHATSAPP_VERIFY_TOKEN     : {_status(settings.whatsapp_verify_token)}")
+    logger.info(f"WHATSAPP_APP_SECRET       : {_status(settings.whatsapp_app_secret)}")
+    logger.info(f"WHATSAPP_BUSINESS_ACCT_ID : {settings.whatsapp_business_account_id or 'NOT SET'}")
+    logger.info(f"GOOGLE_GEMINI_API_KEY     : {_status(settings.google_gemini_api_key)}")
+    logger.info(f"OPENAI_API_KEY            : {_status(settings.openai_api_key)}")
+    logger.info(f"DATABASE_URL              : {_status(settings.database_url)}")
+    logger.info(f"REDIS_URL                 : {_status(settings.redis_url)}")
+    logger.info(f"STT_PROVIDER              : {settings.stt_provider}")
+    logger.info("=" * 70)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup validation
     try:
+        audit_environment_variables()
         from src.core.models import Base
         async with engine.begin() as conn:
             await conn.execute(text("SELECT 1"))

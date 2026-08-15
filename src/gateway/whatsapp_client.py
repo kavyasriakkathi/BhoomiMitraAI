@@ -38,7 +38,7 @@ async def send_text_message(
 
     if not settings.whatsapp_api_token or not settings.whatsapp_phone_number_id:
         logger.error(
-            "WhatsApp API credentials not configured. "
+            "[WHATSAPP OUTBOUND ERROR] Credentials not configured. "
             "Set WHATSAPP_API_TOKEN and WHATSAPP_PHONE_NUMBER_ID."
         )
         return None
@@ -61,47 +61,64 @@ async def send_text_message(
         },
     }
 
+    logger.info(
+        f"WHATSAPP OUTBOUND CALL INITIATED:\n"
+        f"  URL             : {url}\n"
+        f"  Phone Number ID : {settings.whatsapp_phone_number_id}\n"
+        f"  Recipient Phone : {to_phone}\n"
+        f"  Message Length  : {len(message_text)} chars"
+    )
+
     # Retry loop with exponential backoff
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.post(url, headers=headers, json=payload)
 
+            logger.info(
+                f"WHATSAPP OUTBOUND RESPONSE (Attempt {attempt}/{MAX_RETRIES}):\n"
+                f"  HTTP Status Code: {response.status_code}\n"
+                f"  Response Body   : {response.text}"
+            )
+
             if response.status_code == 200:
                 data = response.json()
                 wa_message_id = data.get("messages", [{}])[0].get("id")
                 logger.info(
-                    f"Message sent to {to_phone} "
-                    f"(wa_id={wa_message_id}, attempt={attempt})"
+                    f"WHATSAPP OUTBOUND SUCCESS: Message delivered to {to_phone} "
+                    f"(wa_id={wa_message_id})"
                 )
                 return wa_message_id
 
             if response.status_code == 401:
                 logger.error(
-                    f"WHATSAPP SEND FAILED for {to_phone}: HTTP 401 Unauthorized — "
-                    "The Meta WHATSAPP_API_TOKEN is invalid or expired. Please generate a new token."
+                    f"[WHATSAPP OUTBOUND ERROR] HTTP 401 Unauthorized for {to_phone} — "
+                    f"The Meta WHATSAPP_API_TOKEN is invalid or expired.\n"
+                    f"Meta Response: {response.text}"
                 )
                 return None
 
             if response.status_code == 403:
                 logger.error(
-                    f"WHATSAPP SEND FAILED for {to_phone}: HTTP 403 Forbidden — "
-                    f"Check phone number ID permissions. Meta response: {response.text}"
+                    f"[WHATSAPP OUTBOUND ERROR] HTTP 403 Forbidden for {to_phone} — "
+                    f"Check phone number ID ({settings.whatsapp_phone_number_id}) permissions.\n"
+                    f"Meta Response: {response.text}"
                 )
                 return None
 
             if response.status_code == 400:
                 logger.error(
-                    f"WHATSAPP SEND FAILED for {to_phone}: HTTP 400 Bad Request — "
-                    f"Meta response: {response.text}"
+                    f"[WHATSAPP OUTBOUND ERROR] HTTP 400 Bad Request for {to_phone} — "
+                    f"Meta Response: {response.text}"
                 )
                 return None
 
             # Rate limited by Meta — wait and retry
             if response.status_code == 429:
                 logger.warning(
-                    f"Rate limited by Meta (attempt {attempt}/{MAX_RETRIES}). "
-                    f"Retrying in {RETRY_DELAY_SECONDS * attempt}s..."
+                    f"[WHATSAPP OUTBOUND RATE LIMIT] Rate limited by Meta (attempt {attempt}/{MAX_RETRIES}). "
+                    f"Retrying in {RETRY_DELAY_SECONDS * attempt}s...\n"
+                    f"Meta Response: {response.text}"
                 )
                 import asyncio
                 await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
@@ -109,14 +126,14 @@ async def send_text_message(
 
             # Non-retryable error
             logger.error(
-                f"Failed to send message to {to_phone}: "
-                f"HTTP {response.status_code} — {response.text}"
+                f"[WHATSAPP OUTBOUND ERROR] Failed to send message to {to_phone}: "
+                f"HTTP {response.status_code} — Meta Response: {response.text}"
             )
             return None
 
         except httpx.TimeoutException:
             logger.warning(
-                f"Timeout sending to {to_phone} (attempt {attempt}/{MAX_RETRIES})."
+                f"[WHATSAPP OUTBOUND TIMEOUT] Timeout sending to {to_phone} (attempt {attempt}/{MAX_RETRIES})."
             )
             if attempt < MAX_RETRIES:
                 import asyncio
@@ -125,10 +142,10 @@ async def send_text_message(
             return None
 
         except Exception as e:
-            logger.exception(f"Unexpected error sending message to {to_phone}: {e}")
+            logger.exception(f"[WHATSAPP OUTBOUND UNEXPECTED ERROR] Failed sending message to {to_phone}: {e}")
             return None
 
-    logger.error(f"All {MAX_RETRIES} retries exhausted for {to_phone}.")
+    logger.error(f"[WHATSAPP OUTBOUND EXHAUSTED] All {MAX_RETRIES} retries exhausted for {to_phone}.")
     return None
 
 
@@ -157,8 +174,11 @@ async def mark_message_as_read(message_id: str) -> None:
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            await client.post(url, headers=headers, json=payload)
-        logger.debug(f"Read receipt sent for message {message_id}")
+            response = await client.post(url, headers=headers, json=payload)
+        logger.info(
+            f"WHATSAPP READ RECEIPT RESPONSE for message {message_id}: "
+            f"HTTP {response.status_code} | Body: {response.text}"
+        )
     except Exception as e:
         logger.warning(f"Failed to send read receipt for {message_id}: {e}")
 

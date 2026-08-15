@@ -86,45 +86,88 @@ async def receive_message(
 ):
     """
     Receives incoming WhatsApp messages from Meta's Cloud API.
+    Logs raw request at line 1, verifies signature, parses payload, and queues background processing.
     """
-    logger.info("========== WHATSAPP WEBHOOK HIT ==========")
-
-    # Step 1: Verify signature (returns raw body bytes)
-    body_bytes = await verify_webhook_signature(request)
+    # VERY FIRST LINE: Read body bytes and log raw request + headers before any parsing or validation
+    body_bytes = await request.body()
+    client_ip = request.client.host if request.client else "unknown"
+    headers_dict = dict(request.headers)
 
     try:
-        raw_str = body_bytes.decode("utf-8", errors="ignore")
-        logger.info(f"Raw webhook payload received ({len(body_bytes)} bytes)")
+        raw_body_str = body_bytes.decode("utf-8", errors="replace")
     except Exception:
-        raw_str = ""
+        raw_body_str = "<binary or decode error>"
 
-    # Step 2: Parse payload
+    logger.info("=" * 80)
+    logger.info("========== WHATSAPP WEBHOOK POST HIT ==========")
+    logger.info(f"Client IP   : {client_ip}")
+    logger.info(f"Headers     : {json.dumps(headers_dict, default=str)}")
+    logger.info(f"Raw Body ({len(body_bytes)} bytes): {raw_body_str}")
+    logger.info("=" * 80)
+
+    # Step 1: Verify HMAC-SHA256 signature if app secret is configured
+    is_signature_valid = await verify_webhook_signature(request, body_bytes)
+    if not is_signature_valid:
+        logger.error(f"[WEBHOOK REJECTED] Signature validation failed for POST request from IP {client_ip}.")
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=403, content={"status": "error", "detail": "Invalid signature"})
+
+    # Step 2: Parse raw JSON payload
     try:
         payload_dict = json.loads(body_bytes)
-        payload = WhatsAppWebhookPayload(**payload_dict)
-    except Exception as e:
-        logger.error(f"Failed to parse webhook payload: {e}")
-        return {"status": "ignored", "reason": "parse_error"}
+    except Exception as parse_err:
+        logger.error(
+            f"[WEBHOOK JSON PARSE ERROR] Invalid JSON payload received from Meta: {parse_err}\n"
+            f"Raw body string: {raw_body_str}"
+        )
+        return {"status": "ignored", "reason": "invalid_json"}
 
-    # Step 3: Extract messages and queue background tasks
+    # Step 3: Validate against Pydantic schema
+    try:
+        payload = WhatsAppWebhookPayload(**payload_dict)
+    except Exception as schema_err:
+        logger.error(
+            f"[WEBHOOK SCHEMA ERROR] Failed to parse payload into WhatsAppWebhookPayload model: {schema_err}\n"
+            f"Payload dict: {json.dumps(payload_dict, default=str)}"
+        )
+        return {"status": "ignored", "reason": "schema_validation_error"}
+
+    # Step 4: Extract messages and queue background tasks
     messages_queued = 0
 
     if not payload.entry:
         logger.info("Webhook payload contained no 'entry' items.")
         return {"status": "ok", "messages_queued": 0}
 
-    for entry in payload.entry:
-        for change in entry.changes:
+    for entry_idx, entry in enumerate(payload.entry):
+        for change_idx, change in enumerate(entry.changes):
+            logger.info(f"Processing payload entry[{entry_idx}] change[{change_idx}] field: '{change.field}'")
+
             if change.field != "messages":
-                logger.info(f"Ignoring non-messages field change: {change.field}")
+                logger.info(f"Ignoring non-messages field change: '{change.field}'")
                 continue
 
             value = change.value
-            if not value or not value.messages:
-                logger.info("Webhook change event contained no 'messages' array (likely a status/read update).")
+            if not value:
+                logger.info("Webhook change event contained empty 'value' object.")
                 continue
 
-            logger.info(f"WEBHOOK MESSAGE COUNT: {len(value.messages)}")
+            # Check if payload contains status updates (sent, delivered, read receipts) instead of user messages
+            raw_change_value = payload_dict.get("entry", [{}])[entry_idx].get("changes", [{}])[change_idx].get("value", {})
+            statuses = raw_change_value.get("statuses") if isinstance(raw_change_value, dict) else None
+
+            if statuses:
+                for status_item in statuses:
+                    msg_id = status_item.get("id", "unknown")
+                    status_type = status_item.get("status", "unknown")
+                    recipient_id = status_item.get("recipient_id", "unknown")
+                    logger.info(f"[STATUS RECEIPT] Message {msg_id} to {recipient_id} status updated to: '{status_type}'")
+
+            if not value.messages:
+                logger.info("Webhook change event contained no incoming 'messages' array (likely a status/read receipt update).")
+                continue
+
+            logger.info(f"WEBHOOK USER MESSAGES COUNT: {len(value.messages)}")
 
             sender_name = None
             if value.contacts and value.contacts[0].profile:
@@ -134,29 +177,34 @@ async def receive_message(
                 parsed = _extract_message(msg, sender_name)
 
                 if parsed is None:
-                    logger.info(f"Unsupported message type: {msg.type}. Skipping.")
+                    logger.info(f"Unsupported message type: '{msg.type}'. Skipping message ID {msg.id}.")
                     continue
 
-                logger.info(f"MESSAGE ID: {parsed.message_id}")
-                logger.info(f"MESSAGE TYPE: {parsed.message_type}")
-                logger.info(f"SENDER PHONE: {parsed.phone_number}")
+                logger.info(f"INCOMING MESSAGE PARSED SUCCESSFULLY:")
+                logger.info(f"  Message ID  : {parsed.message_id}")
+                logger.info(f"  Message Type: {parsed.message_type}")
+                logger.info(f"  Sender Phone: {parsed.phone_number}")
+                logger.info(f"  Sender Name : {parsed.sender_name or 'Unknown'}")
                 if parsed.text_content:
-                    logger.info(f"MESSAGE TEXT RECEIVED: {parsed.text_content[:100]}")
+                    logger.info(f"  Message Text: {parsed.text_content[:150]}")
 
-                # Step 4: Queue the background processing pipeline
-                background_tasks.add_task(
-                    process_message_pipeline,
-                    parsed=parsed,
-                    sender_name=sender_name
-                )
-                messages_queued += 1
+                # Step 5: Queue the background processing pipeline
+                try:
+                    background_tasks.add_task(
+                        process_message_pipeline,
+                        parsed=parsed,
+                        sender_name=sender_name
+                    )
+                    messages_queued += 1
+                    logger.info(
+                        f"BACKGROUND PIPELINE QUEUED for message {parsed.message_id} "
+                        f"from {parsed.phone_number}"
+                    )
+                except Exception as queue_err:
+                    logger.exception(f"Failed to queue background task for message {parsed.message_id}: {queue_err}")
 
-                logger.info(
-                    f"BACKGROUND PIPELINE QUEUED for message {parsed.message_id} "
-                    f"from {parsed.phone_number}"
-                )
-
-    # Step 5: Return HTTP 200 OK immediately to Meta
+    # Step 6: Return HTTP 200 OK immediately to Meta
+    logger.info(f"Webhook processing complete. Responding HTTP 200 OK to Meta ({messages_queued} messages queued).")
     return {"status": "ok", "messages_queued": messages_queued}
 
 

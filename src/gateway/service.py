@@ -96,126 +96,141 @@ async def process_message_pipeline(
     sender_name: Optional[str] = None
 ) -> None:
     """
-    Orchestrates the entire lifecycle of an incoming WhatsApp message.
+    Orchestrates the entire lifecycle of an incoming WhatsApp message with isolated,
+    stage-by-stage error handling so no failures pass silently.
     """
 
     logger.info("=" * 80)
     logger.info("BACKGROUND PIPELINE STARTED")
-    logger.info(f"MESSAGE ID: {parsed.message_id}")
-    logger.info(f"SENDER PHONE: {parsed.phone_number}")
-    logger.info(f"MESSAGE TYPE: {parsed.message_type}")
+    logger.info(f"  Message ID  : {parsed.message_id}")
+    logger.info(f"  Sender Phone: {parsed.phone_number}")
+    logger.info(f"  Message Type: {parsed.message_type}")
     if parsed.text_content:
-        logger.info(f"MESSAGE TEXT RECEIVED: {parsed.text_content[:100]}")
+        logger.info(f"  Message Text: {parsed.text_content[:150]}")
     logger.info("=" * 80)
 
     try:
         async with AsyncSessionLocal() as db:
 
-            logger.info("STEP 1: Checking duplicate message")
+            # ── STAGE 1: Duplicate Check ──────────────────────────────
+            logger.info("STAGE 1: Checking for duplicate message in DB")
+            try:
+                if await is_duplicate_message(db, parsed.message_id):
+                    logger.warning(f"STAGE 1: Duplicate message ID {parsed.message_id} detected. Skipping pipeline.")
+                    return
+                logger.info("STAGE 1: Message is unique.")
+            except Exception as dup_err:
+                logger.exception(f"[PIPELINE STAGE FAILED: Stage 1 - Duplicate Check] Message ID: {parsed.message_id}, Error: {dup_err}")
 
-            if await is_duplicate_message(db, parsed.message_id):
-                logger.warning(f"Duplicate message {parsed.message_id}. Skipping.")
-                return
-
-            logger.info("STEP 2: Audio transcription (if needed)")
-
+            # ── STAGE 2: Audio STT (if needed) ────────────────────────
             if parsed.message_type == "audio" and parsed.media_id:
-                media_result = await download_media_bytes(parsed.media_id)
-
-                if not media_result:
-                    logger.error("Audio download failed.")
+                logger.info("STAGE 2: Audio download and STT transcription started")
+                try:
+                    media_result = await download_media_bytes(parsed.media_id)
+                    if not media_result:
+                        logger.error(f"[PIPELINE STAGE FAILED: Stage 2 - Audio Download] Failed to download media ID: {parsed.media_id}")
+                        return
+                    audio_bytes, mime_type = media_result
+                    lang_service = get_language_service()
+                    transcription = await lang_service.transcribe_audio(audio_bytes, mime_type)
+                    parsed.text_content = transcription.transcription_text
+                    logger.info(f"STAGE 2: Audio transcribed successfully: '{parsed.text_content[:100]}...'")
+                except Exception as stt_err:
+                    logger.exception(f"[PIPELINE STAGE FAILED: Stage 2 - Audio STT] Media ID: {parsed.media_id}, Error: {stt_err}")
                     return
 
-                audio_bytes, mime_type = media_result
+            # ── STAGE 3: Farmer Resolution ────────────────────────────
+            logger.info("STAGE 3: Resolving farmer profile in DB")
+            try:
+                farmer = await get_or_create_farmer(db, parsed.phone_number, sender_name)
+                logger.info(f"STAGE 3: Farmer resolved successfully. Farmer ID = {farmer.id}")
+            except Exception as db_farmer_err:
+                logger.exception(f"[PIPELINE STAGE FAILED: Stage 3 - Farmer Resolution] Phone: {parsed.phone_number}, Error: {db_farmer_err}")
+                return
 
-                lang_service = get_language_service()
+            # ── STAGE 4: Conversation Storage ─────────────────────────
+            logger.info("STAGE 4: Storing incoming message in DB")
+            conversation = None
+            try:
+                conversation = await store_incoming_message(db, farmer, parsed)
+                logger.info(f"STAGE 4: Conversation stored successfully. Conversation ID = {conversation.id}")
+            except Exception as db_conv_err:
+                logger.exception(f"[PIPELINE STAGE FAILED: Stage 4 - Conversation Storage] Farmer ID: {farmer.id}, Error: {db_conv_err}")
 
-                transcription = await lang_service.transcribe_audio(
-                    audio_bytes,
-                    mime_type
-                )
-
-                parsed.text_content = transcription.transcription_text
-
-            logger.info("FARMER RESOLUTION STARTED")
-
-            farmer = await get_or_create_farmer(
-                db,
-                parsed.phone_number,
-                sender_name
-            )
-
-            logger.info(f"FARMER RESOLUTION SUCCESS: Farmer ID = {farmer.id}")
-
-            logger.info("CONVERSATION STORAGE STARTED")
-
-            conversation = await store_incoming_message(
-                db,
-                farmer,
-                parsed
-            )
-
-            logger.info(f"CONVERSATION STORED: Conversation ID = {conversation.id}")
-
-            logger.info("AI PROCESSING STARTED")
-
+            # ── STAGE 5: AI Processing (Gemini) ───────────────────────
+            logger.info("STAGE 5: Generating AI response")
             ai_response = None
-
-            if parsed.message_type == "image" and parsed.media_id:
-
-                media_result = await download_media_bytes(parsed.media_id)
-
-                if media_result:
-                    image_bytes, mime_type = media_result
-
-                    ai_response = await process_image_message(
-                        db,
-                        farmer,
-                        conversation,
-                        image_bytes,
-                        mime_type,
+            try:
+                conv_ref = conversation or Conversation(farmer_id=farmer.id, user_message=parsed.text_content, user_message_type=parsed.message_type)
+                
+                if parsed.message_type == "image" and parsed.media_id:
+                    media_result = await download_media_bytes(parsed.media_id)
+                    if media_result:
+                        image_bytes, mime_type = media_result
+                        ai_response = await process_image_message(
+                            db, farmer, conv_ref, image_bytes, mime_type
+                        )
+                    else:
+                        logger.error(f"[PIPELINE STAGE FAILED: Stage 5 - Image Download] Media ID {parsed.media_id} failed download")
+                elif parsed.text_content:
+                    ai_response = await process_text_message(
+                        db, farmer, conv_ref
                     )
 
-            elif parsed.text_content:
-
-                ai_response = await process_text_message(
-                    db,
-                    farmer,
-                    conversation,
-                )
-
-            if ai_response:
-                logger.info(f"AI RESPONSE GENERATED ({len(ai_response)} chars): {ai_response[:120]}...")
-            else:
-                logger.warning("AI RESPONSE GENERATED: NONE (No text response produced)")
-
-            logger.info("WHATSAPP SEND STARTED")
-
-            if ai_response:
-
-                outbound_id = await send_text_message(
-                    to_phone=parsed.phone_number,
-                    message_text=ai_response,
-                )
-
-                if outbound_id:
-                    logger.info(f"WHATSAPP SEND SUCCESS: OUTBOUND MESSAGE ID = {outbound_id}")
+                if ai_response:
+                    logger.info(f"STAGE 5: AI response generated ({len(ai_response)} chars): {ai_response[:120]}...")
                 else:
-                    logger.error("WHATSAPP SEND FAILED: Outbound message ID returned None")
-
-                conversation.outbound_message_id = outbound_id
-                conversation.delivery_status = (
-                    "sent" if outbound_id else "failed"
+                    logger.warning(f"STAGE 5: AI generated no text response for farmer {farmer.id}")
+            except Exception as ai_err:
+                logger.exception(
+                    f"[PIPELINE STAGE FAILED: Stage 5 - AI Processing] "
+                    f"Farmer ID: {farmer.id}, Message Type: {parsed.message_type}, Text: '{parsed.text_content}', Error: {ai_err}"
                 )
 
-                db.add(conversation)
-                await db.commit()
+            # ── STAGE 6: Outbound WhatsApp Send ───────────────────────
+            outbound_id = None
+            if ai_response:
+                logger.info("STAGE 6: Sending outbound WhatsApp message to Meta Cloud API")
+                try:
+                    outbound_id = await send_text_message(
+                        to_phone=parsed.phone_number,
+                        message_text=ai_response,
+                    )
+                    if outbound_id:
+                        logger.info(f"STAGE 6: WhatsApp send SUCCESS. Outbound Meta ID = {outbound_id}")
+                    else:
+                        logger.error(f"[PIPELINE STAGE FAILED: Stage 6 - Outbound Send] Meta API returned None for {parsed.phone_number}")
+                except Exception as send_err:
+                    logger.exception(
+                        f"[PIPELINE STAGE FAILED: Stage 6 - Outbound Send] "
+                        f"Phone: {parsed.phone_number}, Error: {send_err}"
+                    )
+            else:
+                logger.warning("STAGE 6 SKIPPED: No AI response was available to send.")
 
-            logger.info("STEP 7: Mark as Read")
+            # ── STAGE 7: Database Delivery Status Update ──────────────
+            if conversation:
+                logger.info("STAGE 7: Updating delivery status in database")
+                try:
+                    conversation.outbound_message_id = outbound_id
+                    conversation.delivery_status = "sent" if outbound_id else "failed"
+                    db.add(conversation)
+                    await db.commit()
+                    logger.info(f"STAGE 7: Delivery status set to '{conversation.delivery_status}'")
+                except Exception as db_status_err:
+                    logger.exception(f"[PIPELINE STAGE FAILED: Stage 7 - DB Status Update] Conversation ID: {conversation.id}, Error: {db_status_err}")
 
-            await mark_message_as_read(parsed.message_id)
+            # ── STAGE 8: Mark Message as Read ──────────────────────────
+            logger.info("STAGE 8: Marking message as read with Meta API")
+            try:
+                await mark_message_as_read(parsed.message_id)
+                logger.info("STAGE 8: Read receipt sent.")
+            except Exception as read_err:
+                logger.warning(f"STAGE 8: Read receipt warning for {parsed.message_id}: {read_err}")
 
-            logger.info("PIPELINE FINISHED SUCCESSFULLY")
+            logger.info("=" * 80)
+            logger.info("BACKGROUND PIPELINE COMPLETED")
+            logger.info("=" * 80)
 
-    except Exception as e:
-        logger.exception(f"BACKGROUND PIPELINE FAILED for message {parsed.message_id}: {e}")
+    except Exception as pipeline_err:
+        logger.exception(f"[CRITICAL PIPELINE FAILURE] Unhandled error in background pipeline for message {parsed.message_id}: {pipeline_err}")
