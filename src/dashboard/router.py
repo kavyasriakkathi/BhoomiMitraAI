@@ -57,5 +57,17 @@ async def serve_data_deletion_page(request: Request):
         name="data-deletion.html",
     )
 
+@router.get("/privacy-policy", response_class=HTMLResponse, tags=["Legal"])
+@router.head("/privacy-policy", response_class=HTMLResponse, tags=["Legal"])
+async def serve_privacy_policy_page(request: Request):
+    """
+    Renders the public Privacy Policy page for Meta/WhatsApp Business Compliance.
+    Supports both GET and HEAD requests without requiring authentication or cookies.
+    """
+    if request.method == "HEAD":
+        return HTMLResponse(content="", status_code=200, headers={"Content-Type": "text/html; charset=utf-8"})
 
-
+    return templates.TemplateResponse(
+        request=request,
+        name="privacy-policy.html",
+    )

@@ -107,6 +107,13 @@ def create_app() -> FastAPI:
             return HTMLResponse(content="", status_code=200, headers={"Content-Type": "text/html; charset=utf-8"})
         return templates_instance.TemplateResponse(request=request, name="data-deletion.html")
 
+    @app.get("/privacy-policy", response_class=HTMLResponse, tags=["Legal"])
+    @app.head("/privacy-policy", response_class=HTMLResponse, tags=["Legal"])
+    async def privacy_policy_direct_endpoint(request: Request):
+        if request.method == "HEAD":
+            return HTMLResponse(content="", status_code=200, headers={"Content-Type": "text/html; charset=utf-8"})
+        return templates_instance.TemplateResponse(request=request, name="privacy-policy.html")
+
     # ---- Static Files & Web Dashboard Router ----
     from fastapi.staticfiles import StaticFiles
 

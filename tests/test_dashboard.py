@@ -61,5 +61,22 @@ async def test_data_deletion_get_and_head_methods():
         res_static = await client.get("/static/data-deletion.html")
         assert res_static.status_code == 200
 
+@pytest.mark.asyncio
+async def test_privacy_policy_get_and_head_methods():
+    """Verify GET /privacy-policy and HEAD /privacy-policy both return HTTP 200 for Meta crawler validation."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        # GET /privacy-policy
+        res_get = await client.get("/privacy-policy")
+        assert res_get.status_code == 200
+        assert "text/html" in res_get.headers["content-type"]
+        assert "BhoomiMitra AI - Privacy Policy" in res_get.text
+        assert "kavyasriakkathi@gmail.com" in res_get.text
+
+        # HEAD /privacy-policy (Meta Dashboard crawler check)
+        res_head = await client.head("/privacy-policy")
+        assert res_head.status_code == 200
+        assert "text/html" in res_head.headers["content-type"]
+
+
 
 
