@@ -7,7 +7,7 @@ Handles:
 """
 
 import json
-from fastapi import APIRouter, Query, Request, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Query, Request, Depends, HTTPException, BackgroundTasks, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import get_settings
@@ -34,21 +34,45 @@ async def verify_webhook(
     hub_challenge: str = Query(None, alias="hub.challenge"),
 ):
     """
-    Meta sends a GET request with a challenge token when you first
-    register the webhook URL. We must return the challenge string
-    if the verify_token matches ours.
+    Meta sends a GET request with a challenge token when registering the webhook URL.
+    Returns plain text challenge string per Meta specification.
     """
     settings = get_settings()
 
     if hub_mode == "subscribe" and hub_verify_token == settings.whatsapp_verify_token:
         logger.info("Webhook verification successful.")
-        return int(hub_challenge)
+        return Response(content=str(hub_challenge or ""), media_type="text/plain")
 
     logger.warning(
         f"Webhook verification FAILED. "
         f"Mode={hub_mode}, Token mismatch."
     )
     raise HTTPException(status_code=403, detail="Verification failed.")
+
+
+# ──────────────────────────────────────────────
+# GET — Diagnostic Health Check (Non-secret)
+# ──────────────────────────────────────────────
+
+@router.get("/whatsapp/health")
+async def whatsapp_health_check():
+    """
+    Production-safe status check for WhatsApp & AI service configuration.
+    Exposes booleans and public IDs only. No secrets.
+    """
+    settings = get_settings()
+    return {
+        "success": True,
+        "data": {
+            "whatsapp_configured": bool(settings.whatsapp_api_token),
+            "phone_number_id_configured": bool(settings.whatsapp_phone_number_id),
+            "phone_number_id": settings.whatsapp_phone_number_id or "not_set",
+            "verify_token_configured": bool(settings.whatsapp_verify_token),
+            "gemini_configured": bool(settings.google_gemini_api_key),
+            "database_configured": bool(settings.database_url),
+            "app_env": settings.app_env,
+        }
+    }
 
 
 # ──────────────────────────────────────────────
@@ -62,21 +86,17 @@ async def receive_message(
 ):
     """
     Receives incoming WhatsApp messages from Meta's Cloud API.
-
-    Full pipeline:
-      1. Verify HMAC-SHA256 signature.
-      2. Parse the nested JSON payload.
-      3. Extract message fields into a flat ParsedIncomingMessage.
-      4. Queue the background processing pipeline.
-      5. Immediately return HTTP 200 OK to Meta to prevent timeouts.
     """
-
-    logger.info("========== WEBHOOK HIT ==========")
+    logger.info("========== WHATSAPP WEBHOOK HIT ==========")
 
     # Step 1: Verify signature (returns raw body bytes)
     body_bytes = await verify_webhook_signature(request)
 
-    logger.info(body_bytes.decode())
+    try:
+        raw_str = body_bytes.decode("utf-8", errors="ignore")
+        logger.info(f"Raw webhook payload received ({len(body_bytes)} bytes)")
+    except Exception:
+        raw_str = ""
 
     # Step 2: Parse payload
     try:
@@ -89,17 +109,25 @@ async def receive_message(
     # Step 3: Extract messages and queue background tasks
     messages_queued = 0
 
+    if not payload.entry:
+        logger.info("Webhook payload contained no 'entry' items.")
+        return {"status": "ok", "messages_queued": 0}
+
     for entry in payload.entry:
         for change in entry.changes:
             if change.field != "messages":
+                logger.info(f"Ignoring non-messages field change: {change.field}")
                 continue
 
             value = change.value
-            if not value.messages:
+            if not value or not value.messages:
+                logger.info("Webhook change event contained no 'messages' array (likely a status/read update).")
                 continue
 
+            logger.info(f"WEBHOOK MESSAGE COUNT: {len(value.messages)}")
+
             sender_name = None
-            if value.contacts:
+            if value.contacts and value.contacts[0].profile:
                 sender_name = value.contacts[0].profile.name
 
             for msg in value.messages:
@@ -108,6 +136,12 @@ async def receive_message(
                 if parsed is None:
                     logger.info(f"Unsupported message type: {msg.type}. Skipping.")
                     continue
+
+                logger.info(f"MESSAGE ID: {parsed.message_id}")
+                logger.info(f"MESSAGE TYPE: {parsed.message_type}")
+                logger.info(f"SENDER PHONE: {parsed.phone_number}")
+                if parsed.text_content:
+                    logger.info(f"MESSAGE TEXT RECEIVED: {parsed.text_content[:100]}")
 
                 # Step 4: Queue the background processing pipeline
                 background_tasks.add_task(
@@ -118,11 +152,11 @@ async def receive_message(
                 messages_queued += 1
 
                 logger.info(
-                    f"Queued background processing for message {parsed.message_id} "
-                    f"from {parsed.phone_number} (type={parsed.message_type})"
+                    f"BACKGROUND PIPELINE QUEUED for message {parsed.message_id} "
+                    f"from {parsed.phone_number}"
                 )
 
-    # Step 5: Always return 200 OK to Meta immediately
+    # Step 5: Return HTTP 200 OK immediately to Meta
     return {"status": "ok", "messages_queued": messages_queued}
 
 
@@ -135,11 +169,14 @@ def _extract_message(msg, sender_name: str = None) -> ParsedIncomingMessage | No
     Convert a nested WhatsAppMessage into a flat ParsedIncomingMessage.
     Returns None for unsupported message types.
     """
+    if not msg or not msg.from_ or not msg.id:
+        return None
+
     base = {
-        "phone_number": msg.from_,
-        "message_id": msg.id,
-        "timestamp": msg.timestamp,
-        "message_type": msg.type,
+        "phone_number": str(msg.from_),
+        "message_id": str(msg.id),
+        "timestamp": str(msg.timestamp or ""),
+        "message_type": str(msg.type or "text"),
         "sender_name": sender_name,
     }
 
@@ -161,4 +198,5 @@ def _extract_message(msg, sender_name: str = None) -> ParsedIncomingMessage | No
             media_mime_type=msg.image.mime_type,
         )
 
-    return None  # Unsupported types (location, sticker, etc.)
+    return None
+

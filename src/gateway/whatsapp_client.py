@@ -76,6 +76,27 @@ async def send_text_message(
                 )
                 return wa_message_id
 
+            if response.status_code == 401:
+                logger.error(
+                    f"WHATSAPP SEND FAILED for {to_phone}: HTTP 401 Unauthorized — "
+                    "The Meta WHATSAPP_API_TOKEN is invalid or expired. Please generate a new token."
+                )
+                return None
+
+            if response.status_code == 403:
+                logger.error(
+                    f"WHATSAPP SEND FAILED for {to_phone}: HTTP 403 Forbidden — "
+                    f"Check phone number ID permissions. Meta response: {response.text}"
+                )
+                return None
+
+            if response.status_code == 400:
+                logger.error(
+                    f"WHATSAPP SEND FAILED for {to_phone}: HTTP 400 Bad Request — "
+                    f"Meta response: {response.text}"
+                )
+                return None
+
             # Rate limited by Meta — wait and retry
             if response.status_code == 429:
                 logger.warning(

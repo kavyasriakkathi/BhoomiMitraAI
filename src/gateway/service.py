@@ -101,9 +101,11 @@ async def process_message_pipeline(
 
     logger.info("=" * 80)
     logger.info("BACKGROUND PIPELINE STARTED")
-    logger.info(f"Message ID: {parsed.message_id}")
-    logger.info(f"Phone: {parsed.phone_number}")
-    logger.info(f"Type: {parsed.message_type}")
+    logger.info(f"MESSAGE ID: {parsed.message_id}")
+    logger.info(f"SENDER PHONE: {parsed.phone_number}")
+    logger.info(f"MESSAGE TYPE: {parsed.message_type}")
+    if parsed.text_content:
+        logger.info(f"MESSAGE TEXT RECEIVED: {parsed.text_content[:100]}")
     logger.info("=" * 80)
 
     try:
@@ -135,7 +137,7 @@ async def process_message_pipeline(
 
                 parsed.text_content = transcription.transcription_text
 
-            logger.info("STEP 3: Get/Create Farmer")
+            logger.info("FARMER RESOLUTION STARTED")
 
             farmer = await get_or_create_farmer(
                 db,
@@ -143,7 +145,9 @@ async def process_message_pipeline(
                 sender_name
             )
 
-            logger.info("STEP 4: Store Conversation")
+            logger.info(f"FARMER RESOLUTION SUCCESS: Farmer ID = {farmer.id}")
+
+            logger.info("CONVERSATION STORAGE STARTED")
 
             conversation = await store_incoming_message(
                 db,
@@ -151,7 +155,9 @@ async def process_message_pipeline(
                 parsed
             )
 
-            logger.info("STEP 5: AI Processing")
+            logger.info(f"CONVERSATION STORED: Conversation ID = {conversation.id}")
+
+            logger.info("AI PROCESSING STARTED")
 
             ai_response = None
 
@@ -178,9 +184,12 @@ async def process_message_pipeline(
                     conversation,
                 )
 
-            logger.info(f"AI Response: {ai_response}")
+            if ai_response:
+                logger.info(f"AI RESPONSE GENERATED ({len(ai_response)} chars): {ai_response[:120]}...")
+            else:
+                logger.warning("AI RESPONSE GENERATED: NONE (No text response produced)")
 
-            logger.info("STEP 6: Send WhatsApp Reply")
+            logger.info("WHATSAPP SEND STARTED")
 
             if ai_response:
 
@@ -189,7 +198,10 @@ async def process_message_pipeline(
                     message_text=ai_response,
                 )
 
-                logger.info(f"Outbound ID: {outbound_id}")
+                if outbound_id:
+                    logger.info(f"WHATSAPP SEND SUCCESS: OUTBOUND MESSAGE ID = {outbound_id}")
+                else:
+                    logger.error("WHATSAPP SEND FAILED: Outbound message ID returned None")
 
                 conversation.outbound_message_id = outbound_id
                 conversation.delivery_status = (
@@ -206,4 +218,4 @@ async def process_message_pipeline(
             logger.info("PIPELINE FINISHED SUCCESSFULLY")
 
     except Exception as e:
-        logger.exception(f"PIPELINE FAILED: {e}")
+        logger.exception(f"BACKGROUND PIPELINE FAILED for message {parsed.message_id}: {e}")
