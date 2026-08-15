@@ -77,6 +77,20 @@ async def test_privacy_policy_get_and_head_methods():
         assert res_head.status_code == 200
         assert "text/html" in res_head.headers["content-type"]
 
+@pytest.mark.asyncio
+async def test_terms_get_and_head_methods():
+    """Verify GET /terms and HEAD /terms both return HTTP 200."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        # GET /terms — must return full HTML page with 200
+        res_get = await client.get("/terms")
+        assert res_get.status_code == 200, f"Expected 200, got {res_get.status_code}"
+        assert "text/html" in res_get.headers["content-type"]
+        assert "BhoomiMitra AI - Terms of Service" in res_get.text
+        assert "Terms of Service" in res_get.text
+        assert "kavyasriakkathi@gmail.com" in res_get.text
 
-
+        # HEAD /terms — must return 200 with no body (Meta/WhatsApp crawler check)
+        res_head = await client.head("/terms")
+        assert res_head.status_code == 200, f"Expected 200 for HEAD, got {res_head.status_code}"
+        assert "text/html" in res_head.headers["content-type"]
 

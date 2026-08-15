@@ -3,10 +3,13 @@ BhoomiMitra AI — Web Dashboard Router
 
 Serves the unified SaaS dashboard interface rendering Jinja2 HTML templates.
 Routes:
-  GET /           — Main BhoomiMitra Unified SaaS Dashboard
-  GET /dashboard  — Alias for dashboard
-  GET /farmer     — Alias for Farmer perspective
-  GET /shop       — Alias for Shop Owner perspective
+  GET /               — Main BhoomiMitra Unified SaaS Dashboard
+  GET /dashboard      — Alias for dashboard
+  GET /farmer         — Alias for Farmer perspective
+  GET /shop           — Alias for Shop Owner perspective
+  GET /terms          — Terms of Service (public, no auth)
+  GET /privacy-policy — Privacy Policy (public, no auth)
+  GET /data-deletion  — Data Deletion Instructions (public, no auth)
 """
 
 import os
@@ -70,4 +73,21 @@ async def serve_privacy_policy_page(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="privacy-policy.html",
+    )
+
+
+@router.get("/terms", response_class=HTMLResponse, tags=["Legal"])
+@router.head("/terms", response_class=HTMLResponse, tags=["Legal"])
+async def serve_terms_page(request: Request):
+    """
+    Renders the public Terms of Service page.
+    Supports both GET and HEAD requests without requiring authentication or cookies.
+    This route must return HTTP 200 — required for WhatsApp Business / Meta app review.
+    """
+    if request.method == "HEAD":
+        return HTMLResponse(content="", status_code=200, headers={"Content-Type": "text/html; charset=utf-8"})
+
+    return templates.TemplateResponse(
+        request=request,
+        name="terms.html",
     )
