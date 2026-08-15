@@ -4,7 +4,7 @@ KrishiMitra AI — Application Entry Point
 FastAPI application factory with health check and module registration.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from src.config import get_settings
 from src.core.logging import logger
 from src.core.exceptions import (
@@ -90,8 +90,24 @@ def create_app() -> FastAPI:
             }
         }
 
-    # ---- Static Files & Web Dashboard Router ----
+    # ---- Data Deletion Instructions (Public Meta Compliance - GET & HEAD) ----
     import os
+    from fastapi.responses import HTMLResponse
+    from fastapi.templating import Jinja2Templates
+
+    templates_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
+    templates_instance = Jinja2Templates(directory=templates_dir)
+
+    @app.get("/data-deletion", response_class=HTMLResponse, tags=["Legal"])
+    @app.head("/data-deletion", response_class=HTMLResponse, tags=["Legal"])
+    @app.get("/data-deletion.html", response_class=HTMLResponse, tags=["Legal"], include_in_schema=False)
+    @app.head("/data-deletion.html", response_class=HTMLResponse, tags=["Legal"], include_in_schema=False)
+    async def data_deletion_direct_endpoint(request: Request):
+        if request.method == "HEAD":
+            return HTMLResponse(content="", status_code=200, headers={"Content-Type": "text/html; charset=utf-8"})
+        return templates_instance.TemplateResponse(request=request, name="data-deletion.html")
+
+    # ---- Static Files & Web Dashboard Router ----
     from fastapi.staticfiles import StaticFiles
 
     static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
