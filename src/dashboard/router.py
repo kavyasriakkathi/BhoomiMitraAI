@@ -38,3 +38,16 @@ async def serve_unified_dashboard(request: Request):
             "title": "BhoomiMitra AI — Unified Farmer & Agri-Shop SaaS Platform",
         }
     )
+
+
+@router.get("/data-deletion", response_class=HTMLResponse, tags=["Legal"])
+@router.get("/data-deletion.html", response_class=HTMLResponse, tags=["Legal"], include_in_schema=False)
+async def serve_data_deletion_page(request: Request):
+    """
+    Renders the public Data Deletion Instructions for Meta/WhatsApp Business Compliance.
+    """
+    return templates.TemplateResponse(
+        request=request,
+        name="data-deletion.html",
+    )
+

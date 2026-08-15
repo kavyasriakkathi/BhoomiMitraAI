@@ -31,3 +31,27 @@ async def test_health_check_endpoint():
         assert data["success"] is True
         assert data["data"]["status"] == "healthy"
         assert data["data"]["service"] == "bhoomimitra-ai"
+
+@pytest.mark.asyncio
+async def test_data_deletion_page_serves_html():
+    """Verify data deletion instructions route serves HTML with required email and instructions."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        # Test /data-deletion.html
+        res1 = await client.get("/data-deletion.html")
+        assert res1.status_code == 200
+        assert "text/html" in res1.headers["content-type"]
+        assert "Data Deletion Instructions" in res1.text
+        assert "kavyasriakkathi@gmail.com" in res1.text
+
+        # Test /data-deletion
+        res2 = await client.get("/data-deletion")
+        assert res2.status_code == 200
+        assert "text/html" in res2.headers["content-type"]
+        assert "Data Deletion Instructions" in res2.text
+
+        # Test /static/data-deletion.html
+        res3 = await client.get("/static/data-deletion.html")
+        assert res3.status_code == 200
+        assert "Data Deletion Instructions" in res3.text
+
+
