@@ -90,31 +90,9 @@ def create_app() -> FastAPI:
             }
         }
 
-    # ---- Data Deletion Instructions (Public Meta Compliance - GET & HEAD) ----
-    import os
-    from fastapi.responses import HTMLResponse
-    from fastapi.templating import Jinja2Templates
-
-    templates_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
-    templates_instance = Jinja2Templates(directory=templates_dir)
-
-    @app.get("/data-deletion", response_class=HTMLResponse, tags=["Legal"])
-    @app.head("/data-deletion", response_class=HTMLResponse, tags=["Legal"])
-    @app.get("/data-deletion.html", response_class=HTMLResponse, tags=["Legal"], include_in_schema=False)
-    @app.head("/data-deletion.html", response_class=HTMLResponse, tags=["Legal"], include_in_schema=False)
-    async def data_deletion_direct_endpoint(request: Request):
-        if request.method == "HEAD":
-            return HTMLResponse(content="", status_code=200, headers={"Content-Type": "text/html; charset=utf-8"})
-        return templates_instance.TemplateResponse(request=request, name="data-deletion.html")
-
-    @app.get("/privacy-policy", response_class=HTMLResponse, tags=["Legal"])
-    @app.head("/privacy-policy", response_class=HTMLResponse, tags=["Legal"])
-    async def privacy_policy_direct_endpoint(request: Request):
-        if request.method == "HEAD":
-            return HTMLResponse(content="", status_code=200, headers={"Content-Type": "text/html; charset=utf-8"})
-        return templates_instance.TemplateResponse(request=request, name="privacy-policy.html")
-
     # ---- Static Files & Web Dashboard Router ----
+    # NOTE: /data-deletion, /privacy-policy routes are served by dashboard/router.py (canonical).
+    import os
     from fastapi.staticfiles import StaticFiles
 
     static_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
