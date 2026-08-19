@@ -1,3 +1,4 @@
+import time
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -22,6 +23,7 @@ class AIService:
         self.repository = repository
 
     async def generate_ai_response(self, request: AIGenerateRequest) -> AIGenerateResponse:
+        service_start_time = time.time()
         try:
             # 1. Fetch farmer profile for context
             profile = await self.repository.get_farmer_profile(request.farmer_id)
@@ -65,7 +67,6 @@ class AIService:
             if rag_context_text:
                 full_system_prompt += f"\n\n{rag_context_text}"
 
-
             # 5. Fetch conversation history
             history_records = await self.repository.get_conversation_history(request.farmer_id)
             
@@ -85,15 +86,25 @@ class AIService:
                 system_prompt=full_system_prompt,
                 conversation_history=history,
                 user_message=request.message,
+                timeout_seconds=20,
             )
 
-            if ai_text is None:
+            if ai_text is None or not ai_text.strip():
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="AI provider timed out or returned no response."
+                    detail="AI provider timed out or returned empty response."
                 )
 
-            # 7. Automatic memory extraction from exchange
+            total_ai_time = time.time() - service_start_time
+            logger.info(
+                f"[AI SERVICE GENERATION SUCCESS]\n"
+                f"  Farmer ID    : {request.farmer_id}\n"
+                f"  Total Time   : {total_ai_time:.2f}s\n"
+                f"  Output Chars : {len(ai_text)}\n"
+                f"  Preview      : '{ai_text[:120]}...'"
+            )
+
+            # 7. Automatic memory extraction from exchange (runs safely & swiftly)
             try:
                 await mem_service.extract_and_update_memory(
                     farmer_id=request.farmer_id,
@@ -114,7 +125,8 @@ class AIService:
         except HTTPException:
             raise
         except Exception as e:
-            logger.exception(f"Error generating AI response: {e}")
+            elapsed = time.time() - service_start_time
+            logger.exception(f"[AI SERVICE ERROR] Failed generating AI response after {elapsed:.2f}s: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"An unexpected error occurred while communicating with the AI provider: {str(e)}"

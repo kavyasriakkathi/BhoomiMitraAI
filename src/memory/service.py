@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from typing import Optional, Dict, Any, List
 from uuid import UUID
 from datetime import datetime
@@ -128,14 +129,21 @@ class FarmerMemoryService:
                     memory.favorite_shops = list(current_shops)
                     updates_applied = True
 
-        # 2. LLM-assisted Memory Extraction
+        # 2. LLM-assisted Memory Extraction (snappy & resilient)
+        mem_llm_start = time.time()
         try:
+            logger.info(f"[MEMORY LLM EXTRACTION START] farmer_id={farmer_id}")
             prompt_input = f"Farmer Message: {user_message}\nAI Response: {ai_response}"
             extracted_json = await generate_response(
-            system_prompt=MEMORY_EXTRACTION_SYSTEM_PROMPT,
-            conversation_history=[],
-            user_message=prompt_input
-         )
+                system_prompt=MEMORY_EXTRACTION_SYSTEM_PROMPT,
+                conversation_history=[],
+                user_message=prompt_input,
+                timeout_seconds=8,
+                model_override="gemini-2.5-flash-lite",
+            )
+            mem_duration = time.time() - mem_llm_start
+            logger.info(f"[MEMORY LLM EXTRACTION SUCCESS] (took {mem_duration:.2f}s) for farmer_id={farmer_id}")
+
             if extracted_json:
                 # Clean codeblock wrappers if present
                 clean_json = extracted_json.strip()
@@ -204,7 +212,10 @@ class FarmerMemoryService:
                             updates_applied = True
 
         except Exception as e:
-            logger.warning(f"LLM memory extraction skipped for farmer {farmer_id}: {e}")
+            mem_duration = time.time() - mem_llm_start
+            logger.warning(
+                f"[MEMORY LLM EXTRACTION SKIPPED] farmer_id={farmer_id} after {mem_duration:.2f}s: {type(e).__name__} - {e}"
+            )
 
         memory.confidence_scores = confidence_map
         memory.last_updated = datetime.utcnow()
@@ -347,16 +358,22 @@ class FarmerMemoryService:
                 history_text.append(f"BhoomiMitra: {conv.ai_response}")
 
         transcript = "\n".join(history_text)
-        summary = await generate_response(
-            system_prompt=MEMORY_SUMMARIZATION_SYSTEM_PROMPT,
-            user_message=transcript
-        )
+        try:
+            summary = await generate_response(
+                system_prompt=MEMORY_SUMMARIZATION_SYSTEM_PROMPT,
+                conversation_history=[],
+                user_message=transcript,
+                timeout_seconds=10,
+                model_override="gemini-2.5-flash-lite",
+            )
 
-        if summary:
-            memory.conversation_summary = summary.strip()
-            memory.last_updated = datetime.utcnow()
-            await self.repository.save(memory)
-            return memory.conversation_summary
+            if summary:
+                memory.conversation_summary = summary.strip()
+                memory.last_updated = datetime.utcnow()
+                await self.repository.save(memory)
+                return memory.conversation_summary
+        except Exception as sum_err:
+            logger.warning(f"Failed to generate conversation summary for farmer {farmer_id}: {sum_err}")
 
         return memory.conversation_summary or "Summary unavailable."
 

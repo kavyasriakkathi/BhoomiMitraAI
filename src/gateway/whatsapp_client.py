@@ -5,6 +5,7 @@ Sends messages back to farmers via Meta's WhatsApp Cloud API.
 Handles text messages, retries on failure, and delivery logging.
 """
 
+import time
 import httpx
 from typing import Optional
 from src.config import get_settings
@@ -62,21 +63,26 @@ async def send_text_message(
     }
 
     logger.info(
-        f"WHATSAPP OUTBOUND CALL INITIATED:\n"
+        f"[WHATSAPP OUTBOUND START]\n"
         f"  URL             : {url}\n"
         f"  Phone Number ID : {settings.whatsapp_phone_number_id}\n"
         f"  Recipient Phone : {to_phone}\n"
-        f"  Message Length  : {len(message_text)} chars"
+        f"  Message Length  : {len(message_text)} chars\n"
+        f"  Message Preview : '{message_text[:100]}...'"
     )
+
+    total_wa_start = time.time()
 
     # Retry loop with exponential backoff
     for attempt in range(1, MAX_RETRIES + 1):
+        attempt_start = time.time()
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.post(url, headers=headers, json=payload)
 
+            duration = time.time() - attempt_start
             logger.info(
-                f"WHATSAPP OUTBOUND RESPONSE (Attempt {attempt}/{MAX_RETRIES}):\n"
+                f"[WHATSAPP OUTBOUND RESPONSE] (Attempt {attempt}/{MAX_RETRIES}, took {duration:.2f}s):\n"
                 f"  HTTP Status Code: {response.status_code}\n"
                 f"  Response Body   : {response.text}"
             )
@@ -84,8 +90,9 @@ async def send_text_message(
             if response.status_code == 200:
                 data = response.json()
                 wa_message_id = data.get("messages", [{}])[0].get("id")
+                total_duration = time.time() - total_wa_start
                 logger.info(
-                    f"WHATSAPP OUTBOUND SUCCESS: Message delivered to {to_phone} "
+                    f"[WHATSAPP OUTBOUND SUCCESS] Delivered to {to_phone} in {total_duration:.2f}s "
                     f"(wa_id={wa_message_id})"
                 )
                 return wa_message_id
@@ -132,8 +139,9 @@ async def send_text_message(
             return None
 
         except httpx.TimeoutException:
+            duration = time.time() - attempt_start
             logger.warning(
-                f"[WHATSAPP OUTBOUND TIMEOUT] Timeout sending to {to_phone} (attempt {attempt}/{MAX_RETRIES})."
+                f"[WHATSAPP OUTBOUND TIMEOUT] Timeout after {duration:.2f}s sending to {to_phone} (attempt {attempt}/{MAX_RETRIES})."
             )
             if attempt < MAX_RETRIES:
                 import asyncio
@@ -142,10 +150,12 @@ async def send_text_message(
             return None
 
         except Exception as e:
-            logger.exception(f"[WHATSAPP OUTBOUND UNEXPECTED ERROR] Failed sending message to {to_phone}: {e}")
+            duration = time.time() - attempt_start
+            logger.exception(f"[WHATSAPP OUTBOUND UNEXPECTED ERROR] Failed sending message to {to_phone} after {duration:.2f}s: {e}")
             return None
 
-    logger.error(f"[WHATSAPP OUTBOUND EXHAUSTED] All {MAX_RETRIES} retries exhausted for {to_phone}.")
+    total_duration = time.time() - total_wa_start
+    logger.error(f"[WHATSAPP OUTBOUND EXHAUSTED] All {MAX_RETRIES} retries exhausted for {to_phone} after {total_duration:.2f}s.")
     return None
 
 
