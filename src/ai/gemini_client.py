@@ -52,7 +52,7 @@ async def generate_response(
 
     try:
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash-latest",
+            model_name="gemini-3.6-flash",
             system_instruction=system_prompt,
             generation_config=genai.GenerationConfig(
                 temperature=0.4,        # Low temperature for factual farming advice
@@ -104,7 +104,7 @@ async def generate_multimodal_response(
 
     try:
         model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash-latest",
+            model_name="gemini-3.6-flash",
             system_instruction=system_prompt,
             generation_config=genai.GenerationConfig(
                 temperature=0.4,
