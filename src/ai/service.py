@@ -77,7 +77,9 @@ class AIService:
                 if record.user_message:
                     history.append({"role": "user", "parts": record.user_message})
                 if record.ai_response:
-                    history.append({"role": "model", "parts": record.ai_response})
+                    # Clean shop section from the history to prevent LLM contamination
+                    clean_response = record.ai_response.split("Available Nearby Shops:")[0].split("🏬")[0].strip()
+                    history.append({"role": "model", "parts": clean_response})
 
             # 6. Call Gemini API
             logger.info(f"Processing AI request for farmer {request.farmer_id}: '{request.message[:80]}...'")
@@ -144,6 +146,8 @@ async def process_text_message(
     repo = AIRepository(db)
     service = AIService(repo)
     
+    logger.info(f"[PROCESS MSG START] Farmer: {farmer.id} | Query: '{conversation.user_message}'")
+    
     request = AIGenerateRequest(
         farmer_id=farmer.id,
         conversation_id=conversation.id,
@@ -153,6 +157,7 @@ async def process_text_message(
     try:
         response = await service.generate_ai_response(request)
         ai_response_text = response.response_text
+        logger.info(f"[PROCESS MSG RAW GEMINI] Length: {len(ai_response_text) if ai_response_text else 0} | Response: '{ai_response_text}'")
     except HTTPException:
         logger.warning(f"AI unavailable for farmer {farmer.id}. Using fallback.")
         ai_response_text = get_fallback_response(farmer.preferred_language)
@@ -160,11 +165,14 @@ async def process_text_message(
     # Enrich with nearby shop inventory recommendations if products match
     try:
         from src.shops.service import enrich_response_with_shops
+        logger.info("[PROCESS MSG] Invoking enrich_response_with_shops()")
         ai_response_text = await enrich_response_with_shops(
             db, conversation.user_message or "", ai_response_text
         )
     except Exception as err:
         logger.warning(f"Failed to enrich response with shops: {err}")
+
+    logger.info(f"[PROCESS MSG FINAL] Length: {len(ai_response_text)} | Final response immediately before DB save: '{ai_response_text}'")
 
     conversation.ai_response = ai_response_text
     db.add(conversation)
@@ -216,7 +224,9 @@ async def process_image_message(
         if record.user_message:
             history.append({"role": "user", "parts": record.user_message})
         if record.ai_response:
-            history.append({"role": "model", "parts": record.ai_response})
+            # Clean shop section from the history to prevent LLM contamination
+            clean_response = record.ai_response.split("Available Nearby Shops:")[0].split("🏬")[0].strip()
+            history.append({"role": "model", "parts": clean_response})
             
     # 3. Call Gemini Multimodal
     from src.ai.gemini_client import generate_multimodal_response

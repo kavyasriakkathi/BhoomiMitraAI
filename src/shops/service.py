@@ -168,25 +168,67 @@ async def enrich_response_with_shops(db, query_text: str, ai_response: str) -> s
     from src.shops.repository import ShopRepository
     shop_repo = ShopRepository(db)
 
-    # Keywords to trigger auto shop lookup
-    common_keywords = [
-        "urea", "dap", "neem oil", "imidacloprid", "pesticide", "fertilizer",
-        "fungicide", "herbicide", "micronutrient", "seeds", "bayer", "iffco", "coromandel"
-    ]
+    # Map terms (including Telugu equivalents) to English product terms for DB query matching
+    product_mapping = {
+        "urea": "urea",
+        "యూరియా": "urea",
+        "dap": "dap",
+        "డిఎపి": "dap",
+        "డి.ఎ.పి": "dap",
+        "neem oil": "neem oil",
+        "వేప నూనె": "neem oil",
+        "imidacloprid": "imidacloprid",
+        "ఇమిడాక్లోప్రిడ్": "imidacloprid",
+        "pesticide": "pesticide",
+        "పురుగుమందు": "pesticide",
+        "fertilizer": "fertilizer",
+        "ఎరువు": "fertilizer",
+        "ఎరువులు": "fertilizer",
+        "fungicide": "fungicide",
+        "శిలీంద్ర సంహారిణి": "fungicide",
+        "herbicide": "herbicide",
+        "కలుపు సంహారిణి": "herbicide",
+        "micronutrient": "micronutrient",
+        "సూక్ష్మపోషకాలు": "micronutrient",
+        "seeds": "seeds",
+        "విత్తనాలు": "seeds",
+        "bayer": "bayer",
+        "iffco": "iffco",
+        "coromandel": "coromandel"
+    }
 
-    matched_kw = None
     query_lower = query_text.lower()
     response_lower = ai_response.lower()
 
-    for kw in common_keywords:
+    logger.info(f"[ENRICH SHOPS] Called with query_text: '{query_text}' | ai_response: '{ai_response[:100]}...'")
+
+    # Check if query has explicit search/purchase intent
+    intent_keywords = [
+        "buy", "purchase", "where", "shop", "store", "avail", "price", "cost", "rate", "stock", "near", "locate", "sell", "order",
+        "కొనాలి", "ఎక్కడ", "ధర", "స్టాక్", "షాప్", "దొరుకుతుంది", "అందుబాటు", "రేటు"
+    ]
+    
+    matched_intent_kws = [kw for kw in intent_keywords if kw in query_lower]
+    has_intent = len(matched_intent_kws) > 0
+    
+    logger.info(f"[ENRICH SHOPS] Intent check results: has_intent={has_intent} | matched_intent_kws={matched_intent_kws}")
+            
+    if not has_intent:
+        logger.info("[ENRICH SHOPS] Bypassing shop enrichment - No purchase/shop intent detected.")
+        return ai_response
+
+    matched_kw = None
+    for kw, eng_kw in product_mapping.items():
         if kw in query_lower or kw in response_lower:
-            matched_kw = kw
+            matched_kw = eng_kw
             break
 
     if not matched_kw:
+        logger.info("[ENRICH SHOPS] Bypassing shop enrichment - No product keyword matched.")
         return ai_response
 
     matches = await shop_repo.search_shops_by_product(matched_kw)
+    logger.info(f"[ENRICH SHOPS] DB Shop matches found for '{matched_kw}': {len(matches) if matches else 0}")
     if not matches:
         return ai_response
 
@@ -208,4 +250,6 @@ async def enrich_response_with_shops(db, query_text: str, ai_response: str) -> s
         if qty_match:
             shop_section += f"  🛒 Order Request ({qty} {item.unit}s): ₹{total_est:g} - Order sent to Shop Owner!\n"
 
-    return ai_response + shop_section.rstrip()
+    final_result = ai_response + shop_section.rstrip()
+    logger.info(f"[ENRICH SHOPS] Enrichment success. Final response: '{final_result[:150]}...' (Total length: {len(final_result)})")
+    return final_result
