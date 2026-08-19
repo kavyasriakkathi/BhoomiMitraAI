@@ -355,7 +355,9 @@ class FarmerMemoryService:
             if conv.user_message:
                 history_text.append(f"Farmer: {conv.user_message}")
             if conv.ai_response:
-                history_text.append(f"BhoomiMitra: {conv.ai_response}")
+                # Clean shop section from the history to prevent LLM contamination
+                clean_response = conv.ai_response.split("Available Nearby Shops:")[0].split("🏬")[0].strip()
+                history_text.append(f"BhoomiMitra: {clean_response}")
 
         transcript = "\n".join(history_text)
         try:
