@@ -132,10 +132,10 @@ class FarmerMemoryService:
         try:
             prompt_input = f"Farmer Message: {user_message}\nAI Response: {ai_response}"
             extracted_json = await generate_response(
-                system_prompt=MEMORY_EXTRACTION_SYSTEM_PROMPT,
-                user_message=prompt_input
-            )
-
+            system_prompt=MEMORY_EXTRACTION_SYSTEM_PROMPT,
+            conversation_history=[],
+            user_message=prompt_input
+         )
             if extracted_json:
                 # Clean codeblock wrappers if present
                 clean_json = extracted_json.strip()
