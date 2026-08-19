@@ -139,7 +139,7 @@ class FarmerMemoryService:
                 conversation_history=[],
                 user_message=prompt_input,
                 timeout_seconds=8,
-                model_override="gemini-2.5-flash-lite",
+                model_override="gemini-3.5-flash-lite",
             )
             mem_duration = time.time() - mem_llm_start
             logger.info(f"[MEMORY LLM EXTRACTION SUCCESS] (took {mem_duration:.2f}s) for farmer_id={farmer_id}")
@@ -364,7 +364,7 @@ class FarmerMemoryService:
                 conversation_history=[],
                 user_message=transcript,
                 timeout_seconds=10,
-                model_override="gemini-2.5-flash-lite",
+                model_override="gemini-3.5-flash-lite",
             )
 
             if summary:

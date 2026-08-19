@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # AI
     openai_api_key: str = Field(default="")
     google_gemini_api_key: str = Field(default="")
-    gemini_model: str = Field(default="gemini-2.5-flash")
+    gemini_model: str = Field(default="gemini-3.6-flash")
     ai_confidence_threshold: float = Field(default=0.75)
 
     # Google Cloud
