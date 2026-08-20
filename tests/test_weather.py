@@ -263,3 +263,194 @@ async def test_openweather_client_no_key_production():
         result = await client_obj.fetch_weather(district="Warangal", state="Telangana")
 
     assert result is None
+
+
+# ===========================================================================
+# INTEGRATION TESTS — enrich_response_with_weather() full pipeline
+# ===========================================================================
+# These tests verify the enrich_response_with_weather() orchestration
+# function end-to-end with mocked DB, no real API key, no Redis, and no
+# WhatsApp credentials.
+# ===========================================================================
+
+
+def _make_mock_farmer(farmer_id=None, language="en"):
+    """Helper: lightweight mock Farmer with id and preferred_language."""
+    farmer = MagicMock()
+    farmer.id = farmer_id or uuid4()
+    farmer.preferred_language = language
+    return farmer
+
+
+def _make_normalised_weather_dict(location_name="Warangal"):
+    """Helper: normalised dict matching OpenWeatherClient.fetch_weather() output."""
+    tomorrow_str = (NOW + timedelta(days=1)).strftime("%Y-%m-%d 12:00:00")
+    return {
+        "location_name": location_name,
+        "latitude": 17.9689,
+        "longitude": 79.5941,
+        "current": {
+            "temp": 30.2,
+            "feels_like": 32.5,
+            "humidity": 65,
+            "wind_speed": 12.0,
+            "description": "Partly Cloudy",
+            "condition_code": 802,
+        },
+        "forecast": [{
+            "dt_txt": tomorrow_str,
+            "temp": 28.5,
+            "humidity": 70,
+            "description": "Clear Sky",
+            "condition_code": 800,
+        }],
+        "data_available": True,
+        "is_live": False,
+        "source_note": "Simulated Weather (Local Fallback)",
+    }
+
+
+def _mock_db_with_location(memory_gps=None, memory_district=None, memory_state=None,
+                            profile_district=None, profile_state=None):
+    """Helper: create a mock AsyncSession with FarmerMemory and FarmerProfile results."""
+    mock_memory = MagicMock()
+    mock_memory.gps_coordinates = memory_gps or {}
+    mock_memory.district = memory_district
+    mock_memory.state = memory_state
+
+    mock_profile = MagicMock()
+    mock_profile.district = profile_district
+    mock_profile.state = profile_state
+
+    memory_result = MagicMock()
+    memory_result.scalar_one_or_none.return_value = mock_memory
+    profile_result = MagicMock()
+    profile_result.scalar_one_or_none.return_value = mock_profile
+
+    db = AsyncMock()
+    db.execute = AsyncMock(side_effect=[memory_result, profile_result])
+    return db
+
+
+# ---------------------------------------------------------------------------
+# 12. Integration: GPS from FarmerMemory resolves weather
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_enrich_weather_gps_from_farmer_memory():
+    """Weather enrichment appends forecast when FarmerMemory has GPS coordinates."""
+    from src.weather.service import enrich_response_with_weather
+    from src.weather.openweather_client import OpenWeatherClient
+
+    farmer = _make_mock_farmer(language="en")
+    db = _mock_db_with_location(memory_gps={"latitude": 17.385, "longitude": 78.4867})
+    original = "Here is some farming advice."
+
+    with patch.object(
+        OpenWeatherClient, "fetch_weather",
+        new_callable=AsyncMock,
+        return_value=_make_normalised_weather_dict("Hyderabad"),
+    ):
+        result = await enrich_response_with_weather(
+            db, "What is the weather today?", original, farmer
+        )
+
+    assert original in result, "Original AI response must be preserved"
+    assert "Weather Information" in result, "English weather title must be present"
+    assert "30.2" in result, "Temperature from mock data must appear"
+    assert result.startswith(original), "Weather block must be appended, not prepended"
+
+
+# ---------------------------------------------------------------------------
+# 13. Integration: District from FarmerProfile resolves weather (Telugu)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_enrich_weather_district_from_farmer_profile():
+    """Weather enrichment resolves district from FarmerProfile and responds in Telugu."""
+    from src.weather.service import enrich_response_with_weather
+    from src.weather.openweather_client import OpenWeatherClient
+
+    farmer = _make_mock_farmer(language="te")
+    db = _mock_db_with_location(profile_district="Warangal", profile_state="Telangana")
+    original = "వ్యవసాయ సలహా ఇక్కడ ఉంది."
+
+    with patch.object(
+        OpenWeatherClient, "fetch_weather",
+        new_callable=AsyncMock,
+        return_value=_make_normalised_weather_dict("Warangal"),
+    ):
+        result = await enrich_response_with_weather(
+            db, "రేపు వర్షం పడుతుందా?", original, farmer
+        )
+
+    assert original in result, "Original AI response must be preserved"
+    assert "వాతావరణ సమాచారం" in result, "Telugu weather title must be present"
+    assert "ఉష్ణోగ్రత" in result, "Telugu temperature label must be present"
+
+
+# ---------------------------------------------------------------------------
+# 14. Integration: No location — returns original response unchanged
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_enrich_weather_no_location_returns_original():
+    """When farmer has no location data, enrichment returns AI response unchanged."""
+    from src.weather.service import enrich_response_with_weather
+
+    farmer = _make_mock_farmer()
+    db = _mock_db_with_location()  # No GPS, no district
+    original = "Here is some farming advice."
+
+    result = await enrich_response_with_weather(
+        db, "Will it rain tomorrow?", original, farmer
+    )
+
+    assert result == original, "Response must be unchanged when no location is available"
+
+
+# ---------------------------------------------------------------------------
+# 15. Integration: API failure does not crash — returns original response
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_enrich_weather_api_failure_returns_original():
+    """When weather API raises an exception, enrichment returns original response safely."""
+    from src.weather.service import enrich_response_with_weather
+    from src.weather.openweather_client import OpenWeatherClient
+
+    farmer = _make_mock_farmer()
+    db = _mock_db_with_location(memory_gps={"latitude": 17.385, "longitude": 78.4867})
+    original = "Here is some farming advice."
+
+    with patch.object(
+        OpenWeatherClient, "fetch_weather",
+        new_callable=AsyncMock,
+        side_effect=Exception("Simulated API connection failure"),
+    ):
+        result = await enrich_response_with_weather(
+            db, "What is the weather forecast?", original, farmer
+        )
+
+    assert result == original, "Original response must survive an API failure"
+
+
+# ---------------------------------------------------------------------------
+# 16. Integration: Non-weather query skips enrichment entirely
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_enrich_weather_non_weather_query_skips():
+    """Non-weather query returns AI response unchanged and makes no DB queries."""
+    from src.weather.service import enrich_response_with_weather
+
+    farmer = _make_mock_farmer()
+    db = AsyncMock()
+    original = "నిమ్మ నూనె వాడి తెగులు నివారణ చేయండి."
+
+    result = await enrich_response_with_weather(
+        db, "టమాటా తెగులు నివారణకు ఏ మందు వాడాలి?", original, farmer
+    )
+
+    assert result == original, "Response must be unchanged for non-weather queries"
+    db.execute.assert_not_called()
