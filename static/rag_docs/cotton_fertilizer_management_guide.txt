@@ -1,0 +1,32 @@
+Title: PJTSAU & ICAR-CICR Cotton Fertilizer and Nutrient Management Guide
+Source: PJTSAU & ICAR-CICR Package of Practices
+Crop: Cotton
+Category: Fertilizer Management
+Target Regions: Telangana, Andhra Pradesh, and All India Cotton Zones
+
+1. Recommended Fertilizer Doses for Hybrid and Bt Cotton:
+- Standard NPK recommendation: 120:60:60 kg N:P2O5:K2O per hectare (equivalent to 48:24:24 kg N:P:K per acre) for rainfed/irrigated hybrid cotton.
+- Total Nitrogen (N) requirement per acre: 48 kg Nitrogen, which equals approximately 105 kg of Urea per acre split across 3 to 4 stages.
+
+2. Stage-Wise Nitrogen (Urea) Fertilizer Application Schedule (Per Acre):
+- Basal Application (At Sowing / 0 DAS):
+  Apply 20% of Nitrogen (20 to 25 kg Urea per acre) along with the full dose of Phosphorus (DAP or Single Super Phosphate) and 25% of Potash (MOP).
+- Vegetative Stage / Square Formation (20 to 30 Days After Sowing):
+  First top dressing: Apply 25 to 30 kg Urea per acre in moist soil.
+- Flowering Stage / Peak Flowering (45 to 60 Days After Sowing):
+  Second top dressing: Apply 25 to 30 kg Urea per acre along with 10 to 15 kg MOP (Muriate of Potash) per acre. This provides vital nitrogen and potassium support during peak flowering to prevent square and flower drop and sustain boll formation.
+- Boll Development Stage (70 to 80 Days After Sowing):
+  Third top dressing: Apply 20 to 25 kg Urea per acre to enhance boll filling and lint quality.
+
+3. Fertilizer Application Method:
+- Soil Placement / Pocketing: Place fertilizer 5 to 7 cm away from the plant stem and 5 cm deep into the soil, followed by light earthing up.
+- Avoid surface broadcasting on dry soil or dusting over leaves.
+- Apply Urea top dressing only when the soil has adequate moisture after rain or irrigation.
+
+4. Foliar Spray during Flowering & Boll Formation:
+- During peak flowering to boll formation (60 to 90 DAS), spray 2% Urea solution (20 g Urea per litre of water) or 1% Potassium Nitrate (13-0-45 at 10 g per litre of water) at 15-day intervals (2 to 3 sprays) to prevent boll shedding.
+
+5. Important Agronomic & Safety Precautions:
+- Do not apply excessive Urea, as excess nitrogen leads to lush vegetative growth and attracts sucking pests (aphids, jassids, whiteflies).
+- Always base actual fertilizer applications on Soil Health Card (SHC) recommendations.
+- Consult the local Mandal Agricultural Extension Officer (AEO) or Krishi Vigyan Kendra (KVK) for farm-specific micro-nutrient guidance.

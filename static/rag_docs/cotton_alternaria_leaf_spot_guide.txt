@@ -1,0 +1,56 @@
+Title: Cotton Alternaria Leaf Spot Disease Management Guide
+Crop: Cotton (Gossypium hirsutum / Gossypium spp.)
+Disease: Alternaria Leaf Spot
+Causal Agents: Alternaria macrospora / Alternaria alternata
+Disease Type: Fungal disease
+Target Region: Telangana, Andhra Pradesh, and All India Cotton Zones
+
+1. Symptoms:
+- Small dark-brown to reddish-brown circular or irregular necrotic spots on cotton leaves.
+- Lesions may show concentric rings or a target-board appearance.
+- Spots may have a yellowish chlorotic halo surrounding the necrotic center.
+- Severe infection can cause spots to merge, leading to leaf blighting, premature yellowing, and defoliation.
+
+2. Identification Guidance:
+- Inspect lower and middle canopy leaves where the disease first manifests under humid, cloudy, or rainy weather conditions.
+- Look for target-like concentric rings on leaf spots with yellow halos.
+
+3. Cultural and Agronomic Management:
+- Remove and properly dispose of infected plant debris and fallen leaves after harvest to reduce fungal inoculum.
+- Maintain balanced NPK nutrition across all crop growth stages.
+- Avoid potassium deficiency because nutritional imbalance can increase disease severity and susceptibility to Alternaria infection.
+
+4. Fungicide Management:
+- Fungicide application should begin at the first signs of leaf spot where recommended by an agricultural authority or registered product label.
+- Repeat application intervals must follow verified agricultural recommendations and registered product labels.
+- Do not recommend unnecessary repeated spraying.
+
+5. Verified Dosage Information Provided for this Knowledge Entry:
+- Mancozeb 75% WP:
+  Dosage: 2.5 to 3.0 g per litre of water.
+  Approximate field quantity: 500 to 600 g per acre in 200 L water.
+- Copper Oxychloride 50% WP:
+  Dosage: 3.0 g per litre of water.
+  Approximate field quantity: 600 g per acre in 200 L water.
+- Propiconazole 25% EC:
+  Dosage: 1.0 ml per litre of water.
+  Approximate field quantity: 200 ml per acre in 200 L water.
+- Pyraclostrobin 20% WG:
+  Dosage: 1.0 g per litre of water.
+  Approximate field quantity: approximately 200 g per acre in 200 L water.
+- Azoxystrobin + Difenoconazole:
+  Dosage: 1.0 ml per litre of water.
+  Approximate field quantity: approximately 200 ml per acre in 200 L water.
+
+6. Application Precautions & Safety:
+- Follow current registered product label directions and applicable CIBRC-approved guidelines.
+- Use appropriate protective equipment while handling and spraying fungicides.
+- Spray during calm morning or late afternoon hours ensuring uniform coverage of both leaf surfaces.
+- If the exact commercial product, formulation, concentration, crop stage, or local recommendation cannot be verified, the AI must not guess.
+- Advise consultation with a local Agricultural Extension Officer (AEO) or Krishi Vigyan Kendra (KVK) when verification is required.
+
+7. Source Attribution & Verification Notice:
+- ICAR — Central Institute for Cotton Research (CICR), cotton disease management/advisory material.
+- Professor Jayashankar Telangana State Agricultural University (PJTSAU), Cotton Package of Practices.
+- Acharya N.G. Ranga Agricultural University (ANGRAU), Integrated Pest and Disease Management in Cotton.
+- Verification Notice: Treat these dosage values as trusted knowledge for this knowledge entry. Do not create additional pesticide names, concentrations, mixtures, dosage values, or tank-mix instructions beyond verified sources.

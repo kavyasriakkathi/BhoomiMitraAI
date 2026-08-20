@@ -1,0 +1,66 @@
+# Python Bytecode & Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.hypothesis/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.cert
+*.crt
+*.pfx
+secrets/
+
+# Databases & Local Storage
+*.sqlite
+*.sqlite3
+*.db
+dump.rdb
+
+# Logs
+*.log
+logs/
+
+# Build & Packaging
+dist/
+build/
+*.egg-info/
+eggs/
+*.egg
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.fleet/
+
+# OS Specific
+.DS_Store
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Temporary / Scratch
+scratch/
+tmp/
+temp/
