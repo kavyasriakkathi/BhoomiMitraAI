@@ -120,6 +120,7 @@ def create_app() -> FastAPI:
     from src.rag.router import router as rag_router
     from src.market.router import router as market_router
     from src.weather.router import router as weather_router
+    from src.escalation.router import router as escalation_router
 
     app.include_router(gateway_router, prefix="/webhook", tags=["WhatsApp"])
     app.include_router(farmers_router, prefix="/farmers", tags=["Farmers"])
@@ -137,6 +138,7 @@ def create_app() -> FastAPI:
     app.include_router(rag_router, prefix="/rag", tags=["RAG Knowledge Engine"])
     app.include_router(market_router, prefix="/market", tags=["Market Prices"])
     app.include_router(weather_router, prefix="/weather", tags=["Weather Forecast"])
+    app.include_router(escalation_router, prefix="/escalation", tags=["Expert Escalation"])
     app.include_router(ai_router)
 
 

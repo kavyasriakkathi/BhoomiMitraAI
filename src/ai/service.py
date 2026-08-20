@@ -202,6 +202,16 @@ async def process_text_message(
     except Exception as scheme_err:
         logger.warning(f"Failed to enrich response with schemes: {scheme_err}")
 
+    # Enrich with expert escalation ticket if farmer requests human/specialist assistance
+    try:
+        from src.escalation.service import enrich_response_with_escalation
+        logger.info("[PROCESS MSG] Invoking enrich_response_with_escalation()")
+        ai_response_text = await enrich_response_with_escalation(
+            db, conversation.user_message or "", ai_response_text, farmer
+        )
+    except Exception as esc_err:
+        logger.warning(f"Failed to enrich response with escalation: {esc_err}")
+
     logger.info(f"[PROCESS MSG FINAL] Length: {len(ai_response_text)} | Final response immediately before DB save: '{ai_response_text}'")
 
     conversation.ai_response = ai_response_text
