@@ -182,6 +182,16 @@ async def process_text_message(
     except Exception as mkt_err:
         logger.warning(f"Failed to enrich response with market prices: {mkt_err}")
 
+    # Enrich with weather forecast data if farmer asks about weather
+    try:
+        from src.weather.service import enrich_response_with_weather
+        logger.info("[PROCESS MSG] Invoking enrich_response_with_weather()")
+        ai_response_text = await enrich_response_with_weather(
+            db, conversation.user_message or "", ai_response_text, farmer
+        )
+    except Exception as weather_err:
+        logger.warning(f"Failed to enrich response with weather: {weather_err}")
+
     logger.info(f"[PROCESS MSG FINAL] Length: {len(ai_response_text)} | Final response immediately before DB save: '{ai_response_text}'")
 
     conversation.ai_response = ai_response_text

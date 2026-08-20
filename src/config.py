@@ -60,6 +60,14 @@ class Settings(BaseSettings):
     )
     market_price_cache_ttl_seconds: int = Field(default=21600)  # 6 hours
 
+    # Weather (OpenWeatherMap)
+    # OPENWEATHER_API_KEY is OPTIONAL. If empty, the client returns mock weather forecasts.
+    openweather_api_key: str = Field(default="")
+    openweather_api_url: str = Field(
+        default="https://api.openweathermap.org/data/2.5/forecast"
+    )
+    weather_cache_ttl_seconds: int = Field(default=1800)  # 30 minutes
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

@@ -27,3 +27,5 @@ services:
         sync: false
       - key: DATA_GOV_API_KEY
         sync: false
+      - key: OPENWEATHER_API_KEY
+        sync: false

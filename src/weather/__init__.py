@@ -1,0 +1,1 @@
+# BhoomiMitra AI — Weather Module
