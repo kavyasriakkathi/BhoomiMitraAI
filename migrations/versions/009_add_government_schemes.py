@@ -35,8 +35,8 @@ def upgrade():
         sqa.Column('application_deadline', sqa.DateTime(), nullable=True),
         sqa.Column('official_portal_url', sqa.String(length=500), nullable=True),
         sqa.Column('is_active', sqa.Boolean(), server_default='true'),
-        sqa.Column('created_at', sqa.DateTime(), server_default=sqa.text('now()')),
-        sqa.Column('updated_at', sqa.DateTime(), server_default=sqa.text('now()'))
+        sqa.Column('created_at', sqa.DateTime(), server_default=sqa.text('CURRENT_TIMESTAMP')),
+        sqa.Column('updated_at', sqa.DateTime(), server_default=sqa.text('CURRENT_TIMESTAMP'))
     )
 
     op.create_table(
@@ -46,8 +46,8 @@ def upgrade():
         sqa.Column('scheme_id', postgresql.UUID(as_uuid=True), sqa.ForeignKey('government_schemes.id'), nullable=False),
         sqa.Column('status', sqa.String(length=50), server_default='Eligible'),
         sqa.Column('notes', sqa.Text(), nullable=True),
-        sqa.Column('created_at', sqa.DateTime(), server_default=sqa.text('now()')),
-        sqa.Column('updated_at', sqa.DateTime(), server_default=sqa.text('now()'))
+        sqa.Column('created_at', sqa.DateTime(), server_default=sqa.text('CURRENT_TIMESTAMP')),
+        sqa.Column('updated_at', sqa.DateTime(), server_default=sqa.text('CURRENT_TIMESTAMP'))
     )
 
 

@@ -7,15 +7,14 @@ from src.config import get_settings
 client = TestClient(app)
 
 
-def test_webhook_verification_success():
-    settings = get_settings()
-    token = settings.whatsapp_verify_token or "bhoomimitra_verify_2026"
-
+@patch("src.gateway.router.get_settings")
+def test_webhook_verification_success(mock_get_settings):
+    mock_get_settings.return_value.whatsapp_verify_token = "bhoomimitra_verify_2026"
     response = client.get(
         "/webhook/whatsapp",
         params={
             "hub.mode": "subscribe",
-            "hub.verify_token": token,
+            "hub.verify_token": "bhoomimitra_verify_2026",
             "hub.challenge": "115820120",
         },
     )

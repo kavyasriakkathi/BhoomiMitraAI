@@ -1,11 +1,15 @@
 import asyncio
 import uuid
 from sqlalchemy import select
-from src.core.database import AsyncSessionLocal
+from src.core.database import AsyncSessionLocal, engine, Base
+import src.core.models
 from src.core.models import Farmer, FarmerProfile, Conversation, Expert
 
 async def verify_crud():
     print("Starting DB CRUD Verification...")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
     async with AsyncSessionLocal() as session:
         try:
             # 1. Create Expert

@@ -25,3 +25,5 @@ services:
         sync: false
       - key: WHATSAPP_APP_SECRET
         sync: false
+      - key: DATA_GOV_API_KEY
+        sync: false

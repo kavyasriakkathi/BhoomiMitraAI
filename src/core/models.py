@@ -306,3 +306,30 @@ class SchemeApplication(Base):
     scheme = relationship("GovernmentScheme", back_populates="applications")
 
 
+class MarketPrice(Base):
+    """Daily mandi/market commodity price record from Agmarknet or manual seeding."""
+    __tablename__ = "market_prices"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    # Commodity info
+    commodity = Column(String(100), nullable=False, index=True)          # e.g. "Tomato"
+    commodity_telugu = Column(String(100), nullable=True)                # e.g. "టమాటా"
+
+    # Market/location info
+    market_name = Column(String(150), nullable=False, index=True)        # e.g. "Warangal Mandi"
+    district = Column(String(100), nullable=False, index=True)           # e.g. "Warangal"
+    state = Column(String(100), nullable=False, index=True)              # e.g. "Telangana"
+
+    # Price data (all in Rs/quintal by default)
+    min_price = Column(Float, nullable=False)
+    max_price = Column(Float, nullable=False)
+    modal_price = Column(Float, nullable=False)                          # Most common traded price
+    unit = Column(String(20), nullable=False, default="Quintal")
+
+    # Metadata
+    price_date = Column(DateTime, nullable=False, index=True)            # The date the price is valid for
+    source = Column(String(50), nullable=False, default="agmarknet_api") # "agmarknet_api" or "manual_seed"
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

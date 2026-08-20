@@ -172,6 +172,16 @@ async def process_text_message(
     except Exception as err:
         logger.warning(f"Failed to enrich response with shops: {err}")
 
+    # Enrich with mandi/market price data if farmer asks about prices
+    try:
+        from src.market.service import enrich_response_with_market_prices
+        logger.info("[PROCESS MSG] Invoking enrich_response_with_market_prices()")
+        ai_response_text = await enrich_response_with_market_prices(
+            db, conversation.user_message or "", ai_response_text, farmer
+        )
+    except Exception as mkt_err:
+        logger.warning(f"Failed to enrich response with market prices: {mkt_err}")
+
     logger.info(f"[PROCESS MSG FINAL] Length: {len(ai_response_text)} | Final response immediately before DB save: '{ai_response_text}'")
 
     conversation.ai_response = ai_response_text

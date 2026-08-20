@@ -52,6 +52,14 @@ class Settings(BaseSettings):
     expert_whatsapp_group_id: str = Field(default="")
     escalation_timeout_minutes: int = Field(default=30)
 
+    # Market Prices (Agmarknet / data.gov.in)
+    # DATA_GOV_API_KEY is OPTIONAL. If empty, the feature uses only the local DB fallback.
+    data_gov_api_key: str = Field(default="")
+    agmarknet_api_url: str = Field(
+        default="https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
+    )
+    market_price_cache_ttl_seconds: int = Field(default=21600)  # 6 hours
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
