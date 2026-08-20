@@ -160,96 +160,324 @@ class ShopService:
         )
 
 
-async def enrich_response_with_shops(db, query_text: str, ai_response: str) -> str:
-    """
-    Auto-detect product recommendations or shop search intent in the conversation
-    and append nearby shop availability & prices.
-    """
-    from src.shops.repository import ShopRepository
-    shop_repo = ShopRepository(db)
 
-    # Map terms (including Telugu equivalents) to English product terms for DB query matching
-    product_mapping = {
-        "urea": "urea",
-        "యూరియా": "urea",
-        "dap": "dap",
-        "డిఎపి": "dap",
-        "డి.ఎ.పి": "dap",
-        "neem oil": "neem oil",
-        "వేప నూనె": "neem oil",
-        "imidacloprid": "imidacloprid",
-        "ఇమిడాక్లోప్రిడ్": "imidacloprid",
-        "pesticide": "pesticide",
-        "పురుగుమందు": "pesticide",
-        "fertilizer": "fertilizer",
-        "ఎరువు": "fertilizer",
-        "ఎరువులు": "fertilizer",
-        "fungicide": "fungicide",
-        "శిలీంద్ర సంహారిణి": "fungicide",
-        "herbicide": "herbicide",
-        "కలుపు సంహారిణి": "herbicide",
-        "micronutrient": "micronutrient",
-        "సూక్ష్మపోషకాలు": "micronutrient",
-        "seeds": "seeds",
-        "విత్తనాలు": "seeds",
-        "bayer": "bayer",
-        "iffco": "iffco",
-        "coromandel": "coromandel"
-    }
+# ---------------------------------------------------------------------------
+# Intent Detection Keywords
+# ---------------------------------------------------------------------------
 
+_SHOP_INTENT_KEYWORDS_EN = {
+    "buy", "purchase", "where", "shop", "shops", "store", "stores",
+    "avail", "available", "availability", "price", "prices", "cost",
+    "rate", "rates", "stock", "near", "nearby", "locate", "dealer",
+    "dealers", "order", "get", "fertilizer shop", "pesticide shop",
+}
+
+_SHOP_INTENT_KEYWORDS_TE = {
+    "కొనాలి", "ఎక్కడ", "ధర", "ధరలు", "స్టాక్", "షాప్", "షాపులు",
+    "దొరుకుతుంది", "దొరుకుతాయి", "అందుబాటు", "రేటు", "డీలర్",
+    "దుకాణం", "దుకాణాలు", "ఎరువుల షాప్", "పురుగుమందుల షాప్",
+}
+
+# Product keyword normalization mapping
+_PRODUCT_MAPPING = {
+    "urea": "urea",
+    "యూరియా": "urea",
+    "dap": "dap",
+    "డిఎపి": "dap",
+    "డి.ఎ.పి": "dap",
+    "potash": "potash",
+    "mop": "potash",
+    "పోటాష్": "potash",
+    "neem oil": "neem oil",
+    "వేప నూనె": "neem oil",
+    "వేపనూనె": "neem oil",
+    "imidacloprid": "imidacloprid",
+    "ఇమిడాక్లోప్రిడ్": "imidacloprid",
+    "confidor": "imidacloprid",
+    "chlorpyrifos": "chlorpyrifos",
+    "క్లోరిపైరిఫాస్": "chlorpyrifos",
+    "pesticide": "pesticide",
+    "pesticides": "pesticide",
+    "పురుగుమందు": "pesticide",
+    "పురుగుల మందు": "pesticide",
+    "fertilizer": "fertilizer",
+    "fertilizers": "fertilizer",
+    "ఎరువు": "fertilizer",
+    "ఎరువులు": "fertilizer",
+    "seeds": "seeds",
+    "seed": "seeds",
+    "విత్తనాలు": "seeds",
+    "విత్తనం": "seeds",
+    "fungicide": "fungicide",
+    "fungicides": "fungicide",
+    "శిలీంద్ర సంహారిణి": "fungicide",
+    "herbicide": "herbicide",
+    "herbicides": "herbicide",
+    "కలుపు సంహారిణి": "herbicide",
+    "micronutrient": "micronutrient",
+    "micronutrients": "micronutrient",
+    "సూక్ష్మపోషకాలు": "micronutrient",
+    "zinc": "zinc",
+    "జింక్": "zinc",
+    "bayer": "bayer",
+    "బేయర్": "bayer",
+    "iffco": "iffco",
+    "ఇఫ్కో": "iffco",
+    "coromandel": "coromandel",
+    "కోరమాండల్": "coromandel",
+}
+
+# ---------------------------------------------------------------------------
+# Multilingual Formatting Labels
+# ---------------------------------------------------------------------------
+
+_EN_LABELS = {
+    "title":             "🏬 Nearby Agricultural Shops & Availability:",
+    "product":           "📦 Product",
+    "price":             "💰 Price",
+    "stock_in":          "In Stock",
+    "stock_low":         "Low Stock",
+    "stock_out":         "Out of Stock",
+    "contact":           "📞 Contact",
+    "status_open":       "Open",
+    "status_closed":     "Closed",
+    "delivery_avail":    "Available",
+    "delivery_none":     "Not Available",
+    "delivery":          "🚚 Delivery",
+    "dist_fmt":          "{dist} km away",
+    "dist_generic":      "Nearby",
+    "footer_disclaimer": "ℹ️ Note: Prices and stock levels are subject to local dealer confirmation.",
+    "more":              "Find all shops at: /shops",
+}
+
+_TE_LABELS = {
+    "title":             "🏬 సమీప వ్యవసాయ దుకాణాలు & లభ్యత:",
+    "product":           "📦 ఉత్పత్తి",
+    "price":             "💰 ధర",
+    "stock_in":          "స్టాక్ అందుబాటులో ఉంది",
+    "stock_low":         "తక్కువ స్టాక్ ఉంది",
+    "stock_out":         "స్టాక్ లేదు",
+    "contact":           "📞 సంప్రదించండి",
+    "status_open":       "తెరిచి ఉంది",
+    "status_closed":     "మూసివేయబడింది",
+    "delivery_avail":    "అందుబాటులో ఉంది",
+    "delivery_none":     "అందుబాటులో లేదు",
+    "delivery":          "🚚 డెలివరీ",
+    "dist_fmt":          "{dist} కి.మీ దూరం",
+    "dist_generic":      "సమీపంలో",
+    "footer_disclaimer": "ℹ️ గమనిక: ధరలు మరియు స్టాక్ వివరాలు స్థానిక డీలర్ నిర్ధారణకు లోబడి ఉంటాయి.",
+    "more":              "మరిన్ని దుకాణాల కోసం: /shops",
+}
+
+
+def _detect_shop_intent(query_lower: str, query_text: str) -> bool:
+    """Detect if the query has shop or input purchase intent in English or Telugu."""
+    if any(kw in query_lower for kw in _SHOP_INTENT_KEYWORDS_EN):
+        return True
+    if any(kw in query_text for kw in _SHOP_INTENT_KEYWORDS_TE):
+        return True
+    return False
+
+
+def _detect_product_from_query(query_text: str, ai_response: str = "") -> Optional[str]:
+    """Detect and normalize product keyword from user query or AI response."""
     query_lower = query_text.lower()
     response_lower = ai_response.lower()
 
-    logger.info(f"[ENRICH SHOPS] Called with query_text: '{query_text}' | ai_response: '{ai_response[:100]}...'")
+    for kw, eng_product in _PRODUCT_MAPPING.items():
+        if kw in query_lower or kw in query_text or kw in response_lower:
+            return eng_product
+    return None
 
-    # Check if query has explicit search/purchase intent
-    intent_keywords = [
-        "buy", "purchase", "where", "shop", "store", "avail", "price", "cost", "rate", "stock", "near", "locate", "sell", "order",
-        "కొనాలి", "ఎక్కడ", "ధర", "స్టాక్", "షాప్", "దొరుకుతుంది", "అందుబాటు", "రేటు"
-    ]
-    
-    matched_intent_kws = [kw for kw in intent_keywords if kw in query_lower]
-    has_intent = len(matched_intent_kws) > 0
-    
-    logger.info(f"[ENRICH SHOPS] Intent check results: has_intent={has_intent} | matched_intent_kws={matched_intent_kws}")
-            
+
+def _format_stock_string(quantity: int, min_level: int, available: bool, unit: str, labels: dict) -> str:
+    """Format stock status string accurately without inventing numbers."""
+    if not available or quantity <= 0:
+        return labels["stock_out"]
+    if quantity <= min_level:
+        return f"{labels['stock_low']} ({quantity} {unit}s)"
+    return f"{labels['stock_in']} ({quantity} {unit}s)"
+
+
+async def _resolve_farmer_location(db, farmer) -> Tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
+    """
+    Resolve farmer location using the 4-tier hierarchy:
+    1. FarmerMemory.gps_coordinates
+    2. FarmerProfile.district & state
+    3. FarmerMemory.district & state
+    4. None (all-active fallback)
+    """
+    if not farmer:
+        return None, None, None, None
+
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    district: Optional[str] = None
+    state: Optional[str] = None
+
+    try:
+        from sqlalchemy import select
+        from src.memory.models import FarmerMemory
+        from src.core.models import FarmerProfile
+
+        # 1. Check FarmerMemory for GPS coordinates
+        mem_res = await db.execute(
+            select(FarmerMemory).where(FarmerMemory.farmer_id == farmer.id)
+        )
+        memory = mem_res.scalar_one_or_none()
+        if memory and memory.gps_coordinates:
+            gps = memory.gps_coordinates
+            try:
+                lat = float(gps.get("latitude") or 0.0)
+                lon = float(gps.get("longitude") or 0.0)
+                if lat != 0.0 and lon != 0.0:
+                    latitude = lat
+                    longitude = lon
+            except (ValueError, TypeError):
+                pass
+
+        # 2. Check FarmerProfile for district/state
+        prof_res = await db.execute(
+            select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
+        )
+        profile = prof_res.scalar_one_or_none()
+        if profile and profile.district:
+            district = profile.district.strip()
+            state = profile.state.strip() if profile.state else None
+
+        # 3. Check FarmerMemory for district if profile is blank
+        if not district and memory and memory.district:
+            district = memory.district.strip()
+            state = memory.state.strip() if memory.state else None
+
+    except Exception as loc_err:
+        logger.warning(f"[SHOPS ENRICH] Failed to resolve farmer location: {loc_err}")
+
+    return latitude, longitude, district, state
+
+
+# ---------------------------------------------------------------------------
+# Pipeline Integration Function — called from ai/service.py
+# ---------------------------------------------------------------------------
+
+async def enrich_response_with_shops(
+    db,
+    query_text: str,
+    ai_response: str,
+    farmer=None,
+) -> str:
+    """
+    Auto-detect product recommendations or shop search intent in the conversation
+    and append nearby shop availability & prices in Telugu or English.
+
+    Always returns the original ai_response unchanged if:
+    - No shop intent is detected
+    - No product keyword is matched
+    - No matching active shops/inventory are found
+    - Any exception occurs
+    """
+    from src.shops.repository import ShopRepository, haversine_distance
+
+    query_lower = query_text.lower()
+    logger.info(f"[ENRICH SHOPS] Called with query_text: '{query_text}' | ai_response length: {len(ai_response)}")
+
+    # Step 1: Detect intent (English or Telugu)
+    has_intent = _detect_shop_intent(query_lower, query_text)
     if not has_intent:
         logger.info("[ENRICH SHOPS] Bypassing shop enrichment - No purchase/shop intent detected.")
         return ai_response
 
-    matched_kw = None
-    for kw, eng_kw in product_mapping.items():
-        if kw in query_lower or kw in response_lower:
-            matched_kw = eng_kw
-            break
-
-    if not matched_kw:
+    # Step 2: Detect product keyword
+    matched_product = _detect_product_from_query(query_text, ai_response)
+    if not matched_product:
         logger.info("[ENRICH SHOPS] Bypassing shop enrichment - No product keyword matched.")
         return ai_response
 
-    matches = await shop_repo.search_shops_by_product(matched_kw)
-    logger.info(f"[ENRICH SHOPS] DB Shop matches found for '{matched_kw}': {len(matches) if matches else 0}")
-    if not matches:
+    # Step 3: Resolve farmer location and language
+    latitude, longitude, district, state = await _resolve_farmer_location(db, farmer)
+    language = getattr(farmer, "preferred_language", "en") or "en"
+    labels = _TE_LABELS if language == "te" else _EN_LABELS
+
+    # Step 4: Fetch matching shops from DB (auto-seed defaults if empty)
+    try:
+        shop_repo = ShopRepository(db)
+        await shop_repo.seed_default_shops_if_empty()
+        matches = await shop_repo.search_shops_by_product(matched_product)
+    except Exception as db_err:
+        logger.warning(f"[ENRICH SHOPS] DB query failed: {db_err}")
         return ai_response
 
-    import re
-    qty_match = re.search(r'(\d+)\s*(bags?|bottles?|kg|litres?|packets?|pkts?)?', query_lower)
-    qty = int(qty_match.group(1)) if qty_match else 1
+    if not matches:
+        logger.info(f"[ENRICH SHOPS] No active shops found for product '{matched_product}'.")
+        return ai_response
 
-    shop_section = "\n\n🏬 Available Nearby Shops:\n"
-    for shop, item in matches[:3]:
-        status_str = "Open" if shop.status == "active" else "Closed"
-        delivery_str = "Available" if shop.delivery_available else "Not Available"
-        total_est = item.price * qty
-        shop_section += (
-            f"• {shop.shop_name}\n"
-            f"  Product: {item.product_name} ({item.brand})\n"
-            f"  Price: ₹{item.price:g} | Stock: {item.quantity_in_stock} {item.unit}s\n"
-            f"  Contact: {shop.phone_number} | Status: {status_str} | Delivery: {delivery_str}\n"
+    # Step 5: Rank & Filter matches by location
+    scored_matches = []
+    for shop, item in matches:
+        dist: Optional[float] = None
+        if (
+            latitude is not None
+            and longitude is not None
+            and shop.latitude is not None
+            and shop.longitude is not None
+        ):
+            dist = haversine_distance(latitude, longitude, shop.latitude, shop.longitude)
+
+        # Sort priority:
+        # 1. Distant distance if GPS available (closest first)
+        # 2. Exact district match if no GPS
+        # 3. Other shops
+        district_match = (
+            district is not None
+            and shop.district is not None
+            and district.lower() in shop.district.lower()
         )
-        if qty_match:
-            shop_section += f"  🛒 Order Request ({qty} {item.unit}s): ₹{total_est:g} - Order sent to Shop Owner!\n"
+        sort_key = (
+            0 if dist is not None else (1 if district_match else 2),
+            dist if dist is not None else 99999.0,
+        )
+        scored_matches.append((sort_key, shop, item, dist))
 
-    final_result = ai_response + shop_section.rstrip()
-    logger.info(f"[ENRICH SHOPS] Enrichment success. Final response: '{final_result[:150]}...' (Total length: {len(final_result)})")
-    return final_result
+    scored_matches.sort(key=lambda x: x[0])
+    top = scored_matches[:3]
+
+    # Step 6: Format WhatsApp reply block
+    shop_entries = []
+    for _, shop, item, dist in top:
+        dist_str = labels["dist_fmt"].format(dist=dist) if dist is not None else labels["dist_generic"]
+        status_str = labels["status_open"] if shop.status == "active" else labels["status_closed"]
+        delivery_str = labels["delivery_avail"] if shop.delivery_available else labels["delivery_none"]
+        stock_str = _format_stock_string(
+            item.quantity_in_stock, item.minimum_stock_level, item.available, item.unit, labels
+        )
+
+        time_range = ""
+        if shop.opening_time and shop.closing_time:
+            time_range = f" ({shop.opening_time} - {shop.closing_time})"
+
+        lines = [
+            f"\n• *{shop.shop_name}* ({dist_str})",
+            f"  {labels['product']}: {item.product_name} ({item.brand})",
+            f"  {labels['price']}: ₹{item.price:g}/{item.unit} | {stock_str}",
+            f"  {labels['contact']}: {shop.phone_number} | {status_str}{time_range}",
+            f"  {labels['delivery']}: {delivery_str}",
+        ]
+        shop_entries.append("\n".join(lines))
+
+    footer_parts = [labels["footer_disclaimer"]]
+    if len(matches) > 3:
+        footer_parts.append(labels["more"])
+
+    full_block = "\n".join([
+        labels["title"],
+        *shop_entries,
+        "",
+        "\n".join(footer_parts),
+    ])
+
+    logger.info(
+        f"[ENRICH SHOPS] Appending {len(top)} shops for '{matched_product}' "
+        f"(district: {district}, coords: ({latitude}, {longitude}))."
+    )
+    return ai_response + "\n\n" + full_block
+
