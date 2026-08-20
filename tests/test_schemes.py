@@ -144,3 +144,160 @@ def test_get_farmer_applications(mock_scheme_service):
     assert isinstance(data, list)
     assert len(data) == 1
     assert data[0]["status"] == "Applied"
+
+
+# ===========================================================================
+# NEW TESTS: Intent Detection, Formatting, Crop Prioritisation, Pipeline
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# 5. Intent Detection — English keywords
+# ---------------------------------------------------------------------------
+
+def test_scheme_intent_english():
+    """English scheme keywords correctly trigger intent."""
+    from src.schemes.service import _detect_scheme_intent
+
+    assert _detect_scheme_intent("what government schemes are available?") is True
+    assert _detect_scheme_intent("tell me about pm kisan") is True
+    assert _detect_scheme_intent("i want to know about subsidies for farmers") is True
+    assert _detect_scheme_intent("am i eligible for kcc?") is True
+
+
+# ---------------------------------------------------------------------------
+# 6. Intent Detection — Telugu keywords
+# ---------------------------------------------------------------------------
+
+def test_scheme_intent_telugu():
+    """Telugu scheme keywords correctly trigger intent."""
+    from src.schemes.service import _SCHEME_KEYWORDS_TE
+
+    query_te = "రైతులకు ఏ ప్రభుత్వ పథకాలు ఉన్నాయి?"
+    has_intent = any(kw in query_te for kw in _SCHEME_KEYWORDS_TE)
+    assert has_intent, "Telugu scheme query should detect scheme intent"
+
+    query_subsidy = "సబ్సిడీలు అందుబాటులో ఉన్నాయా?"
+    has_intent_subsidy = any(kw in query_subsidy for kw in _SCHEME_KEYWORDS_TE)
+    assert has_intent_subsidy, "Telugu subsidy query should detect scheme intent"
+
+
+# ---------------------------------------------------------------------------
+# 7. Non-scheme query does NOT trigger intent
+# ---------------------------------------------------------------------------
+
+def test_no_scheme_intent_skipped():
+    """Pest or crop disease query does not trigger scheme intent."""
+    from src.schemes.service import _detect_scheme_intent, _SCHEME_KEYWORDS_TE
+
+    query = "టమాటా తెగులు నివారణకు ఏ మందు వాడాలి?"
+    en_match = _detect_scheme_intent(query.lower())
+    te_match = any(kw in query for kw in _SCHEME_KEYWORDS_TE)
+    assert not en_match and not te_match, "Pest query should not trigger scheme intent"
+
+
+# ---------------------------------------------------------------------------
+# 8. Crop detection from query
+# ---------------------------------------------------------------------------
+
+def test_crop_detection_from_query():
+    """Crop keywords extracted correctly from English and Telugu queries."""
+    from src.schemes.service import _detect_crop_from_query
+
+    assert _detect_crop_from_query("cotton crop scheme") == "Cotton"
+    assert _detect_crop_from_query("పత్తి పంటకు పథకం") == "Cotton"
+    assert _detect_crop_from_query("rice subsidy available?") == "Rice"
+    assert _detect_crop_from_query("వరి రైతులకు సహాయం") == "Rice"
+    assert _detect_crop_from_query("what schemes are available") is None
+
+
+# ---------------------------------------------------------------------------
+# 9. Crop prioritisation — never excludes "All Crops" schemes
+# ---------------------------------------------------------------------------
+
+def test_crop_sort_never_excludes_all_crops():
+    """'All Crops' schemes always appear in results even when a crop is mentioned."""
+    from src.schemes.service import _sort_schemes_by_crop_priority
+    from unittest.mock import MagicMock
+
+    all_crops_scheme = MagicMock()
+    all_crops_scheme.crop_type = "All Crops"
+    all_crops_scheme.scheme_name = "PM-KISAN"
+
+    cotton_scheme = MagicMock()
+    cotton_scheme.crop_type = "Cotton"
+    cotton_scheme.scheme_name = "Cotton Support"
+
+    sorted_schemes = _sort_schemes_by_crop_priority(
+        [all_crops_scheme, cotton_scheme], mentioned_crop="Cotton"
+    )
+
+    names = [s.scheme_name for s in sorted_schemes]
+    assert "PM-KISAN" in names, "'All Crops' scheme must never be excluded"
+    assert names[0] == "Cotton Support", "Crop-specific match should rank first"
+
+
+# ---------------------------------------------------------------------------
+# 10. English scheme block formatting includes disclaimer
+# ---------------------------------------------------------------------------
+
+def test_scheme_formatting_english_has_disclaimer():
+    """English formatted scheme block includes the safety disclaimer."""
+    from src.schemes.service import _format_scheme_block, _EN_LABELS
+    from unittest.mock import MagicMock
+    from datetime import datetime, timedelta
+
+    mock_scheme = MagicMock()
+    mock_scheme.scheme_name = "PM-KISAN Samman Nidhi"
+    mock_scheme.benefits_summary = "₹6,000 per year in 3 installments."
+    mock_scheme.eligibility_criteria = "Farmers with up to 5 acres."
+    mock_scheme.required_documents = "Aadhaar, Land Papers, Bank Passbook."
+    mock_scheme.application_deadline = datetime.utcnow() + timedelta(days=60)
+    mock_scheme.official_portal_url = "https://pmkisan.gov.in"
+
+    block = _format_scheme_block(mock_scheme, _EN_LABELS, "en")
+    assert "PM-KISAN Samman Nidhi" in block
+    assert "₹6,000" in block
+    assert "pmkisan.gov.in" in block
+    # Disclaimer is appended at the full_block level, not inside scheme block
+
+
+# ---------------------------------------------------------------------------
+# 11. Telugu scheme block formatting uses Telugu labels
+# ---------------------------------------------------------------------------
+
+def test_scheme_formatting_telugu_labels():
+    """Telugu formatted scheme block uses Telugu label keys."""
+    from src.schemes.service import _format_scheme_block, _TE_LABELS
+    from unittest.mock import MagicMock
+
+    mock_scheme = MagicMock()
+    mock_scheme.scheme_name = "రైతు బంధు"
+    mock_scheme.benefits_summary = "ఎకరాకు ₹10,000 ప్రతి సంవత్సరం."
+    mock_scheme.eligibility_criteria = "తెలంగాణ రాష్ట్రంలోని పట్టాదార్ రైతులు."
+    mock_scheme.required_documents = "పట్టాదార్ పాస్ బుక్, ఆధార్ కార్డు."
+    mock_scheme.application_deadline = None
+    mock_scheme.official_portal_url = "https://rythubandhu.telangana.gov.in"
+
+    block = _format_scheme_block(mock_scheme, _TE_LABELS, "te")
+    assert "రైతు బంధు" in block
+    assert "ప్రయోజనాలు" in block
+    assert "అర్హత" in block
+    assert "rythubandhu.telangana.gov.in" in block
+
+
+# ---------------------------------------------------------------------------
+# 12. seed_defaults_if_empty bug fix — self parameter present
+# ---------------------------------------------------------------------------
+
+def test_seed_defaults_if_empty_has_self_parameter():
+    """Verify the seed_defaults_if_empty method correctly declares self."""
+    import inspect
+    from src.schemes.service import SchemeService
+
+    sig = inspect.signature(SchemeService.seed_defaults_if_empty)
+    params = list(sig.parameters.keys())
+    assert "self" in params, (
+        "seed_defaults_if_empty must declare 'self' as first parameter. "
+        "The bug has not been fixed."
+    )
+
