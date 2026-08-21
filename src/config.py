@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     # Google Cloud
     google_cloud_project_id: str = Field(default="")
     google_application_credentials: str = Field(default="")
+    google_application_credentials_json: str = Field(default="")
 
     # Speech-to-Text
     stt_provider: str = Field(default="google")
