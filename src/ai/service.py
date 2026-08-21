@@ -28,9 +28,35 @@ class AIService:
             # 1. Fetch farmer profile for context
             profile = await self.repository.get_farmer_profile(request.farmer_id)
 
-            # 2. Build farmer context string
+            # 2. Fetch conversation history (oldest first for Gemini)
+            history_records = await self.repository.get_conversation_history(request.farmer_id)
+            history_records.reverse()
+            history = []
+            recent_context_crop = None
+
+            from src.rag.service import extract_crop_from_text
+            query_crop = extract_crop_from_text(request.message)
+
+            for record in history_records:
+                if record.user_message:
+                    history.append({"role": "user", "parts": record.user_message})
+                    c = extract_crop_from_text(record.user_message)
+                    if c:
+                        recent_context_crop = c
+                if record.ai_response:
+                    # Clean shop section from the history to prevent LLM contamination
+                    clean_response = record.ai_response.split("Available Nearby Shops:")[0].split("🏬")[0].strip()
+                    history.append({"role": "model", "parts": clean_response})
+
+            # Priority for crop:
+            # 1. Explicit crop mentioned in current message (e.g. "టమాటా" / Tomato overrides profile's "Cotton")
+            # 2. If short follow-up and query_crop is None, crop from recent conversation history
+            # 3. Farmer profile current_crop
+            effective_crop = query_crop or (recent_context_crop if recent_context_crop else (profile.current_crop if profile else None))
+
+            # Build farmer context string
             farmer_context = build_farmer_context(
-                crop=profile.current_crop if profile else None,
+                crop=effective_crop or (profile.current_crop if profile else None),
                 district=profile.district if profile else None,
                 state=profile.state if profile else None,
                 land_size=profile.land_size_acres if profile else None,
@@ -43,6 +69,14 @@ class AIService:
             mem_service = FarmerMemoryService(mem_repo)
             memory_context = await mem_service.format_memory_for_system_prompt(request.farmer_id)
 
+            # Build enriched RAG query for short follow-ups (e.g. "ఎకరానికి ఎంత కావాలి?" / "ఈ వ్యాధికి ఎంత మందు వేయాలి?")
+            rag_query = request.message
+            msg_tokens = request.message.strip().split()
+            if not query_crop and len(msg_tokens) <= 7 and history_records:
+                recent_user_msgs = [r.user_message for r in history_records[-2:] if r.user_message]
+                if recent_user_msgs:
+                    rag_query = f"{' '.join(recent_user_msgs)} {request.message}"
+
             # 3.5 Retrieve trusted agricultural RAG knowledge
             rag_context_text = ""
             try:
@@ -51,13 +85,13 @@ class AIService:
                 rag_repo = RAGRepository(self.repository.session)
                 rag_service = RAGService(rag_repo)
                 rag_results = await rag_service.search_knowledge(
-                    query=request.message,
+                    query=rag_query,
                     top_k=3,
                     state=profile.state if profile else None,
-                    crop=profile.current_crop if profile else None,
+                    crop=effective_crop,
                 )
                 if rag_results:
-                    rag_snippets = [f"• Document: {r.document_title} ({r.source}): {r.chunk_text}" for r in rag_results]
+                    rag_snippets = [f"• Document: {r.document_title} (Crop: {r.crop or 'General'}, Source: {r.source}): {r.chunk_text}" for r in rag_results]
                     rag_context_text = "=== RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE (GROUND TRUTH) ===\n" + "\n".join(rag_snippets)
             except Exception as rag_err:
                 logger.warning(f"RAG knowledge retrieval warning: {rag_err}")
@@ -67,19 +101,6 @@ class AIService:
             if rag_context_text:
                 full_system_prompt += f"\n\n{rag_context_text}"
 
-            # 5. Fetch conversation history
-            history_records = await self.repository.get_conversation_history(request.farmer_id)
-            
-            # Gemini expects oldest first
-            history_records.reverse()
-            history = []
-            for record in history_records:
-                if record.user_message:
-                    history.append({"role": "user", "parts": record.user_message})
-                if record.ai_response:
-                    # Clean shop section from the history to prevent LLM contamination
-                    clean_response = record.ai_response.split("Available Nearby Shops:")[0].split("🏬")[0].strip()
-                    history.append({"role": "model", "parts": clean_response})
 
             # 6. Call Gemini API
             logger.info(f"Processing AI request for farmer {request.farmer_id}: '{request.message[:80]}...'")
@@ -88,7 +109,7 @@ class AIService:
                 system_prompt=full_system_prompt,
                 conversation_history=history,
                 user_message=request.message,
-                timeout_seconds=20,
+                timeout_seconds=10,
             )
 
             if ai_text is None or not ai_text.strip():
