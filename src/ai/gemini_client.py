@@ -17,8 +17,8 @@ _initialized = False
 
 # Resilient fallback chain of supported models
 FALLBACK_MODELS = [
-    "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
     "gemini-flash-latest",
 ]
 
@@ -40,7 +40,7 @@ async def generate_response(
     system_prompt: str,
     conversation_history: List[Dict[str, str]],
     user_message: str,
-    timeout_seconds: int = 20,
+    timeout_seconds: int = 10,
     model_override: Optional[str] = None,
 ) -> Optional[str]:
     """
@@ -52,7 +52,7 @@ async def generate_response(
         conversation_history: List of {"role": "user"|"model", "parts": "..."} dicts
                               representing the recent conversation context.
         user_message: The farmer's current message.
-        timeout_seconds: Max time to wait for the API response (default: 20s).
+        timeout_seconds: Max time to wait for the API response (default: 10s).
         model_override: Optional model name to use instead of default.
 
     Returns:
@@ -60,7 +60,7 @@ async def generate_response(
     """
     _ensure_initialized()
     settings = get_settings()
-    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.6-flash"
+    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.5-flash-lite"
 
     # Build candidates list starting with primary model
     candidate_models = [primary_model]
@@ -156,7 +156,7 @@ async def generate_multimodal_response(
     image_bytes: bytes,
     mime_type: str,
     user_message: str = "",
-    timeout_seconds: int = 30,
+    timeout_seconds: int = 15,
     model_override: Optional[str] = None,
 ) -> Optional[str]:
     """
@@ -164,7 +164,7 @@ async def generate_multimodal_response(
     """
     _ensure_initialized()
     settings = get_settings()
-    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.6-flash"
+    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.5-flash-lite"
 
     candidate_models = [primary_model]
     for fallback in FALLBACK_MODELS:
