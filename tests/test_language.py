@@ -38,8 +38,10 @@ def test_resolve_google_credentials_from_json_string(mock_service_account_dict):
 
 
 def test_resolve_google_credentials_from_raw_json_in_path_field(mock_service_account_dict):
+    raw_json = json.dumps(mock_service_account_dict)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = raw_json
     settings = Settings(
-        google_application_credentials=json.dumps(mock_service_account_dict),
+        google_application_credentials=raw_json,
         google_application_credentials_json="",
     )
     with patch("src.language.service.service_account.Credentials.from_service_account_info") as mock_from_info:
@@ -47,6 +49,29 @@ def test_resolve_google_credentials_from_raw_json_in_path_field(mock_service_acc
         creds = resolve_google_credentials(settings)
         assert creds is not None
         mock_from_info.assert_called_once()
+        # Verify raw JSON was cleared from os.environ so google-auth does not try to open it as a file
+        assert os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") != raw_json
+
+
+def test_resolve_google_credentials_prefers_render_secret(tmp_path, mock_service_account_dict, monkeypatch):
+    render_secrets_dir = tmp_path / "render_secrets"
+    render_secrets_dir.mkdir()
+    secret_file = render_secrets_dir / "service-account.json"
+    secret_file.write_text(json.dumps(mock_service_account_dict), encoding="utf-8")
+
+    monkeypatch.setattr("src.language.service.Path", lambda p: render_secrets_dir if p == "/etc/secrets" else Path(p))
+
+    settings = Settings(
+        google_application_credentials="non_existent_fallback_path.json",
+        google_application_credentials_json="",
+    )
+
+    with patch("src.language.service.service_account.Credentials.from_service_account_file") as mock_from_file:
+        mock_creds = MagicMock()
+        mock_from_file.return_value = mock_creds
+        creds = resolve_google_credentials(settings)
+        assert creds is mock_creds
+        mock_from_file.assert_called_once_with(str(secret_file))
 
 
 def test_resolve_google_credentials_from_existing_file(tmp_path, mock_service_account_dict):
@@ -123,6 +148,7 @@ def test_language_service_google_client_loads_credentials():
         client = service.google_client
         mock_speech_client.assert_called_once_with(credentials=mock_creds)
         assert client == mock_speech_client.return_value
+
 
 
 
