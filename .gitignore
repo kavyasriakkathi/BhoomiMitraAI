@@ -28,6 +28,11 @@ venv.bak/
 *.crt
 *.pfx
 secrets/
+*service_account*.json
+*service-account*.json
+*credentials*.json
+*gen-lang-client*.json
+
 
 # Databases & Local Storage
 *.sqlite

@@ -98,6 +98,34 @@ def test_resolve_google_credentials_render_secret_discovery(tmp_path, mock_servi
         assert creds is not None
 
 
+def test_resolve_google_credentials_render_service_account_mounted(tmp_path, mock_service_account_dict):
+    secret_file = tmp_path / "service-account.json"
+    secret_file.write_text(json.dumps(mock_service_account_dict), encoding="utf-8")
+
+    settings = Settings(
+        google_application_credentials=str(secret_file),
+        google_application_credentials_json="",
+    )
+
+    with patch("src.language.service.service_account.Credentials.from_service_account_file") as mock_from_file:
+        mock_creds = MagicMock()
+        mock_from_file.return_value = mock_creds
+        creds = resolve_google_credentials(settings)
+        assert creds is mock_creds
+        mock_from_file.assert_called_once_with(str(secret_file))
+
+
+def test_language_service_google_client_loads_credentials():
+    mock_creds = MagicMock()
+    with patch("src.language.service.resolve_google_credentials", return_value=mock_creds), \
+         patch("src.language.service.speech.SpeechAsyncClient") as mock_speech_client:
+        service = LanguageService()
+        client = service.google_client
+        mock_speech_client.assert_called_once_with(credentials=mock_creds)
+        assert client == mock_speech_client.return_value
+
+
+
 @pytest.mark.asyncio
 async def test_language_service_empty_audio_error():
     service = LanguageService()
