@@ -21,7 +21,7 @@ async def test_english_message_produces_english_response():
     )
 
     with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_response), \
-         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp: resp):
+         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp, *args, **kwargs: resp):
         
         result = await process_text_message(db_mock, farmer, conversation)
         assert result == "You should use NPK fertilizer for cotton."
@@ -42,7 +42,7 @@ async def test_telugu_message_produces_telugu_response():
     )
 
     with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_response), \
-         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp: resp):
+         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp, *args, **kwargs: resp):
         
         result = await process_text_message(db_mock, farmer, conversation)
         assert result == "పత్తి పంటకు ఎన్పికె (NPK) ఎరువును ఉపయోగించాలి."
@@ -62,7 +62,7 @@ async def test_memory_extraction_not_appended_to_response():
     )
 
     with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_response), \
-         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp: resp):
+         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp, *args, **kwargs: resp):
         
         result = await process_text_message(db_mock, farmer, conversation)
         assert result == "Got it, 5 acres of land size recorded."
@@ -85,7 +85,7 @@ async def test_context_sentence_is_not_duplicated():
     )
 
     with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_response), \
-         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp: resp):
+         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp, *args, **kwargs: resp):
         
         result = await process_text_message(db_mock, farmer, conversation)
         assert result == "At 45 days, cotton is in the squaring stage. Ensure adequate watering."
@@ -131,7 +131,7 @@ async def test_no_duplicate_fragments_in_final_response():
     )
 
     with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_response), \
-         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp: resp):
+         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp, *args, **kwargs: resp):
         
         result = await process_text_message(db_mock, farmer, conversation)
         
@@ -215,7 +215,7 @@ async def test_e2e_general_question_does_not_append_shops():
         
         result = await process_text_message(db_mock, farmer, conversation)
         assert result == "For cotton, you should apply Urea or NPK."
-        assert "Available Nearby Shops" not in result
+        assert "Nearby Agricultural Shops" not in result
 
 
 @pytest.mark.asyncio
@@ -242,7 +242,7 @@ async def test_e2e_general_question_plural_does_not_append_shops():
         
         result = await process_text_message(db_mock, farmer, conversation)
         assert result == "You can use organic manure or Urea/NPK."
-        assert "Available Nearby Shops" not in result
+        assert "Nearby Agricultural Shops" not in result
 
 
 @pytest.mark.asyncio
@@ -265,11 +265,13 @@ async def test_e2e_english_buy_question_appends_shops():
     mock_search_results = [(mock_shop, mock_inventory)]
 
     with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_response), \
+         patch("src.shops.repository.ShopRepository.seed_default_shops_if_empty", new_callable=AsyncMock), \
+         patch("src.shops.service._resolve_farmer_location", new_callable=AsyncMock, return_value=(None, None, None, None)), \
          patch("src.shops.repository.ShopRepository.search_shops_by_product", return_value=mock_search_results):
         
         result = await process_text_message(db_mock, farmer, conversation)
         assert "You can buy Urea at local shops." in result
-        assert "Available Nearby Shops" in result
+        assert "Nearby Agricultural Shops" in result
         assert "Mallanna Fertilizer" in result
 
 
@@ -293,11 +295,13 @@ async def test_e2e_english_buy_question_variation_appends_shops():
     mock_search_results = [(mock_shop, mock_inventory)]
 
     with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_response), \
+         patch("src.shops.repository.ShopRepository.seed_default_shops_if_empty", new_callable=AsyncMock), \
+         patch("src.shops.service._resolve_farmer_location", new_callable=AsyncMock, return_value=(None, None, None, None)), \
          patch("src.shops.repository.ShopRepository.search_shops_by_product", return_value=mock_search_results):
         
         result = await process_text_message(db_mock, farmer, conversation)
         assert "You can buy Urea at nearby shops." in result
-        assert "Available Nearby Shops" in result
+        assert "Nearby Agricultural Shops" in result
         assert "Mallanna Fertilizer" in result
 
 
@@ -321,11 +325,13 @@ async def test_e2e_telugu_buy_question_appends_shops():
     mock_search_results = [(mock_shop, mock_inventory)]
 
     with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_response), \
+         patch("src.shops.repository.ShopRepository.seed_default_shops_if_empty", new_callable=AsyncMock), \
+         patch("src.shops.service._resolve_farmer_location", new_callable=AsyncMock, return_value=(None, None, None, None)), \
          patch("src.shops.repository.ShopRepository.search_shops_by_product", return_value=mock_search_results):
         
         result = await process_text_message(db_mock, farmer, conversation)
         assert "మీరు స్థానిక దుకాణాలలో యూరియాను కొనుగోలు చేయవచ్చు." in result
-        assert "Available Nearby Shops" in result
+        assert "సమీప వ్యవసాయ దుకాణాలు" in result
         assert "Mallanna Fertilizer" in result
 
 
@@ -349,7 +355,7 @@ async def test_cotton_alternaria_multi_turn_dosage_grounded_response():
     )
 
     with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_response), \
-         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp: resp):
+         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp, *args, **kwargs: resp):
         
         result = await process_text_message(db_mock, farmer, conversation)
         assert "2.5 నుండి 3.0 గ్రాముల" in result or "Mancozeb" in result

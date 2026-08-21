@@ -167,7 +167,7 @@ async def process_text_message(
         from src.shops.service import enrich_response_with_shops
         logger.info("[PROCESS MSG] Invoking enrich_response_with_shops()")
         ai_response_text = await enrich_response_with_shops(
-            db, conversation.user_message or "", ai_response_text
+            db, conversation.user_message or "", ai_response_text, farmer
         )
     except Exception as err:
         logger.warning(f"Failed to enrich response with shops: {err}")
