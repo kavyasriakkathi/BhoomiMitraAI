@@ -25,3 +25,7 @@ services:
         sync: false
       - key: WHATSAPP_APP_SECRET
         sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        sync: false
+      - key: GOOGLE_APPLICATION_CREDENTIALS_JSON
+        sync: false
