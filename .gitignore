@@ -45,3 +45,5 @@ htmlcov/
 
 # Redis dump
 dump.rdb
+
+scratch/
