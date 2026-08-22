@@ -199,23 +199,7 @@ class DecisionEngine:
             )
 
         # -------------------------------------------------------------
-        # RULE 4: MISSING PROBLEM
-        # -------------------------------------------------------------
-        if is_problem_missing(effective_problem):
-            if in_telugu:
-                response = "మీ పంటలో కనిపిస్తున్న సమస్య లేదా తెగులు లక్షణాలను దయచేసి వివరించండి."
-            else:
-                response = "Could you please describe the specific problem or symptoms you are noticing on your crop?"
-            return Decision(
-                decision_type=DecisionType.ASK_CLARIFICATION,
-                risk_level=RiskLevel.LOW,
-                response=response,
-                reasons=["Farming problem/symptoms not specified"],
-                requires_human_review=False,
-            )
-
-        # -------------------------------------------------------------
-        # RULE 5: MISSING GROWTH STAGE (Only for stage-dependent inquiries)
+        # RULE 4: MISSING GROWTH STAGE (Only for stage-dependent inquiries)
         # -------------------------------------------------------------
         if self.is_stage_dependent_query(message) and is_growth_stage_missing(farmer_input.growth_stage):
             if in_telugu:
@@ -227,6 +211,22 @@ class DecisionEngine:
                 risk_level=RiskLevel.LOW,
                 response=response,
                 reasons=["Growth stage required for stage-specific nutrient inquiry"],
+                requires_human_review=False,
+            )
+
+        # -------------------------------------------------------------
+        # RULE 5: MISSING PROBLEM
+        # -------------------------------------------------------------
+        if is_problem_missing(effective_problem):
+            if in_telugu:
+                response = "మీ పంటలో కనిపిస్తున్న సమస్య లేదా తెగులు లక్షణాలను దయచేసి వివరించండి."
+            else:
+                response = "Could you please describe the specific problem or symptoms you are noticing on your crop?"
+            return Decision(
+                decision_type=DecisionType.ASK_CLARIFICATION,
+                risk_level=RiskLevel.LOW,
+                response=response,
+                reasons=["Farming problem/symptoms not specified"],
                 requires_human_review=False,
             )
 

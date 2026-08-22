@@ -325,8 +325,5 @@ async def test_e2e_telugu_buy_question_appends_shops():
         
         result = await process_text_message(db_mock, farmer, conversation)
         assert "మీరు స్థానిక దుకాణాలలో యూరియాను కొనుగోలు చేయవచ్చు." in result
-        assert "Available Nearby Shops" in result
+        assert "అందుబాటులో ఉన్న సమీప దుకాణాలు" in result or "Available Nearby Shops" in result
         assert "Mallanna Fertilizer" in result
-
-
-

@@ -28,8 +28,30 @@ class AIService:
     async def generate_ai_response(self, request: AIGenerateRequest) -> AIGenerateResponse:
         service_start_time = time.time()
         try:
-            # 1. Fetch farmer profile for context
+            # 1. Fetch farmer profile and history for context
             profile = await self.repository.get_farmer_profile(request.farmer_id)
+            history_records = await self.repository.get_conversation_history(request.farmer_id)
+
+            # 1.2 Resolve contextual crop and problem (including from recent history for follow-ups)
+            effective_crop = profile.current_crop if profile else None
+            if not effective_crop:
+                effective_crop = self.decision_engine.extract_crop(request.message)
+                if not effective_crop:
+                    for h in history_records:
+                        if h.user_message:
+                            c = self.decision_engine.extract_crop(h.user_message)
+                            if c:
+                                effective_crop = c
+                                break
+
+            effective_problem = self.decision_engine.extract_problem(request.message)
+            if not effective_problem:
+                for h in history_records:
+                    if h.user_message:
+                        p = self.decision_engine.extract_problem(h.user_message)
+                        if p:
+                            effective_problem = p
+                            break
 
             # 1.5 Evaluate Decision Engine BEFORE invoking LLM / Gemini
             location_str = None
@@ -40,9 +62,9 @@ class AIService:
 
             farmer_input = FarmerInput(
                 message=request.message,
-                crop=profile.current_crop if profile else None,
+                crop=effective_crop,
                 growth_stage=None,
-                problem=None,
+                problem=effective_problem,
                 location=location_str,
             )
 
@@ -100,13 +122,9 @@ class AIService:
             if rag_context_text:
                 full_system_prompt += f"\n\n{rag_context_text}"
 
-            # 5. Fetch conversation history
-            history_records = await self.repository.get_conversation_history(request.farmer_id)
-            
-            # Gemini expects oldest first
-            history_records.reverse()
+            # 5. Prepare conversation history for Gemini (oldest first)
             history = []
-            for record in history_records:
+            for record in reversed(history_records):
                 if record.user_message:
                     history.append({"role": "user", "parts": record.user_message})
                 if record.ai_response:
@@ -217,6 +235,16 @@ async def process_text_message(
         )
     except Exception as err:
         logger.warning(f"Failed to enrich response with shops: {err}")
+
+    # Run final post-generation safety & language validation
+    from src.decision_engine.validators import validate_generated_ai_response
+    final_safety = validate_generated_ai_response(
+        response_text=ai_response_text,
+        user_message=conversation.user_message or "",
+    )
+    if not final_safety.is_safe:
+        logger.warning(f"[PROCESS MSG SAFETY INTERCEPT] Violations: {final_safety.violations} | Reasons: {final_safety.reasons}")
+        ai_response_text = final_safety.safe_response
 
     logger.info(f"[PROCESS MSG FINAL] Length: {len(ai_response_text)} | Final response immediately before DB save: '{ai_response_text}'")
 

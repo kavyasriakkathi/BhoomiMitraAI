@@ -236,19 +236,36 @@ async def enrich_response_with_shops(db, query_text: str, ai_response: str) -> s
     qty_match = re.search(r'(\d+)\s*(bags?|bottles?|kg|litres?|packets?|pkts?)?', query_lower)
     qty = int(qty_match.group(1)) if qty_match else 1
 
-    shop_section = "\n\n🏬 Available Nearby Shops:\n"
-    for shop, item in matches[:3]:
-        status_str = "Open" if shop.status == "active" else "Closed"
-        delivery_str = "Available" if shop.delivery_available else "Not Available"
-        total_est = item.price * qty
-        shop_section += (
-            f"• {shop.shop_name}\n"
-            f"  Product: {item.product_name} ({item.brand})\n"
-            f"  Price: ₹{item.price:g} | Stock: {item.quantity_in_stock} {item.unit}s\n"
-            f"  Contact: {shop.phone_number} | Status: {status_str} | Delivery: {delivery_str}\n"
-        )
-        if qty_match:
-            shop_section += f"  🛒 Order Request ({qty} {item.unit}s): ₹{total_est:g} - Order sent to Shop Owner!\n"
+    is_telugu = any("\u0C00" <= ch <= "\u0C7F" for ch in query_text + ai_response)
+
+    if is_telugu:
+        shop_section = "\n\n🏬 అందుబాటులో ఉన్న సమీప దుకాణాలు:\n"
+        for shop, item in matches[:3]:
+            status_str = "తెరిచి ఉంది" if shop.status == "active" else "మూసివేయబడింది"
+            delivery_str = "అందుబాటులో ఉంది" if shop.delivery_available else "అందుబాటులో లేదు"
+            total_est = item.price * qty
+            shop_section += (
+                f"• {shop.shop_name}\n"
+                f"  ఉత్పత్తి: {item.product_name} ({item.brand})\n"
+                f"  ధర: ₹{item.price:g} | స్టాక్: {item.quantity_in_stock} {item.unit}s\n"
+                f"  సంప్రదించండి: {shop.phone_number} | స్థితి: {status_str} | డెలివరీ: {delivery_str}\n"
+            )
+            if qty_match:
+                shop_section += f"  🛒 ఆర్డర్ అభ్యర్థన ({qty} {item.unit}s): ₹{total_est:g} - ఆర్డర్ పంపబడింది!\n"
+    else:
+        shop_section = "\n\n🏬 Available Nearby Shops:\n"
+        for shop, item in matches[:3]:
+            status_str = "Open" if shop.status == "active" else "Closed"
+            delivery_str = "Available" if shop.delivery_available else "Not Available"
+            total_est = item.price * qty
+            shop_section += (
+                f"• {shop.shop_name}\n"
+                f"  Product: {item.product_name} ({item.brand})\n"
+                f"  Price: ₹{item.price:g} | Stock: {item.quantity_in_stock} {item.unit}s\n"
+                f"  Contact: {shop.phone_number} | Status: {status_str} | Delivery: {delivery_str}\n"
+            )
+            if qty_match:
+                shop_section += f"  🛒 Order Request ({qty} {item.unit}s): ₹{total_est:g} - Order sent to Shop Owner!\n"
 
     final_result = ai_response + shop_section.rstrip()
     logger.info(f"[ENRICH SHOPS] Enrichment success. Final response: '{final_result[:150]}...' (Total length: {len(final_result)})")

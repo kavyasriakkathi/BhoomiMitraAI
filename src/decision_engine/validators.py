@@ -301,17 +301,96 @@ def is_non_agricultural(text: str) -> bool:
     return len(detect_non_agricultural_content(text)) > 0
 
 
+# Unsafe chemical formulation patterns (e.g. 22.9 EC, 10% EC @ 2 ml/l, unverified chemical rates)
+UNSAFE_FORMULATION_PATTERNS = [
+    re.compile(r"\b\d+(\.\d+)?\s*%\s*(?:EC|SC|WP|SL|WDG|SP|GR|FS|ec|sc|wp|sl)\b"),
+    re.compile(r"\b\d+(\.\d+)?\s*(?:EC|SC|WP|SL|WDG|SP|GR|FS)\b"),
+    re.compile(r"@\s*\d+(\.\d+)?\s*(?:ml|g|gm|grams?|kg)"),
+]
+
+
+def detect_unsafe_chemical_formulations(text: str) -> List[str]:
+    """Detects unverified chemical formulations or guessed dosage rates in text."""
+    if not text or not isinstance(text, str):
+        return []
+    found: List[str] = []
+    for pattern in UNSAFE_FORMULATION_PATTERNS:
+        for match in pattern.finditer(text):
+            m_str = match.group(0).strip()
+            if m_str and m_str not in found:
+                found.append(m_str)
+    return found
+
+
+def clean_telugu_text(text: str) -> str:
+    """
+    Cleans Telugu output text:
+    - Removes parenthetical English clauses (e.g. '(If nymph population is high, spray Pyriproxyfen...)').
+    - Cleans corrupted leading vowel diacritics / signs that lack a base consonant.
+    - Strips leaked prompt artifacts.
+    - Cleans excess whitespace.
+    """
+    if not text or not isinstance(text, str):
+        return ""
+
+    cleaned = text
+
+    # Remove parenthetical English clauses
+    cleaned = re.sub(r"\([A-Za-z0-9\s,%@./:;-]+\)", "", cleaned)
+
+    # Remove leaked internal prompt tags
+    cleaned = re.sub(r"\[Farmer Profile\].*?(?:\n|$)", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"## Farmer Long-Term Memory Profile.*?(?:\n|$)", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"=== RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE.*?(?:\n|$)", "", cleaned, flags=re.IGNORECASE)
+
+    # Clean corrupted leading vowel diacritics (Telugu dependent vowels U+0C01-U+0C03, U+0C3E-U+0C4D, U+0C55, U+0C56)
+    cleaned = re.sub(r"^[\u0C01-\u0C03\u0C3E-\u0C4D\u0C55\u0C56\s]+", "", cleaned)
+
+    # Clean double spaces
+    cleaned = re.sub(r"[ \t]+", " ", cleaned).strip()
+
+    return cleaned
+
+
+def is_mixed_language_output(text: str, is_user_telugu: bool) -> bool:
+    """
+    Checks if a response violates language purity:
+    - For Telugu input: detects if there are leaked English sentences or significant English words (> 15%).
+    - For English input: detects if Telugu script is present.
+    """
+    if not text:
+        return False
+
+    if is_user_telugu:
+        # Check for English sentences (sequences of 3+ English words)
+        english_sentence_match = re.search(r"\b[A-Za-z]{2,}\s+[A-Za-z]{2,}\s+[A-Za-z]{2,}\b", text)
+        if english_sentence_match:
+            return True
+        # Calculate English word ratio
+        words = text.split()
+        if not words:
+            return False
+        eng_words = [w for w in words if re.match(r"^[A-Za-z]+[.,!?]?$", w)]
+        if len(eng_words) / len(words) > 0.15:
+            return True
+        return False
+    else:
+        # English user: no Telugu script allowed
+        return any("\u0C00" <= ch <= "\u0C7F" for ch in text)
+
+
 def validate_generated_ai_response(
     response_text: str,
     user_message: str = "",
 ) -> "ResponseValidationResult":
     """
-    Validates a generated AI response against safety standards:
-    1. Invented/unknown pesticide names
-    2. Banned pesticide recommendations
-    3. Human medical advice
-    4. Non-agricultural/out-of-domain content
-    5. Unsafe dosage claims
+    Validates a generated AI response against safety and language standards:
+    1. Language purity (Telugu input must receive pure Telugu; English input pure English)
+    2. Invented/unknown pesticide names
+    3. Banned pesticide recommendations
+    4. Human medical advice
+    5. Non-agricultural/out-of-domain content
+    6. Unsafe or guessed chemical dosages / technical formulations
 
     Returns ResponseValidationResult with safety status and safe fallback if needed.
     """
@@ -320,42 +399,58 @@ def validate_generated_ai_response(
     if not response_text or not isinstance(response_text, str):
         return ResponseValidationResult(is_safe=True, safe_response="")
 
-    combined_text = f"{user_message} {response_text}"
-    is_te = any("\u0C00" <= ch <= "\u0C7F" for ch in combined_text)
+    if user_message:
+        is_user_telugu = any("\u0C00" <= ch <= "\u0C7F" for ch in user_message)
+    else:
+        is_user_telugu = any("\u0C00" <= ch <= "\u0C7F" for ch in response_text)
+
+    # Pre-clean Telugu text (stripping English parentheticals and corrupted leading diacritics)
+    processed_text = clean_telugu_text(response_text) if is_user_telugu else response_text.strip()
 
     violations: List[str] = []
     reasons: List[str] = []
 
     # 1. Check for invented/unknown pesticides
-    unknown_chems = detect_unknown_or_example_pesticides(response_text)
+    unknown_chems = detect_unknown_or_example_pesticides(processed_text)
     if unknown_chems:
         violations.append("invented_pesticide")
         reasons.append(f"Response contains unverified/synthetic pesticide names: {', '.join(unknown_chems)}")
 
     # 2. Check for banned pesticides
-    banned_chems = detect_banned_pesticides(response_text)
+    banned_chems = detect_banned_pesticides(processed_text)
     if banned_chems:
         violations.append("banned_pesticide")
         reasons.append(f"Response recommends banned or hazardous pesticide: {', '.join(banned_chems)}")
 
     # 3. Check for medical advice
-    medical_terms = detect_medical_advice(response_text)
+    medical_terms = detect_medical_advice(processed_text)
     if medical_terms:
         violations.append("medical_advice")
         reasons.append(f"Response provides human medical advice: {', '.join(medical_terms)}")
 
     # 4. Check for non-agricultural content
-    non_agri_terms = detect_non_agricultural_content(response_text)
+    non_agri_terms = detect_non_agricultural_content(processed_text)
     if non_agri_terms:
         violations.append("non_agricultural")
         reasons.append(f"Response contains non-agricultural content: {', '.join(non_agri_terms)}")
 
+    # 5. Check for unsafe/unverified chemical formulations or dosage claims
+    unsafe_forms = detect_unsafe_chemical_formulations(processed_text)
+    if unsafe_forms:
+        violations.append("unsafe_formulation")
+        reasons.append(f"Response contains unverified chemical formulations or dosage: {', '.join(unsafe_forms)}")
+
+    # 6. Check for mixed language violations
+    if is_mixed_language_output(processed_text, is_user_telugu):
+        violations.append("mixed_language")
+        reasons.append("Response violates language consistency requirement")
+
     if not violations:
-        return ResponseValidationResult(is_safe=True, safe_response=response_text)
+        return ResponseValidationResult(is_safe=True, safe_response=processed_text)
 
     # Construct safe fallback response based on highest severity violation
     if "banned_pesticide" in violations:
-        if is_te:
+        if is_user_telugu:
             safe_resp = (
                 "హెచ్చరిక: ఈ ప్రతిస్పందనలో నిషేధించబడిన/హానికరమైన పురుగుమందు ప్రస్తావించబడింది. "
                 "ప్రభుత్వ నిబంధనల ప్రకారం ఇది నిషేధం. దయచేసి సురక్షితమైన ప్రత్యామ్నాయాల కొరకు మీ స్థానిక వ్యవసాయ అధికారిని సంప్రదించండి."
@@ -366,7 +461,7 @@ def validate_generated_ai_response(
                 "In accordance with safety regulations, please avoid prohibited chemicals and consult your local Agricultural Extension Officer for approved alternatives."
             )
     elif "medical_advice" in violations:
-        if is_te:
+        if is_user_telugu:
             safe_resp = (
                 "భూమిమిత్ర కేవలం వ్యవసాయ సంబంధిత సలహాలను మాత్రమే అందిస్తుంది. "
                 "మానవ ఆరోగ్య సమస్యలు లేదా మందుల కొరకు దయచేసి అర్హత కలిగిన వైద్యుడిని సంప్రదించండి."
@@ -377,7 +472,7 @@ def validate_generated_ai_response(
                 "For human health guidance or medical prescriptions, please consult a qualified healthcare professional."
             )
     elif "non_agricultural" in violations:
-        if is_te:
+        if is_user_telugu:
             safe_resp = (
                 "భూమిమిత్ర కేవలం వ్యవసాయం, పంటల సంరక్షణ మరియు రైతు సంక్షేమం గురించిన ప్రశ్నలకు మాత్రమే సమాధానం ఇస్తుంది."
             )
@@ -385,8 +480,19 @@ def validate_generated_ai_response(
             safe_resp = (
                 "BhoomiMitra exclusively assists with agriculture, crop health, farming practices, and farmer welfare."
             )
-    else:  # invented_pesticide / unsafe dosage
-        if is_te:
+    elif "mixed_language" in violations:
+        if is_user_telugu:
+            safe_resp = (
+                "పంటలో తెగులు లేదా పురుగుల నివారణకు వేపనూనె (5 మి.లీ/లీటర్ నీటికి) పిచికారీ చేయడం మరియు పసుపు జిగురు అట్టలు అమర్చడం మంచిది. "
+                "ఖచ్చితమైన రసాయన పిచికారీ కొరకు దయచేసి స్థానిక వ్యవసాయ అధికారిని సంప్రదించండి."
+            )
+        else:
+            safe_resp = (
+                "For pest management, we recommend starting with neem oil spray and yellow sticky traps as safe cultural practices. "
+                "Please consult your local agriculture officer for exact chemical recommendations."
+            )
+    else:  # invented_pesticide / unsafe_formulation / unsafe dosage
+        if is_user_telugu:
             safe_resp = (
                 "రసాయన లేదా పురుగుమందుల ఖచ్చితమైన సమాచారాన్ని ఇక్కడ నేరుగా నిర్ధారించలేము. "
                 "పంట రక్షణ కొరకు దయచేసి అధికారిక ఉత్పత్తి లేబుల్ చూడండి లేదా స్థానిక వ్యవసాయ అధికారిని సంప్రదించండి."
@@ -403,4 +509,5 @@ def validate_generated_ai_response(
         reasons=reasons,
         safe_response=safe_resp,
     )
+
 
