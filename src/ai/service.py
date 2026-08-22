@@ -11,6 +11,8 @@ from src.crop_health.repository import CropHealthRepository
 from src.crop_health.schemas import CropHealthCreate
 from src.crops.repository import CropRepository
 from src.farmers.repository import FarmerRepository
+from src.decision_engine.engine import DecisionEngine
+from src.decision_engine.models import FarmerInput, DecisionType
 from src.ai.prompts import (
     BHOOMIMITRA_SYSTEM_PROMPT,
     build_farmer_context,
@@ -21,12 +23,43 @@ from src.ai.gemini_client import generate_response
 class AIService:
     def __init__(self, repository: AIRepository):
         self.repository = repository
+        self.decision_engine = DecisionEngine()
 
     async def generate_ai_response(self, request: AIGenerateRequest) -> AIGenerateResponse:
         service_start_time = time.time()
         try:
             # 1. Fetch farmer profile for context
             profile = await self.repository.get_farmer_profile(request.farmer_id)
+
+            # 1.5 Evaluate Decision Engine BEFORE invoking LLM / Gemini
+            location_str = None
+            if profile:
+                loc_parts = [str(p) for p in [getattr(profile, "district", None), getattr(profile, "state", None)] if p and isinstance(p, str)]
+                if loc_parts:
+                    location_str = ", ".join(loc_parts)
+
+            farmer_input = FarmerInput(
+                message=request.message,
+                crop=profile.current_crop if profile else None,
+                growth_stage=None,
+                problem=None,
+                location=location_str,
+            )
+
+            decision = self.decision_engine.evaluate(farmer_input)
+            logger.info(
+                f"[DECISION ENGINE] Farmer: {request.farmer_id} | Decision: {decision.decision_type.value} "
+                f"| Risk: {decision.risk_level.value} | Reasons: {decision.reasons}"
+            )
+
+            # If SAFE_FALLBACK or ASK_CLARIFICATION, return immediately without calling Gemini
+            if decision.decision_type in (DecisionType.SAFE_FALLBACK, DecisionType.ASK_CLARIFICATION):
+                return AIGenerateResponse(
+                    response_text=decision.response,
+                    intent=decision.decision_type.value,
+                    confidence=1.0,
+                    provider_used="decision_engine",
+                )
 
             # 2. Build farmer context string
             farmer_context = build_farmer_context(
@@ -96,6 +129,19 @@ class AIService:
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="AI provider timed out or returned empty response."
                 )
+
+            # 6.5 Validate generated AI response for agricultural safety
+            from src.decision_engine.validators import validate_generated_ai_response
+            safety_result = validate_generated_ai_response(
+                response_text=ai_text,
+                user_message=request.message,
+            )
+            if not safety_result.is_safe:
+                logger.warning(
+                    f"[AI SAFETY VIOLATION DETECTED] Farmer: {request.farmer_id} | "
+                    f"Violations: {safety_result.violations} | Reasons: {safety_result.reasons}"
+                )
+                ai_text = safety_result.safe_response
 
             total_ai_time = time.time() - service_start_time
             logger.info(
@@ -250,6 +296,16 @@ async def process_image_message(
         diagnosis_data = MultimodalDiagnosisResponse(**parsed_json)
         reply_text = diagnosis_data.friendly_whatsapp_reply
 
+        # Validate AI vision response for safety
+        from src.decision_engine.validators import validate_generated_ai_response
+        safety_res = validate_generated_ai_response(
+            response_text=f"{reply_text} {diagnosis_data.treatment_recommendation or ''}",
+            user_message=user_caption,
+        )
+        if not safety_res.is_safe:
+            logger.warning(f"[VISION SAFETY VIOLATION] Farmer {farmer.id}: {safety_res.reasons}")
+            reply_text = safety_res.safe_response
+
         # 4. Save to Crop Health Module
         # Attempt to find the farmer's most recent crop to link the diagnosis
         result = await db.execute(
@@ -299,3 +355,56 @@ async def process_image_message(
     await db.commit()
     
     return reply_text
+
+
+async def process_voice_message(
+    db: AsyncSession,
+    farmer: Farmer,
+    conversation: Conversation,
+    audio_bytes: bytes,
+    mime_type: str,
+) -> str:
+    """
+    Voice message pipeline:
+    1. Transcribes voice audio using VoiceService.
+    2. If transcription fails or returns empty:
+       - Returns a localized retry message.
+       - Does NOT call Gemini.
+    3. If transcription succeeds:
+       - Sets conversation.user_message to the transcribed text.
+       - Reuses the existing process_text_message pipeline
+         (runs Decision Engine -> Gemini (if ANSWER) -> Safety Validator -> Final response).
+    """
+    from src.voice.service import get_voice_service
+    voice_service = get_voice_service()
+
+    preferred_lang = getattr(farmer, "preferred_language", "te-IN") or "te-IN"
+    lang_code = "te-IN" if "te" in preferred_lang.lower() else "en-IN"
+
+    transcription = await voice_service.transcribe_audio(
+        audio_bytes=audio_bytes,
+        mime_type=mime_type,
+        language_code=lang_code,
+    )
+
+    if not transcription.is_success or not transcription.text.strip():
+        logger.warning(
+            f"[VOICE PIPELINE] STT failed or empty for farmer {farmer.id}: {transcription.error_message}"
+        )
+        retry_msg = voice_service.get_stt_failure_message(preferred_lang)
+        conversation.ai_response = retry_msg
+        db.add(conversation)
+        await db.commit()
+        return retry_msg
+
+    # Successfully transcribed speech into text
+    logger.info(
+        f"[VOICE PIPELINE] Farmer {farmer.id} audio transcribed successfully: '{transcription.text}'"
+    )
+    conversation.user_message = transcription.text
+    db.add(conversation)
+    await db.commit()
+
+    # Re-route directly through existing text pipeline
+    return await process_text_message(db, farmer, conversation)
+

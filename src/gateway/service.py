@@ -123,21 +123,28 @@ async def process_message_pipeline(
                 logger.exception(f"[PIPELINE STAGE FAILED: Stage 1 - Duplicate Check] Message ID: {parsed.message_id}, Error: {dup_err}")
 
             # ── STAGE 2: Audio STT (if needed) ────────────────────────
+            stt_failed = False
             if parsed.message_type == "audio" and parsed.media_id:
                 logger.info("STAGE 2: Audio download and STT transcription started")
                 try:
                     media_result = await download_media_bytes(parsed.media_id)
                     if not media_result:
                         logger.error(f"[PIPELINE STAGE FAILED: Stage 2 - Audio Download] Failed to download media ID: {parsed.media_id}")
-                        return
-                    audio_bytes, mime_type = media_result
-                    lang_service = get_language_service()
-                    transcription = await lang_service.transcribe_audio(audio_bytes, mime_type)
-                    parsed.text_content = transcription.transcription_text
-                    logger.info(f"STAGE 2: Audio transcribed successfully: '{parsed.text_content[:100]}...'")
+                        stt_failed = True
+                    else:
+                        audio_bytes, mime_type = media_result
+                        from src.voice.service import get_voice_service
+                        voice_service = get_voice_service()
+                        transcription = await voice_service.transcribe_audio(audio_bytes, mime_type)
+                        if transcription.is_success and transcription.text.strip():
+                            parsed.text_content = transcription.text.strip()
+                            logger.info(f"STAGE 2: Audio transcribed successfully: '{parsed.text_content[:100]}...'")
+                        else:
+                            logger.warning(f"STAGE 2: STT returned empty/failed: {transcription.error_message}")
+                            stt_failed = True
                 except Exception as stt_err:
                     logger.exception(f"[PIPELINE STAGE FAILED: Stage 2 - Audio STT] Media ID: {parsed.media_id}, Error: {stt_err}")
-                    return
+                    stt_failed = True
 
             # ── STAGE 3: Farmer Resolution ────────────────────────────
             logger.info("STAGE 3: Resolving farmer profile in DB")
@@ -163,7 +170,13 @@ async def process_message_pipeline(
             try:
                 conv_ref = conversation or Conversation(farmer_id=farmer.id, user_message=parsed.text_content, user_message_type=parsed.message_type)
                 
-                if parsed.message_type == "image" and parsed.media_id:
+                if stt_failed:
+                    from src.voice.service import get_voice_service
+                    ai_response = get_voice_service().get_stt_failure_message(getattr(farmer, "preferred_language", "te"))
+                    conv_ref.ai_response = ai_response
+                    db.add(conv_ref)
+                    await db.commit()
+                elif parsed.message_type == "image" and parsed.media_id:
                     media_result = await download_media_bytes(parsed.media_id)
                     if media_result:
                         image_bytes, mime_type = media_result

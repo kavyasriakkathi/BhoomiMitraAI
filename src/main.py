@@ -64,14 +64,40 @@ def create_app() -> FastAPI:
     """Application factory — creates and configures the FastAPI instance."""
 
     settings = get_settings()
+    is_production = settings.app_env.lower() == "production"
 
     app = FastAPI(
         title="BhoomiMitra AI",
         description="AI-powered WhatsApp Farming Assistant MVP",
         version="0.1.0",
-        docs_url="/docs",
+        docs_url=None if is_production else "/docs",
         redoc_url=None,
+        openapi_url=None if is_production else "/openapi.json",
         lifespan=lifespan,
+    )
+
+    # ---- CORS Configuration ----
+    import os
+    from fastapi.middleware.cors import CORSMiddleware
+
+    if is_production:
+        raw_origins = os.getenv("CORS_ORIGINS", "")
+        if raw_origins:
+            allowed_origins = [o.strip() for o in raw_origins.split(",") if o.strip()]
+        else:
+            allowed_origins = [
+                "https://bhoomimitra.onrender.com",
+                "https://bhoomimitra-ai.onrender.com",
+            ]
+    else:
+        allowed_origins = ["*"]
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
 
     # ---- Exception Handlers ----
