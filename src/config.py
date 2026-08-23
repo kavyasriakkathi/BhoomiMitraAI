@@ -68,6 +68,20 @@ class Settings(BaseSettings):
     )
     weather_cache_ttl_seconds: int = Field(default=1800)  # 30 minutes
 
+    # Authentication & JWT
+    jwt_secret_key: str = Field(default="bhoomimitra-ai-secret-key-change-in-production-2026")
+    jwt_algorithm: str = Field(default="HS256")
+    access_token_expire_minutes: int = Field(default=15)
+    auth_cookie_name: str = Field(default="access_token")
+    auth_cookie_secure: bool = Field(default=False)
+    auth_cookie_samesite: str = Field(default="lax")
+    admin_registration_key: str = Field(default="")
+
+    # Payment Gateway (Razorpay)
+    razorpay_key_id: str = Field(default="rzp_test_bhoomimitra_mock_key")
+    razorpay_key_secret: str = Field(default="rzp_test_bhoomimitra_mock_secret")
+    razorpay_webhook_secret: str = Field(default="rzp_webhook_secret_mock_2026")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -77,6 +91,10 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @property
+    def cookie_secure(self) -> bool:
+        return self.auth_cookie_secure or self.is_production
 
 
 @lru_cache()

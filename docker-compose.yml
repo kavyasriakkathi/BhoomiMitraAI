@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bhoomimitra_web_staging
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_NAME=bhoomimitra-ai
+      - APP_ENV=staging
+      - DEBUG=false
+      - PORT=8000
+      - DATABASE_URL=postgresql+asyncpg://bhoomi_user:bhoomi_secure_pass_2026@postgres:5432/bhoomimitra_staging
+      - REDIS_URL=redis://redis:6379/0
+      - JWT_SECRET_KEY=bhoomimitra-staging-jwt-secret-key-do-not-use-in-prod-2026
+      - ACCESS_TOKEN_EXPIRE_MINUTES=15
+      - AUTH_COOKIE_NAME=access_token
+      - AUTH_COOKIE_SECURE=false
+      - ADMIN_REGISTRATION_KEY=bhoomi_admin_staging_passkey_2026
+      - RAZORPAY_KEY_ID=rzp_test_staging_key
+      - RAZORPAY_KEY_SECRET=rzp_test_staging_secret
+      - RAZORPAY_WEBHOOK_SECRET=rzp_test_webhook_secret
+      - WHATSAPP_VERIFY_TOKEN=staging_meta_verify_token
+      - WHATSAPP_API_TOKEN=staging_meta_api_token
+      - WHATSAPP_APP_SECRET=staging_meta_app_secret
+      - WHATSAPP_PHONE_NUMBER_ID=staging_meta_phone_id
+      - WHATSAPP_BUSINESS_ACCOUNT_ID=staging_meta_waba_id
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: bhoomimitra_postgres_staging
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: bhoomi_user
+      POSTGRES_PASSWORD: bhoomi_secure_pass_2026
+      POSTGRES_DB: bhoomimitra_staging
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bhoomi_user -d bhoomimitra_staging"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: bhoomimitra_redis_staging
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_staging_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_staging_data:
+  redis_staging_data:

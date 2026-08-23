@@ -10,6 +10,8 @@ from src.schemes.schemas import (
 )
 from src.schemes.service import SchemeService
 from src.schemes.dependencies import get_scheme_service
+from src.auth.dependencies import require_admin
+from src.core.models import UserAccount
 
 router = APIRouter()
 
@@ -33,11 +35,12 @@ async def list_government_schemes(
     "",
     response_model=GovernmentSchemeResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Create a new government scheme",
+    summary="Create a new government scheme (Admin only)",
     description="Register a new national or state government agriculture scheme.",
 )
 async def create_government_scheme(
     data: GovernmentSchemeCreate,
+    current_user: UserAccount = Depends(require_admin),
     service: SchemeService = Depends(get_scheme_service),
 ):
     return await service.create_scheme(data)

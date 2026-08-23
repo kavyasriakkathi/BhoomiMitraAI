@@ -5,6 +5,8 @@ from src.core.database import get_db
 from src.farmers.schemas import FarmerCreate, FarmerUpdate, FarmerResponse, PaginatedFarmerResponse
 from src.farmers.service import FarmerService
 from src.farmers.dependencies import get_farmer_service
+from src.auth.dependencies import require_admin
+from src.core.models import UserAccount
 
 router = APIRouter()
 
@@ -77,11 +79,12 @@ async def update_farmer(
 @router.delete(
     "/{farmer_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a farmer",
+    summary="Delete a farmer (Admin only)",
     description="Hard delete a farmer by their UUID."
 )
 async def delete_farmer(
     farmer_id: UUID,
+    current_user: UserAccount = Depends(require_admin),
     service: FarmerService = Depends(get_farmer_service),
     db: AsyncSession = Depends(get_db)
 ):

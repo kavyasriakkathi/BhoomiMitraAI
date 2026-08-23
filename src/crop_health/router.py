@@ -5,6 +5,8 @@ from src.core.database import get_db
 from src.crop_health.schemas import CropHealthCreate, CropHealthUpdate, CropHealthResponse, PaginatedCropHealthResponse
 from src.crop_health.service import CropHealthService
 from src.crop_health.dependencies import get_crop_health_service
+from src.auth.dependencies import require_admin
+from src.core.models import UserAccount
 
 router = APIRouter()
 
@@ -49,7 +51,7 @@ async def update_diagnosis(diagnosis_id: UUID, data: CropHealthUpdate, service: 
     return diagnosis
 
 @router.delete("/{diagnosis_id}", status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a diagnosis", description="Hard delete a crop health diagnosis record by its UUID.")
-async def delete_diagnosis(diagnosis_id: UUID, service: CropHealthService = Depends(get_crop_health_service), db: AsyncSession = Depends(get_db)):
+    summary="Delete a diagnosis (Admin only)", description="Hard delete a crop health diagnosis record by its UUID.")
+async def delete_diagnosis(diagnosis_id: UUID, current_user: UserAccount = Depends(require_admin), service: CropHealthService = Depends(get_crop_health_service), db: AsyncSession = Depends(get_db)):
     await service.delete_diagnosis(diagnosis_id)
     await db.commit()

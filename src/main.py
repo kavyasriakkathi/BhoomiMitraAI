@@ -78,6 +78,16 @@ def create_app() -> FastAPI:
     app.add_exception_handler(BhoomiMitraException, bhoomimitra_exception_handler)
     app.add_exception_handler(Exception, global_exception_handler)
 
+    # ---- CORS Middleware ----
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     # ---- Health Check ----
     @app.get("/health", tags=["System"])
     async def health_check():
@@ -112,6 +122,7 @@ def create_app() -> FastAPI:
     from src.crop_health.router import router as crop_health_router
     from src.advisory.router import router as advisory_router
     from src.ai.router import router as ai_router
+    from src.auth.router import router as auth_router
     from src.shops.router import router as shops_router
     from src.inventory.router import router as inventory_router
     from src.orders.router import router as orders_router
@@ -121,7 +132,9 @@ def create_app() -> FastAPI:
     from src.market.router import router as market_router
     from src.weather.router import router as weather_router
     from src.escalation.router import router as escalation_router
+    from src.payments.router import router as payments_router
 
+    app.include_router(auth_router, prefix="/auth", tags=["Authentication & RBAC"])
     app.include_router(gateway_router, prefix="/webhook", tags=["WhatsApp"])
     app.include_router(farmers_router, prefix="/farmers", tags=["Farmers"])
     app.include_router(farmer_profiles_router, prefix="/farmer-profiles", tags=["Farmer Profiles"])
@@ -133,6 +146,7 @@ def create_app() -> FastAPI:
     app.include_router(shops_router, prefix="/shops", tags=["Agri Shops"])
     app.include_router(inventory_router, prefix="/inventory", tags=["Inventory Management"])
     app.include_router(orders_router, prefix="/orders", tags=["Order Requests & Cart"])
+    app.include_router(payments_router, prefix="/payments", tags=["Payments"])
     app.include_router(schemes_router, prefix="/schemes", tags=["Government Schemes"])
     app.include_router(memory_router, prefix="/memory", tags=["Farmer Memory Profile"])
     app.include_router(rag_router, prefix="/rag", tags=["RAG Knowledge Engine"])

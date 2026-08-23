@@ -10,6 +10,8 @@ from src.farmer_profiles.schemas import (
 )
 from src.farmer_profiles.service import FarmerProfileService
 from src.farmer_profiles.dependencies import get_farmer_profile_service
+from src.auth.dependencies import require_admin
+from src.core.models import UserAccount
 
 router = APIRouter()
 
@@ -95,11 +97,12 @@ async def update_farmer_profile(
 @router.delete(
     "/{profile_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a farmer profile",
+    summary="Delete a farmer profile (Admin only)",
     description="Hard delete a farmer profile by its UUID."
 )
 async def delete_farmer_profile(
     profile_id: UUID,
+    current_user: UserAccount = Depends(require_admin),
     service: FarmerProfileService = Depends(get_farmer_profile_service),
     db: AsyncSession = Depends(get_db)
 ):

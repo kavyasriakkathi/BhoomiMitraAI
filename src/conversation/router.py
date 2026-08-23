@@ -10,6 +10,8 @@ from src.conversation.schemas import (
 )
 from src.conversation.service import ConversationService
 from src.conversation.dependencies import get_conversation_service
+from src.auth.dependencies import require_admin
+from src.core.models import UserAccount
 
 router = APIRouter()
 
@@ -109,11 +111,12 @@ async def update_conversation(
 @router.delete(
     "/{conversation_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete a conversation",
+    summary="Delete a conversation (Admin only)",
     description="Hard delete a conversation record by its UUID.",
 )
 async def delete_conversation(
     conversation_id: UUID,
+    current_user: UserAccount = Depends(require_admin),
     service: ConversationService = Depends(get_conversation_service),
     db: AsyncSession = Depends(get_db),
 ):

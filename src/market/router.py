@@ -19,6 +19,9 @@ from src.market.schemas import (
 from src.market.service import MarketService
 from src.market.dependencies import get_market_service
 from src.config import get_settings
+from src.auth.dependencies import get_optional_current_user
+from src.auth.constants import UserRole
+from src.core.models import UserAccount
 
 router = APIRouter()
 
@@ -79,24 +82,26 @@ async def list_commodities(
     summary="[Admin] Manually seed a market price record",
     description=(
         "Inserts a single market price record into the local database. "
-        "Requires the X-Admin-Token header matching WHATSAPP_VERIFY_TOKEN "
-        "(the simplest available secret in this project). "
+        "Requires active Admin session or X-Admin-Token header matching WHATSAPP_VERIFY_TOKEN. "
         "Skips insertion if the exact same commodity + market + date already exists."
     ),
 )
 async def create_market_price(
     data: MarketPriceCreate,
     x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token"),
+    current_user: Optional[UserAccount] = Depends(get_optional_current_user),
     service: MarketService = Depends(get_market_service),
 ) -> MarketPriceResponse:
-    # Simple token check using the existing WHATSAPP_VERIFY_TOKEN secret
-    # (no dedicated auth system exists in this project)
     settings = get_settings()
     expected = settings.whatsapp_verify_token
-    if not expected or x_admin_token != expected:
+
+    is_admin_session = current_user and current_user.role == UserRole.ADMIN
+    is_admin_header = expected and x_admin_token == expected
+
+    if not (is_admin_session or is_admin_header):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Valid X-Admin-Token header required.",
+            detail="Admin authentication or valid X-Admin-Token header required.",
         )
 
     result = await service.create_price(data)

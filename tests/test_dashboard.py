@@ -94,3 +94,39 @@ async def test_terms_get_and_head_methods():
         assert res_head.status_code == 200, f"Expected 200 for HEAD, got {res_head.status_code}"
         assert "text/html" in res_head.headers["content-type"]
 
+
+@pytest.mark.asyncio
+async def test_dashboard_renders_auth_and_expert_ui():
+    """Verify dashboard HTML contains the authentication modal, auth buttons, and expert views."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        res = await client.get("/dashboard")
+        assert res.status_code == 200
+        html = res.text
+        # Auth navbar elements
+        assert "btn-nav-login" in html
+        assert "user-profile-badge" in html
+        assert "auth-controls" in html
+        # Expert Dashboard view
+        assert "view-expert" in html
+        assert "Expert Dashboard" in html
+        # Auth modal with login & registration forms
+        assert "modal-auth" in html
+        assert "form-auth-login" in html
+        assert "form-auth-register" in html
+
+
+@pytest.mark.asyncio
+async def test_app_js_cookie_handling_security():
+    """Verify frontend app.js does not store auth tokens in localStorage or sessionStorage."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        res = await client.get("/static/app.js")
+        assert res.status_code == 200
+        js_code = res.text
+        assert "localStorage.setItem('token'" not in js_code
+        assert "localStorage.setItem('access_token'" not in js_code
+        assert "sessionStorage.setItem('token'" not in js_code
+        assert "credentials: 'include'" in js_code
+        assert "checkAuthStatus" in js_code
+        assert "handleAuthLogin" in js_code
+
+

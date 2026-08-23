@@ -12,11 +12,24 @@ class OrderRepository:
         self.db = db
 
     async def create(self, data: OrderRequestCreate) -> OrderRequest:
-        # Fetch inventory item details for snapshot pricing
+        # Fetch inventory item details for snapshot pricing and availability check
         res = await self.db.execute(select(Inventory).where(Inventory.id == data.inventory_id))
         inventory_item = res.scalar_one_or_none()
         if not inventory_item:
             raise ValueError(f"Inventory product '{data.inventory_id}' not found.")
+
+        # Business Rule: Ensure inventory item belongs to the specified shop
+        if inventory_item.shop_id != data.shop_id:
+            raise ValueError(f"Inventory item '{data.inventory_id}' does not belong to shop '{data.shop_id}'.")
+
+        # Business Rule: Ensure item is available and has sufficient stock
+        if not inventory_item.available or inventory_item.quantity_in_stock <= 0:
+            raise ValueError(f"Product '{inventory_item.product_name}' is currently out of stock.")
+
+        if data.quantity > inventory_item.quantity_in_stock:
+            raise ValueError(
+                f"Requested quantity ({data.quantity}) exceeds available stock ({inventory_item.quantity_in_stock})."
+            )
 
         price = inventory_item.discount_price if inventory_item.discount_price else inventory_item.price
         total = round(price * data.quantity, 2)
@@ -32,6 +45,8 @@ class OrderRepository:
             quantity=data.quantity,
             total_price=total,
             status="Pending",
+            payment_status="Pending",
+            payment_method=data.payment_method or "Online",
             notes=data.notes,
         )
 
@@ -49,7 +64,30 @@ class OrderRepository:
         if not order:
             return None
 
-        order.status = data.status
+        current_status = order.status
+        new_status = data.status
+
+        # Business Rule: Terminal state enforcement
+        if current_status in ["Completed", "Cancelled"] and current_status != new_status:
+            raise ValueError(f"Cannot change status of an order that is already '{current_status}'.")
+
+        # Business Rule: Cannot complete an unpaid order
+        if new_status == "Completed" and order.payment_status != "Paid" and order.payment_method != "COD":
+            raise ValueError(f"Cannot complete unpaid order '{order_id}'. Payment status is '{order.payment_status}'.")
+
+        # Business Rule: When order transitions to Completed, deduct inventory quantity
+        if current_status != "Completed" and new_status == "Completed":
+            inv_res = await self.db.execute(select(Inventory).where(Inventory.id == order.inventory_id))
+            inv_item = inv_res.scalar_one_or_none()
+            if inv_item:
+                new_qty = max(0, inv_item.quantity_in_stock - order.quantity)
+                inv_item.quantity_in_stock = new_qty
+                if new_qty == 0:
+                    inv_item.available = False
+                inv_item.last_updated = datetime.utcnow()
+                self.db.add(inv_item)
+
+        order.status = new_status
         if data.notes:
             order.notes = (order.notes or "") + f" [{data.notes}]"
         order.updated_at = datetime.utcnow()

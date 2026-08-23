@@ -11,6 +11,8 @@ from src.inventory.schemas import (
 )
 from src.inventory.service import InventoryService
 from src.inventory.dependencies import get_inventory_service
+from src.auth.dependencies import require_shop_owner, verify_shop_access
+from src.core.models import UserAccount
 
 router = APIRouter()
 
@@ -18,9 +20,11 @@ router = APIRouter()
 @router.post("", response_model=InventoryResponse, status_code=status.HTTP_201_CREATED)
 async def add_product(
     payload: InventoryCreate,
+    current_user: UserAccount = Depends(require_shop_owner),
     service: InventoryService = Depends(get_inventory_service),
 ):
-    """Add a new product to an Agri Shop inventory."""
+    """Add a new product to an Agri Shop inventory (Shop Owner or Admin)."""
+    verify_shop_access(current_user, payload.shop_id)
     return await service.add_product(payload)
 
 
@@ -55,27 +59,33 @@ async def list_shop_products(
 @router.get("/dashboard/{shop_id}", response_model=ShopDashboardSummaryResponse)
 async def get_shop_dashboard(
     shop_id: UUID,
+    current_user: UserAccount = Depends(require_shop_owner),
     service: InventoryService = Depends(get_inventory_service),
 ):
     """Shop Owner Dashboard: Summary of stock counts, low stock alerts, and out of stock items."""
+    verify_shop_access(current_user, shop_id)
     return await service.get_dashboard_summary(shop_id)
 
 
 @router.get("/dashboard/{shop_id}/low-stock", response_model=List[InventoryResponse])
 async def get_low_stock_products(
     shop_id: UUID,
+    current_user: UserAccount = Depends(require_shop_owner),
     service: InventoryService = Depends(get_inventory_service),
 ):
     """View low stock items for a shop."""
+    verify_shop_access(current_user, shop_id)
     return await service.get_low_stock_products(shop_id)
 
 
 @router.get("/dashboard/{shop_id}/out-of-stock", response_model=List[InventoryResponse])
 async def get_out_of_stock_products(
     shop_id: UUID,
+    current_user: UserAccount = Depends(require_shop_owner),
     service: InventoryService = Depends(get_inventory_service),
 ):
     """View out of stock items for a shop."""
+    verify_shop_access(current_user, shop_id)
     return await service.get_out_of_stock_products(shop_id)
 
 
@@ -92,9 +102,12 @@ async def get_product(
 async def update_product(
     item_id: UUID,
     payload: InventoryUpdate,
+    current_user: UserAccount = Depends(require_shop_owner),
     service: InventoryService = Depends(get_inventory_service),
 ):
     """Update inventory product details and price."""
+    existing_product = await service.get_product_by_id(item_id)
+    verify_shop_access(current_user, existing_product.shop_id)
     return await service.update_product(item_id, payload)
 
 
@@ -102,16 +115,23 @@ async def update_product(
 async def update_stock(
     item_id: UUID,
     payload: StockUpdatePayload,
+    current_user: UserAccount = Depends(require_shop_owner),
     service: InventoryService = Depends(get_inventory_service),
 ):
     """Update product stock quantity and availability."""
+    existing_product = await service.get_product_by_id(item_id)
+    verify_shop_access(current_user, existing_product.shop_id)
     return await service.update_stock(item_id, payload)
 
 
 @router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_product(
     item_id: UUID,
+    current_user: UserAccount = Depends(require_shop_owner),
     service: InventoryService = Depends(get_inventory_service),
 ):
     """Delete an inventory product."""
+    existing_product = await service.get_product_by_id(item_id)
+    verify_shop_access(current_user, existing_product.shop_id)
     await service.delete_product(item_id)
+

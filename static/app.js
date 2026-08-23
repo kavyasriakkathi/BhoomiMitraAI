@@ -4,10 +4,18 @@
    Voice Shopping, Voice Order Tracking, Voice Scanner, and DB Sync
    ========================================================================== */
 
+/* ==========================================================================
+   BhoomiMitra AI — Voice-First SPA Frontend Controller & Intent Engine
+   Integrates 11 Indian Languages, Speech Recognition, TTS Synthesis,
+   Voice Shopping, Voice Order Tracking, Voice Scanner, and DB Sync
+   ========================================================================== */
+
 let currentRole = 'farmer';
 let currentLanguage = 'en';
+let currentUser = null;
 let activeFarmerId = null;
 let activeShopId = null;
+let activeExpertId = null;
 let chartInstance = null;
 let chatPollingTimer = null;
 let lastKnownConversationCount = 0;
@@ -23,18 +31,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 async function initializeData() {
   try {
-    // 1. Fetch first registered shop
-    const shopRes = await fetch('/shops?page=1&size=1');
-    if (shopRes.ok) {
-      const shopData = await shopRes.json();
-      if (shopData.items && shopData.items.length > 0) {
-        activeShopId = shopData.items[0].id;
-        populateShopProfileForm(shopData.items[0]);
-      }
-    }
+    // 1. Check user authentication status via HttpOnly session cookie
+    await checkAuthStatus();
 
-    // 2. Fetch first farmer
-    const farmerRes = await fetch('/farmers?page=1&size=1');
+    // 2. Fetch first farmer for voice AI / chat testing
+    const farmerRes = await fetch('/farmers?page=1&size=1', { credentials: 'include' });
     if (farmerRes.ok) {
       const farmerData = await farmerRes.json();
       if (farmerData.items && farmerData.items.length > 0) {
@@ -49,68 +50,277 @@ async function initializeData() {
       }
     }
 
-    // 3. Load initial views
+    // 3. Load public farmer views
     await loadNearbyShops();
     await loadFarmerOrders();
     if (activeFarmerId) {
       await loadFarmerChatMessages();
-    }
-    if (activeShopId) {
-      await loadShopOwnerData();
     }
   } catch (err) {
     console.error("Failed to initialize dashboard data:", err);
   }
 }
 
-// Language Switching Engine for 11 Indian Languages
-function changeLanguage(lang) {
-  currentLanguage = lang;
-  voiceEngine.setLanguage(lang);
-  applyLanguageTranslation(lang);
+// ==========================================================================
+// AUTHENTICATION & RBAC CONTROLLER
+// ==========================================================================
 
-  // Spoken confirmation in selected language
-  const welcomeText = t('aiBannerSub', lang);
-  voiceEngine.speakText(welcomeText, lang);
+async function checkAuthStatus() {
+  try {
+    const res = await fetch('/auth/me', { credentials: 'include' });
+    if (res.ok) {
+      currentUser = await res.json();
+      updateAuthUI();
+
+      // Configure role IDs
+      if (currentUser.role === 'shop_owner' && currentUser.shop_id) {
+        activeShopId = currentUser.shop_id;
+        loadShopOwnerData();
+      } else if (currentUser.role === 'expert' && currentUser.expert_id) {
+        activeExpertId = currentUser.expert_id;
+        loadExpertDashboardData();
+      } else if (currentUser.role === 'admin') {
+        // Admin has universal access
+        if (!activeShopId) {
+          const shopRes = await fetch('/shops?page=1&size=1', { credentials: 'include' });
+          if (shopRes.ok) {
+            const data = await shopRes.json();
+            if (data.items && data.items.length > 0) {
+              activeShopId = data.items[0].id;
+            }
+          }
+        }
+      }
+    } else {
+      currentUser = null;
+      activeShopId = null;
+      activeExpertId = null;
+      updateAuthUI();
+    }
+  } catch (err) {
+    console.warn("Auth check error:", err);
+    currentUser = null;
+    activeShopId = null;
+    activeExpertId = null;
+    updateAuthUI();
+  }
 }
 
-function applyLanguageTranslation(lang) {
-  // Update text for all registered UI element IDs
-  const elementsToTranslate = [
-    'ui-brand-name', 'ui-brand-sub', 'ui-role-farmer', 'ui-role-shop',
-    'ui-profile-title', 'ui-ai-banner-title', 'ui-tab-shops', 'ui-tab-search',
-    'ui-tab-orders', 'ui-tab-chat', 'ui-nearby-heading', 'ui-search-btn',
-    'ui-orders-heading', 'ui-refresh-btn', 'ui-chat-heading', 'ui-send-btn',
-    'ui-stat-total-products', 'ui-stat-low-stock', 'ui-stat-active-orders',
-    'ui-stat-total-revenue', 'ui-shop-orders-title', 'ui-shop-inventory-title',
-    'ui-add-product-btn', 'ui-shop-profile-title', 'ui-save-profile-btn',
-    'ui-order-modal-title', 'ui-confirm-order'
-  ];
+function updateAuthUI() {
+  const btnLogin = document.getElementById('btn-nav-login');
+  const userBadge = document.getElementById('user-profile-badge');
+  const emailDisplay = document.getElementById('user-email-display');
+  const roleBadge = document.getElementById('user-role-badge');
 
-  elementsToTranslate.forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-      const translationKey = id.replace(/^ui-/, '').replace(/-([a-z])/g, (g) => g[1].toUpperCase());
-      const translatedText = t(translationKey, lang);
-      if (translatedText && translatedText !== translationKey) {
-        el.innerText = translatedText;
-      }
+  if (currentUser) {
+    if (btnLogin) btnLogin.style.display = 'none';
+    if (userBadge) userBadge.style.display = 'flex';
+    if (emailDisplay) emailDisplay.innerText = currentUser.email;
+    if (roleBadge) {
+      roleBadge.innerText = currentUser.role.replace('_', ' ').toUpperCase();
+      roleBadge.className = `badge badge-${currentUser.role === 'admin' ? 'open' : currentUser.role === 'expert' ? 'accepted' : 'completed'}`;
     }
-  });
+  } else {
+    if (btnLogin) btnLogin.style.display = 'inline-block';
+    if (userBadge) userBadge.style.display = 'none';
+  }
+}
 
-  // Update input placeholders
-  const searchInput = document.getElementById('search-product-input');
-  if (searchInput) searchInput.placeholder = t('searchPlaceholder', lang);
+function openAuthModal(mode = 'login') {
+  const modal = document.getElementById('modal-auth');
+  if (!modal) return;
+  modal.classList.add('active');
+  hideAuthAlert();
+  switchAuthTab(mode);
+}
 
-  const chatInput = document.getElementById('chat-user-input');
-  if (chatInput) chatInput.placeholder = t('chatPlaceholder', lang);
+function switchAuthTab(tab) {
+  const btnLogin = document.getElementById('auth-tab-btn-login');
+  const btnRegister = document.getElementById('auth-tab-btn-register');
+  const formLogin = document.getElementById('form-auth-login');
+  const formRegister = document.getElementById('form-auth-register');
+  const title = document.getElementById('modal-auth-title');
 
-  // Update voice state pill
-  voiceEngine.updateVisualizerState();
+  hideAuthAlert();
+
+  if (tab === 'login') {
+    if (btnLogin) btnLogin.classList.add('active');
+    if (btnRegister) btnRegister.classList.remove('active');
+    if (formLogin) formLogin.style.display = 'block';
+    if (formRegister) formRegister.style.display = 'none';
+    if (title) title.innerText = "🔐 Sign In to BhoomiMitra AI";
+  } else {
+    if (btnRegister) btnRegister.classList.add('active');
+    if (btnLogin) btnLogin.classList.remove('active');
+    if (formRegister) formRegister.style.display = 'block';
+    if (formLogin) formLogin.style.display = 'none';
+    if (title) title.innerText = "📝 Register New Account";
+  }
+}
+
+function onRegisterRoleChange(role) {
+  const shopGroup = document.getElementById('reg-group-shop');
+  const expertGroup = document.getElementById('reg-group-expert');
+  const adminGroup = document.getElementById('reg-group-admin');
+
+  if (shopGroup) shopGroup.style.display = role === 'shop_owner' ? 'block' : 'none';
+  if (expertGroup) expertGroup.style.display = role === 'expert' ? 'block' : 'none';
+  if (adminGroup) adminGroup.style.display = role === 'admin' ? 'block' : 'none';
+}
+
+function showAuthAlert(message, isError = true) {
+  const banner = document.getElementById('auth-alert');
+  const text = document.getElementById('auth-alert-text');
+  if (!banner || !text) return;
+
+  text.innerText = message;
+  banner.className = `alert-banner ${isError ? 'auth-alert-error' : 'auth-alert-success'}`;
+  banner.style.display = 'block';
+}
+
+function hideAuthAlert() {
+  const banner = document.getElementById('auth-alert');
+  if (banner) banner.style.display = 'none';
+}
+
+async function handleAuthLogin(e) {
+  e.preventDefault();
+  hideAuthAlert();
+
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const submitBtn = document.getElementById('btn-submit-login');
+
+  if (!email || !password) {
+    showAuthAlert("Please enter both email and password.", true);
+    return;
+  }
+
+  try {
+    if (submitBtn) submitBtn.disabled = true;
+    const res = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include', // Sets the HttpOnly cookie automatically
+      body: JSON.stringify({ email, password }),
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      closeModal('modal-auth');
+      await checkAuthStatus();
+
+      // Automatically navigate to their dashboard
+      if (currentUser.role === 'shop_owner') {
+        switchDashboardRole('shop');
+      } else if (currentUser.role === 'expert') {
+        switchDashboardRole('expert');
+      } else if (currentUser.role === 'admin') {
+        switchDashboardRole('rag');
+      }
+
+      voiceEngine.speakText(`Welcome back, ${currentUser.email.split('@')[0]}!`, currentLanguage);
+    } else {
+      const errMsg = (data && data.error && data.error.message) || data.detail || "Authentication failed. Please check credentials.";
+      showAuthAlert(`⚠️ ${errMsg}`, true);
+    }
+  } catch (err) {
+    showAuthAlert(`Network error: ${err.message}`, true);
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+async function handleAuthRegister(e) {
+  e.preventDefault();
+  hideAuthAlert();
+
+  const role = document.getElementById('reg-role').value;
+  const email = document.getElementById('reg-email').value.trim();
+  const password = document.getElementById('reg-password').value;
+  const shopId = document.getElementById('reg-shop-id').value.trim() || null;
+  const expertId = document.getElementById('reg-expert-id').value.trim() || null;
+  const adminKey = document.getElementById('reg-admin-key').value.trim() || null;
+  const submitBtn = document.getElementById('btn-submit-register');
+
+  const payload = {
+    email,
+    password,
+    role,
+    shop_id: role === 'shop_owner' ? shopId : null,
+    expert_id: role === 'expert' ? expertId : null,
+    admin_creation_key: role === 'admin' ? adminKey : null,
+  };
+
+  try {
+    if (submitBtn) submitBtn.disabled = true;
+    const res = await fetch('/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      showAuthAlert("🎉 Account created successfully! Please sign in with your credentials.", false);
+      setTimeout(() => {
+        switchAuthTab('login');
+        const loginEmailInput = document.getElementById('login-email');
+        if (loginEmailInput) loginEmailInput.value = email;
+      }, 1200);
+    } else {
+      const errMsg = (data && data.error && data.error.message) || data.detail || "Registration failed.";
+      showAuthAlert(`⚠️ ${errMsg}`, true);
+    }
+  } catch (err) {
+    showAuthAlert(`Network error: ${err.message}`, true);
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+async function authLogout() {
+  try {
+    await fetch('/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+    });
+  } catch (err) {
+    console.warn("Logout error:", err);
+  } finally {
+    currentUser = null;
+    activeShopId = null;
+    activeExpertId = null;
+    updateAuthUI();
+    switchDashboardRole('farmer');
+    alert("👋 You have been logged out successfully.");
+  }
 }
 
 // Role Switching
 function switchDashboardRole(role) {
+  // Check authorization permissions
+  if (role === 'shop') {
+    if (!currentUser || (currentUser.role !== 'shop_owner' && currentUser.role !== 'admin')) {
+      openAuthModal('login');
+      showAuthAlert("Please log in with an Agri Shop Owner or Admin account to access shop management.", true);
+      return;
+    }
+  } else if (role === 'expert') {
+    if (!currentUser || (currentUser.role !== 'expert' && currentUser.role !== 'admin')) {
+      openAuthModal('login');
+      showAuthAlert("Please log in with an Agricultural Expert or Admin account to view consultations.", true);
+      return;
+    }
+  } else if (role === 'rag') {
+    if (!currentUser || currentUser.role !== 'admin') {
+      openAuthModal('login');
+      showAuthAlert("Platform Administrator privileges are required to access the Knowledge Center.", true);
+      return;
+    }
+  }
+
   currentRole = role;
   document.querySelectorAll('.role-btn').forEach(btn => btn.classList.remove('active'));
   document.querySelectorAll('.dashboard-view').forEach(view => {
@@ -119,20 +329,31 @@ function switchDashboardRole(role) {
   });
 
   if (role === 'farmer') {
-    document.getElementById('btn-role-farmer').classList.add('active');
+    const btn = document.getElementById('btn-role-farmer');
+    if (btn) btn.classList.add('active');
     const farmerView = document.getElementById('view-farmer');
     if (farmerView) {
       farmerView.classList.add('active');
       farmerView.style.display = 'block';
     }
   } else if (role === 'shop') {
-    document.getElementById('btn-role-shop').classList.add('active');
+    const btn = document.getElementById('btn-role-shop');
+    if (btn) btn.classList.add('active');
     const shopView = document.getElementById('view-shop');
     if (shopView) {
       shopView.classList.add('active');
       shopView.style.display = 'block';
     }
     loadShopOwnerData();
+  } else if (role === 'expert') {
+    const btn = document.getElementById('btn-role-expert');
+    if (btn) btn.classList.add('active');
+    const expertView = document.getElementById('view-expert');
+    if (expertView) {
+      expertView.classList.add('active');
+      expertView.style.display = 'block';
+    }
+    loadExpertDashboardData();
   } else if (role === 'rag') {
     const ragBtn = document.getElementById('btn-role-rag');
     if (ragBtn) ragBtn.classList.add('active');
@@ -613,22 +834,110 @@ async function loadFarmerOrders() {
     const data = await res.json();
 
     if (data.items.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6">No purchase requests submitted yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7">No purchase requests submitted yet.</td></tr>';
       return;
     }
 
-    tbody.innerHTML = data.items.map(o => `
+    tbody.innerHTML = data.items.map(o => {
+      const isPaid = o.payment_status === 'Paid';
+      const payBadge = isPaid
+        ? '<span class="badge badge-accepted" style="background:#10b981; color:#fff;">💳 Paid</span>'
+        : (o.status === 'Cancelled'
+            ? '<span class="badge badge-cancelled">Cancelled</span>'
+            : `<button class="btn btn-primary btn-sm" onclick="payForOrder('${o.id}')" style="padding:3px 10px; font-size:12px; border-radius:4px;">💳 Pay Now (₹${o.total_price})</button>`);
+
+      return `
       <tr>
         <td>${o.id.substring(0, 8)}...</td>
         <td><strong>${escapeHtml(o.product_name)}</strong> (${escapeHtml(o.brand || '')})</td>
         <td>${o.quantity} ${o.unit}s</td>
         <td>₹${o.total_price}</td>
         <td><span class="badge badge-${o.status.toLowerCase()}">${o.status}</span></td>
+        <td>${payBadge}</td>
         <td>${new Date(o.created_at).toLocaleDateString()}</td>
-      </tr>
-    `).join('');
+      </tr>`;
+    }).join('');
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6" style="color:red;">Error loading orders</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" style="color:red;">Error loading orders</td></tr>`;
+  }
+}
+
+async function payForOrder(orderId) {
+  try {
+    const res = await fetch('/payments/create-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_id: orderId }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json();
+      alert("Failed to initiate payment: " + (err.detail || "Error"));
+      return;
+    }
+
+    const orderData = await res.json();
+
+    if (window.Razorpay && !orderData.key_id.startsWith("rzp_test_bhoomimitra_mock")) {
+      const options = {
+        key: orderData.key_id,
+        amount: orderData.amount_in_paise,
+        currency: orderData.currency,
+        name: "BhoomiMitra AI",
+        description: `Payment for ${orderData.product_name}`,
+        order_id: orderData.razorpay_order_id,
+        handler: async function (response) {
+          await verifyPaymentOnBackend(orderId, response);
+        },
+        prefill: {
+          contact: orderData.customer_phone || "",
+        },
+        theme: {
+          color: "#16a34a",
+        },
+      };
+      const rzp = new window.Razorpay(options);
+      rzp.open();
+    } else {
+      // Local development / Test checkout simulation
+      const proceed = confirm(`💳 BhoomiMitra Razorpay Checkout\n\nProduct: ${orderData.product_name}\nAmount: ₹${orderData.amount_in_paise / 100}\nRazorpay Order: ${orderData.razorpay_order_id}\n\nClick OK to simulate successful payment.`);
+      if (proceed) {
+        const mockPaymentId = `pay_mock_${Date.now().toString(36)}`;
+        await verifyPaymentOnBackend(orderId, {
+          razorpay_order_id: orderData.razorpay_order_id,
+          razorpay_payment_id: mockPaymentId,
+          // Generate valid HMAC matching mock secret for test mode
+          razorpay_signature: "mock_signature_test_mode",
+        });
+      }
+    }
+  } catch (err) {
+    alert("Payment error: " + err.message);
+  }
+}
+
+async function verifyPaymentOnBackend(orderId, rzpResponse) {
+  try {
+    const res = await fetch('/payments/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        order_id: orderId,
+        razorpay_order_id: rzpResponse.razorpay_order_id,
+        razorpay_payment_id: rzpResponse.razorpay_payment_id,
+        razorpay_signature: rzpResponse.razorpay_signature,
+      }),
+    });
+
+    if (res.ok) {
+      alert("🎉 Payment successful! Your order is now marked as Paid and ready for shop confirmation.");
+      loadFarmerOrders();
+    } else {
+      const err = await res.json();
+      alert("⚠️ Payment verification failed: " + (err.detail || "Error"));
+    }
+  } catch (err) {
+    alert("Verification error: " + err.message);
   }
 }
 
@@ -704,7 +1013,7 @@ async function loadShopOwnerData() {
 
 async function loadShopDashboardStats() {
   try {
-    const dashRes = await fetch(`/inventory/dashboard/${activeShopId}`);
+    const dashRes = await fetch(`/inventory/dashboard/${activeShopId}`, { credentials: 'include' });
     if (dashRes.ok) {
       const dash = await dashRes.json();
       document.getElementById('stat-total-products').innerText = dash.total_products;
@@ -718,7 +1027,7 @@ async function loadShopDashboardStats() {
       }
     }
 
-    const analyticsRes = await fetch(`/orders/analytics/${activeShopId}`);
+    const analyticsRes = await fetch(`/orders/analytics/${activeShopId}`, { credentials: 'include' });
     if (analyticsRes.ok) {
       const analytics = await analyticsRes.json();
       document.getElementById('stat-active-orders').innerText = analytics.pending_orders + analytics.accepted_orders;
@@ -736,7 +1045,7 @@ async function loadShopOrders() {
   tbody.innerHTML = '<tr><td colspan="6">Loading incoming orders...</td></tr>';
 
   try {
-    const res = await fetch(`/orders/shop/${activeShopId}`);
+    const res = await fetch(`/orders/shop/${activeShopId}`, { credentials: 'include' });
     if (!res.ok) throw new Error('Failed to load orders');
     const data = await res.json();
 
@@ -770,6 +1079,7 @@ async function updateOrderStatus(orderId, newStatus) {
     const res = await fetch(`/orders/${orderId}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ status: newStatus })
     });
     if (res.ok) {
@@ -789,7 +1099,7 @@ async function loadShopInventory() {
   tbody.innerHTML = '<tr><td colspan="8">Loading inventory...</td></tr>';
 
   try {
-    const res = await fetch(`/inventory/shop/${activeShopId}`);
+    const res = await fetch(`/inventory/shop/${activeShopId}`, { credentials: 'include' });
     if (!res.ok) throw new Error('Failed to load inventory');
     const data = await res.json();
 
@@ -850,6 +1160,7 @@ async function saveInventoryProduct(e) {
     const res = await fetch('/inventory', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify(payload)
     });
     if (res.ok) {
@@ -877,6 +1188,7 @@ async function quickStockPrompt(itemId, currentQty) {
     const res = await fetch(`/inventory/${itemId}/stock`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({ quantity_in_stock: parsed })
     });
     if (res.ok) {
@@ -890,7 +1202,10 @@ async function quickStockPrompt(itemId, currentQty) {
 async function deleteProduct(itemId) {
   if (!confirm("Are you sure you want to delete this product?")) return;
   try {
-    const res = await fetch(`/inventory/${itemId}`, { method: 'DELETE' });
+    const res = await fetch(`/inventory/${itemId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
     if (res.ok) loadShopOwnerData();
   } catch (err) {
     alert("Delete failed.");
@@ -923,13 +1238,14 @@ async function saveShopProfile(e) {
     const res = await fetch(`/shops/${activeShopId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify(payload)
     });
     if (res.ok) {
       alert("✅ Shop Profile updated successfully!");
     }
   } catch (err) {
-    alert("Error updating profile");
+    alert("Error updating profile: " + err.message);
   }
 }
 
@@ -1158,6 +1474,7 @@ async function handleRagDocumentUpload(event) {
     const res = await fetch('/rag/upload', {
       method: 'POST',
       body: formData,
+      credentials: 'include',
     });
 
     if (res.ok) {
@@ -1178,7 +1495,10 @@ async function deleteRagDocument(docId) {
   if (!confirm("Are you sure you want to delete this document and all its indexed vector chunks?")) return;
 
   try {
-    const res = await fetch(`/rag/document/${docId}`, { method: 'DELETE' });
+    const res = await fetch(`/rag/document/${docId}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    });
     if (res.ok) {
       alert("✅ Document deleted successfully.");
       loadRagDocuments();
@@ -1193,7 +1513,10 @@ async function deleteRagDocument(docId) {
 
 async function rebuildRagVectorIndex() {
   try {
-    const res = await fetch('/rag/rebuild', { method: 'POST' });
+    const res = await fetch('/rag/rebuild', {
+      method: 'POST',
+      credentials: 'include',
+    });
     if (res.ok) {
       const result = await res.json();
       alert(`✅ Vector Index Rebuilt!\nProcessed: ${result.documents_processed} documents\nTotal Chunks: ${result.total_chunks}`);

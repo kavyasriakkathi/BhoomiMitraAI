@@ -6,7 +6,9 @@ from logging.config import fileConfig
 # Ensure current working directory is in sys.path
 sys.path.insert(0, os.getcwd())
 
+import sqlalchemy as sa
 from sqlalchemy import pool
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
@@ -36,6 +38,13 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 target_metadata = Base.metadata
 
+def custom_compare_type(context, inspected_column, metadata_column, inspected_type, metadata_type):
+    """Handle SQLite UUID reflection compatibility."""
+    if isinstance(metadata_type, (sa.UUID, postgresql.UUID)) or getattr(metadata_type, '__visit_name__', '') == 'UUID' or str(metadata_type).upper().startswith('UUID'):
+        if isinstance(inspected_type, (sa.NUMERIC, sa.types.NullType, sa.TEXT, sa.String)):
+            return False
+    return None
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
@@ -44,13 +53,20 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        compare_type=custom_compare_type,
+        render_as_batch=True,
     )
 
     with context.begin_transaction():
         context.run_migrations()
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        compare_type=custom_compare_type,
+        render_as_batch=True,
+    )
 
     with context.begin_transaction():
         context.run_migrations()

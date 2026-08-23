@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, Float, ForeignKey, Text, Integer
+from sqlalchemy import Column, String, Boolean, DateTime, Float, ForeignKey, Text, Integer, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from src.core.database import Base
@@ -109,6 +109,23 @@ class Expert(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+class UserAccount(Base):
+    """Authentication account for dashboard users."""
+    __tablename__ = "user_accounts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    role = Column(String(30), nullable=False)
+    is_active = Column(Boolean, default=True)
+
+    expert_id = Column(UUID(as_uuid=True), ForeignKey("experts.id"), unique=True, nullable=True)
+    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id"), unique=True, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
 class Crop(Base):
     """Crop details — a farm can have multiple crops"""
     __tablename__ = "crops"
@@ -208,7 +225,7 @@ class Inventory(Base):
     __tablename__ = "inventory"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id"), index=True, nullable=False)
+    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), index=True, nullable=False)
 
     product_name = Column(String(150), nullable=False, index=True)
     category = Column(String(100), nullable=False, index=True)
@@ -231,14 +248,14 @@ class Inventory(Base):
     order_requests = relationship("OrderRequest", back_populates="inventory_item", cascade="all, delete-orphan")
 
 
-class OrderRequest(BaseModel if False else Base):
+class OrderRequest(Base):
     """Farmer Cart & Shop Purchase Order Request Model"""
     __tablename__ = "order_requests"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    farmer_id = Column(UUID(as_uuid=True), ForeignKey("farmers.id"), index=True, nullable=False)
-    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id"), index=True, nullable=False)
-    inventory_id = Column(UUID(as_uuid=True), ForeignKey("inventory.id"), index=True, nullable=False)
+    farmer_id = Column(UUID(as_uuid=True), ForeignKey("farmers.id", ondelete="CASCADE"), index=True, nullable=False)
+    shop_id = Column(UUID(as_uuid=True), ForeignKey("shops.id", ondelete="CASCADE"), index=True, nullable=False)
+    inventory_id = Column(UUID(as_uuid=True), ForeignKey("inventory.id", ondelete="CASCADE"), index=True, nullable=False)
 
     product_name = Column(String(150), nullable=False)
     brand = Column(String(100), nullable=True)
@@ -247,7 +264,13 @@ class OrderRequest(BaseModel if False else Base):
     quantity = Column(Integer, nullable=False, default=1)
     total_price = Column(Float, nullable=False)
 
-    status = Column(String(20), default="Pending", index=True) # Pending, Accepted, Ready, Completed, Cancelled
+    status = Column(String(20), default="Pending", index=True, nullable=False) # Pending, Accepted, Ready, Completed, Cancelled
+    payment_status = Column(String(20), default="Pending", index=True, nullable=False) # Pending, Paid, Failed, Refunded
+    payment_method = Column(String(50), default="Online", nullable=True)
+    razorpay_order_id = Column(String(100), nullable=True, index=True)
+    razorpay_payment_id = Column(String(100), nullable=True, index=True)
+    razorpay_signature = Column(String(255), nullable=True)
+    paid_at = Column(DateTime, nullable=True)
     notes = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -264,12 +287,12 @@ class GovernmentScheme(Base):
     __tablename__ = "government_schemes"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    scheme_name = Column(String(200), nullable=False, index=True)
-    scheme_code = Column(String(50), nullable=False, unique=True, index=True) # e.g. PM_KISAN, PMFBY, KCC, SOLAR_PUMP
-    category = Column(String(100), nullable=False, index=True)               # Financial Assistance, Crop Insurance, Subsidies, etc.
-    state = Column(String(100), default="All India", index=True)              # 'All India' or specific state like 'Telangana'
-    district = Column(String(100), nullable=True, index=True)
-    crop_type = Column(String(100), default="All Crops", index=True)
+    scheme_name = Column(String(200), nullable=False)
+    scheme_code = Column(String(50), nullable=False, unique=True) # e.g. PM_KISAN, PMFBY, KCC, SOLAR_PUMP
+    category = Column(String(100), nullable=False)               # Financial Assistance, Crop Insurance, Subsidies, etc.
+    state = Column(String(100), default="All India")              # 'All India' or specific state like 'Telangana'
+    district = Column(String(100), nullable=True)
+    crop_type = Column(String(100), default="All Crops")
     min_land_acres = Column(Float, default=0.0)
     max_land_acres = Column(Float, nullable=True)                            # None means no upper limit
     description = Column(Text, nullable=False)
@@ -278,7 +301,7 @@ class GovernmentScheme(Base):
     required_documents = Column(Text, nullable=False)
     application_deadline = Column(DateTime, nullable=True)
     official_portal_url = Column(String(500), nullable=True)
-    is_active = Column(Boolean, default=True, index=True)
+    is_active = Column(Boolean, default=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -292,10 +315,10 @@ class SchemeApplication(Base):
     __tablename__ = "scheme_applications"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    farmer_id = Column(UUID(as_uuid=True), ForeignKey("farmers.id"), index=True, nullable=False)
-    scheme_id = Column(UUID(as_uuid=True), ForeignKey("government_schemes.id"), index=True, nullable=False)
+    farmer_id = Column(UUID(as_uuid=True), ForeignKey("farmers.id"), nullable=False)
+    scheme_id = Column(UUID(as_uuid=True), ForeignKey("government_schemes.id"), nullable=False)
 
-    status = Column(String(50), default="Eligible", index=True) # Eligible, Applied, Under Review, Approved, Disbursed
+    status = Column(String(50), default="Eligible") # Eligible, Applied, Under Review, Approved, Disbursed
     notes = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -309,6 +332,9 @@ class SchemeApplication(Base):
 class MarketPrice(Base):
     """Daily mandi/market commodity price record from Agmarknet or manual seeding."""
     __tablename__ = "market_prices"
+    __table_args__ = (
+        Index("idx_market_prices_commodity_district_date", "commodity", "district", "price_date"),
+    )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
 

@@ -11,6 +11,8 @@ from src.shops.schemas import (
 )
 from src.shops.service import ShopService
 from src.shops.dependencies import get_shop_service
+from src.auth.dependencies import require_admin, require_shop_owner, verify_shop_access
+from src.core.models import UserAccount
 
 router = APIRouter()
 
@@ -18,9 +20,10 @@ router = APIRouter()
 @router.post("", response_model=ShopResponse, status_code=status.HTTP_201_CREATED)
 async def create_shop(
     payload: ShopCreate,
+    current_user: UserAccount = Depends(require_admin),
     service: ShopService = Depends(get_shop_service),
 ):
-    """Register a new Agri Shop."""
+    """Register a new Agri Shop (Admin only)."""
     return await service.create_shop(payload)
 
 
@@ -90,18 +93,21 @@ async def get_shop(
 async def update_shop(
     shop_id: UUID,
     payload: ShopUpdate,
+    current_user: UserAccount = Depends(require_shop_owner),
     service: ShopService = Depends(get_shop_service),
 ):
-    """Update shop details."""
+    """Update shop details (Shop Owner or Admin)."""
+    verify_shop_access(current_user, shop_id)
     return await service.update_shop(shop_id, payload)
 
 
 @router.delete("/{shop_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_shop(
     shop_id: UUID,
+    current_user: UserAccount = Depends(require_admin),
     service: ShopService = Depends(get_shop_service),
 ):
-    """Delete a shop profile."""
+    """Delete a shop profile (Admin only)."""
     await service.delete_shop(shop_id)
 
 
@@ -114,3 +120,4 @@ async def list_shops(
 ):
     """List all registered Agri shops with pagination."""
     return await service.list_shops(page=page, size=size, status_filter=status)
+

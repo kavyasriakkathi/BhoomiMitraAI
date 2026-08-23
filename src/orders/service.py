@@ -1,8 +1,10 @@
+import asyncio
 from typing import Optional, List
 from uuid import UUID
 from fastapi import HTTPException, status
 from src.core.logging import logger
 from src.orders.repository import OrderRepository
+from src.orders.notifications import notify_farmer_order_update
 from src.orders.schemas import (
     OrderRequestCreate,
     OrderRequestUpdateStatus,
@@ -20,6 +22,13 @@ class OrderService:
         try:
             order = await self.repository.create(data)
             logger.info(f"Created order request '{order.id}' for farmer '{order.farmer_id}' at shop '{order.shop_id}'")
+
+            # Non-blocking asynchronous WhatsApp notification to farmer
+            try:
+                asyncio.create_task(notify_farmer_order_update(order.id, event="Created"))
+            except Exception as notif_err:
+                logger.warning(f"Could not schedule creation WhatsApp notification: {notif_err}")
+
             return OrderRequestResponse.model_validate(order)
         except ValueError as err:
             raise HTTPException(
@@ -44,13 +53,41 @@ class OrderService:
                 detail=f"Invalid status '{data.status}'. Allowed: {', '.join(valid_statuses)}"
             )
 
-        order = await self.repository.update_status(order_id, data)
+        existing_order = await self.repository.get_by_id(order_id)
+        if not existing_order:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Order request with ID '{order_id}' not found."
+            )
+
+        previous_status = existing_order.status
+
+        try:
+            order = await self.repository.update_status(order_id, data)
+        except ValueError as err:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(err)
+            )
+
         if not order:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Order request with ID '{order_id}' not found."
             )
-        logger.info(f"Updated status of order '{order_id}' to '{order.status}'")
+
+        # Idempotency check: Only notify farmer if the status actually changed
+        if previous_status != data.status:
+            try:
+                asyncio.create_task(
+                    notify_farmer_order_update(
+                        order.id, event=data.status, reason=data.notes
+                    )
+                )
+            except Exception as notif_err:
+                logger.warning(f"Could not schedule status WhatsApp notification: {notif_err}")
+
+        logger.info(f"Updated status of order '{order_id}' from '{previous_status}' to '{order.status}'")
         return OrderRequestResponse.model_validate(order)
 
     async def list_farmer_orders(

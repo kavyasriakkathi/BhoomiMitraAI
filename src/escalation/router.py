@@ -9,6 +9,9 @@ from src.escalation.schemas import (
 )
 from src.escalation.service import EscalationService
 from src.escalation.dependencies import get_escalation_service
+from src.auth.constants import UserRole
+from src.auth.dependencies import require_admin, require_expert, require_roles, verify_expert_access
+from src.core.models import UserAccount
 
 router = APIRouter()
 
@@ -34,9 +37,10 @@ async def get_expert(
 @router.post("/experts", response_model=ExpertResponse, status_code=status.HTTP_201_CREATED)
 async def create_expert(
     payload: ExpertCreate,
+    current_user: UserAccount = Depends(require_admin),
     service: EscalationService = Depends(get_escalation_service),
 ):
-    """Register a new agricultural expert."""
+    """Register a new agricultural expert (Admin only)."""
     return await service.create_expert(payload)
 
 
@@ -44,16 +48,20 @@ async def create_expert(
 async def update_expert(
     expert_id: UUID,
     payload: ExpertUpdate,
+    current_user: UserAccount = Depends(require_expert),
     service: EscalationService = Depends(get_escalation_service),
 ):
-    """Update expert details."""
+    """Update expert details (Expert owner or Admin)."""
+    verify_expert_access(current_user, expert_id)
     return await service.update_expert(expert_id, payload)
 
 
 @router.get("/tickets/farmer/{farmer_id}", response_model=FarmerEscalationHistoryResponse)
 async def get_farmer_escalation_tickets(
     farmer_id: UUID,
+    current_user: UserAccount = Depends(require_expert),
     service: EscalationService = Depends(get_escalation_service),
 ):
-    """Fetch past escalation tickets and consultation history for a farmer."""
+    """Fetch past escalation tickets and consultation history for a farmer (Admin / Expert only)."""
     return await service.get_farmer_escalations(farmer_id)
+

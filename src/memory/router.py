@@ -9,6 +9,8 @@ from src.memory.schemas import (
 )
 from src.memory.service import FarmerMemoryService
 from src.memory.dependencies import get_memory_service
+from src.auth.dependencies import require_expert
+from src.core.models import UserAccount
 from src.core.logging import logger
 
 router = APIRouter()
@@ -25,14 +27,15 @@ async def get_farmer_memory(
     return await service.get_memory_response(farmer_id)
 
 
-@router.put("/{farmer_id}", response_model=FarmerMemoryResponse, summary="Update Farmer Memory Profile")
+@router.put("/{farmer_id}", response_model=FarmerMemoryResponse, summary="Update Farmer Memory Profile (Admin / Expert only)")
 async def update_farmer_memory(
     farmer_id: UUID,
     data: FarmerMemoryUpdate,
+    current_user: UserAccount = Depends(require_expert),
     service: FarmerMemoryService = Depends(get_memory_service)
 ):
     """
-    Update farmer long-term memory profile (Admin / Expert / System).
+    Update farmer long-term memory profile (Admin / Expert).
     """
     return await service.update_memory(farmer_id, data)
 

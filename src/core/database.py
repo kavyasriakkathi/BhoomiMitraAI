@@ -42,10 +42,10 @@ def get_async_db_config(raw_url: str) -> Tuple[str, Dict[str, Any]]:
         for param in unsupported_params:
             query_params.pop(param, None)
 
-        if sslmode == "disable":
+        if sslmode == "disable" or "localhost" in parsed.netloc or "postgres" in parsed.netloc or "127.0.0.1" in parsed.netloc:
             connect_args["ssl"] = False
         else:
-            # Default to SSL enabled for postgresql+asyncpg (required by Neon PostgreSQL)
+            # Default to SSL enabled for postgresql+asyncpg (required by Neon PostgreSQL / Cloud RDS)
             connect_args["ssl"] = True
 
         # Reconstruct query string without unsupported parameters

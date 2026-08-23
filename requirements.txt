@@ -49,3 +49,4 @@ httpx==0.27.0
 # --- Dev Tools ---
 ruff==0.6.0
 pre-commit==3.8.0
+argon2-cffi==25.1.0

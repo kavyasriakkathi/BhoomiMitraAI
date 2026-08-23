@@ -10,6 +10,8 @@ from src.rag.schemas import (
 )
 from src.rag.service import RAGService
 from src.rag.dependencies import get_rag_service
+from src.auth.dependencies import require_admin
+from src.core.models import UserAccount
 
 router = APIRouter()
 
@@ -18,7 +20,7 @@ router = APIRouter()
     "/upload",
     response_model=KnowledgeDocumentResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Upload & Index Agriculture Knowledge PDF Document",
+    summary="Upload & Index Agriculture Knowledge PDF Document (Admin only)",
     tags=["RAG Knowledge Engine"],
 )
 async def upload_document(
@@ -29,6 +31,7 @@ async def upload_document(
     language: str = Form("en"),
     state: Optional[str] = Form(None),
     crop: Optional[str] = Form(None),
+    current_user: UserAccount = Depends(require_admin),
     service: RAGService = Depends(get_rag_service),
 ):
     """
@@ -36,11 +39,12 @@ async def upload_document(
     Accepts multipart/form-data file uploads with metadata fields.
     Renders 'Choose File' button in FastAPI Swagger UI.
     """
-    filename = file.filename or "document.pdf"
+    import os
+    clean_filename = os.path.basename(file.filename or "document.pdf")
     content_type = file.content_type or ""
 
-    is_pdf_ext = filename.lower().endswith(".pdf")
-    is_txt_ext = filename.lower().endswith(".txt")
+    is_pdf_ext = clean_filename.lower().endswith(".pdf")
+    is_txt_ext = clean_filename.lower().endswith(".txt")
     is_pdf_type = "pdf" in content_type.lower()
     is_txt_type = "text" in content_type.lower() or "plain" in content_type.lower()
 
@@ -57,6 +61,13 @@ async def upload_document(
             detail="Uploaded file is empty."
         )
 
+    MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25MB limit
+    if len(file_bytes) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File exceeds maximum permitted size of {MAX_FILE_SIZE_BYTES // (1024*1024)}MB."
+        )
+
     if not (file_bytes.startswith(b"%PDF") or is_pdf_ext or is_txt_ext):
         try:
             file_bytes.decode("utf-8")
@@ -66,10 +77,10 @@ async def upload_document(
                 detail="Unsupported binary file format. Please upload a valid PDF or text document."
             )
 
-    document_title = title or filename or "Untitled Agricultural Document"
+    document_title = title or clean_filename or "Untitled Agricultural Document"
     return await service.upload_and_index_document(
         file_bytes=file_bytes,
-        filename=filename,
+        filename=clean_filename,
         title=document_title,
         source=source,
         category=category,
@@ -82,10 +93,11 @@ async def upload_document(
 @router.post(
     "/rebuild",
     response_model=RebuildIndexResponse,
-    summary="Rebuild RAG Vector Index Across All Documents",
+    summary="Rebuild RAG Vector Index Across All Documents (Admin only)",
     tags=["RAG Knowledge Engine"],
 )
 async def rebuild_index(
+    current_user: UserAccount = Depends(require_admin),
     service: RAGService = Depends(get_rag_service),
 ):
     """
@@ -128,7 +140,7 @@ async def search_knowledge(
 @router.get(
     "/documents",
     response_model=List[KnowledgeDocumentResponse],
-    summary="List Knowledge Base Documents",
+    summary="List Knowledge Base Documents (Admin only)",
     tags=["RAG Knowledge Engine"],
 )
 async def list_documents(
@@ -136,6 +148,7 @@ async def list_documents(
     source: Optional[str] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    current_user: UserAccount = Depends(require_admin),
     service: RAGService = Depends(get_rag_service),
 ):
     """
@@ -152,11 +165,12 @@ async def list_documents(
 
 @router.delete(
     "/document/{id}",
-    summary="Delete Knowledge Document by ID",
+    summary="Delete Knowledge Document by ID (Admin only)",
     tags=["RAG Knowledge Engine"],
 )
 async def delete_document(
     id: UUID,
+    current_user: UserAccount = Depends(require_admin),
     service: RAGService = Depends(get_rag_service),
 ):
     """

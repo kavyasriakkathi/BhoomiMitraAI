@@ -9,6 +9,7 @@ class OrderRequestBase(BaseModel):
     shop_id: UUID = Field(..., description="Shop ID receiving the request")
     inventory_id: UUID = Field(..., description="Product Inventory ID")
     quantity: int = Field(1, ge=1, description="Quantity requested")
+    payment_method: Optional[str] = Field(default="Online", description="Payment method: Online or COD")
     notes: Optional[str] = Field(None, description="Optional delivery notes or instructions")
 
 
@@ -29,6 +30,10 @@ class OrderRequestResponse(OrderRequestBase):
     unit_price: float
     total_price: float
     status: str
+    payment_status: str = "Pending"
+    razorpay_order_id: Optional[str] = None
+    razorpay_payment_id: Optional[str] = None
+    paid_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

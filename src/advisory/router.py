@@ -5,6 +5,8 @@ from src.core.database import get_db
 from src.advisory.schemas import AdvisoryCreate, AdvisoryUpdate, AdvisoryResponse, AdvisoryListResponse
 from src.advisory.service import AdvisoryService
 from src.advisory.dependencies import get_advisory_service
+from src.auth.dependencies import require_admin, require_expert
+from src.core.models import UserAccount
 
 router = APIRouter()
 
@@ -35,14 +37,14 @@ async def get_advisory(advisory_id: UUID, service: AdvisoryService = Depends(get
     return await service.get_by_id(advisory_id)
 
 @router.put("/{advisory_id}", response_model=AdvisoryResponse, status_code=status.HTTP_200_OK,
-    summary="Update an advisory", description="Update advisory details. Only provided fields will be updated.")
-async def update_advisory(advisory_id: UUID, data: AdvisoryUpdate, service: AdvisoryService = Depends(get_advisory_service), db: AsyncSession = Depends(get_db)):
+    summary="Update an advisory (Admin / Expert only)", description="Update advisory details. Only provided fields will be updated.")
+async def update_advisory(advisory_id: UUID, data: AdvisoryUpdate, current_user: UserAccount = Depends(require_expert), service: AdvisoryService = Depends(get_advisory_service), db: AsyncSession = Depends(get_db)):
     advisory = await service.update(advisory_id, data)
     await db.commit()
     return advisory
 
 @router.delete("/{advisory_id}", status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete an advisory", description="Hard delete an advisory record by its UUID.")
-async def delete_advisory(advisory_id: UUID, service: AdvisoryService = Depends(get_advisory_service), db: AsyncSession = Depends(get_db)):
+    summary="Delete an advisory (Admin only)", description="Hard delete an advisory record by its UUID.")
+async def delete_advisory(advisory_id: UUID, current_user: UserAccount = Depends(require_admin), service: AdvisoryService = Depends(get_advisory_service), db: AsyncSession = Depends(get_db)):
     await service.delete(advisory_id)
     await db.commit()
