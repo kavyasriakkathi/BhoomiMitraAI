@@ -21,12 +21,168 @@ from src.weather.schemas import (
 # ------------------------------------------------------------------
 WEATHER_KEYWORDS_EN = {
     "weather", "forecast", "rain", "raining", "rainy", "temperature",
-    "wind", "humidity", "climate", "degree", "hot", "cold", "will it rain"
+    "wind", "humidity", "climate", "degree", "hot", "cold", "will it rain",
+    "precipitation", "cloudy", "storm", "thunderstorm", "showers", "sun", "sunny",
 }
 WEATHER_KEYWORDS_TE = {
-    "వాతావరణం", "వాతావరణ", "వర్షం", "వర్షాలు", "వాన", "కురుస్తుందా",
-    "ఉష్ణోగ్రత", "గాలి", "తేమ", "ఎండ", "చలి", "వాతావరణ అంచనా", "మంచు"
+    "వాతావరణం", "వాతావరణ", "వర్షం", "వర్షాలు", "వాన", "వానలు", "కురుస్తుందా",
+    "పడుతుంది", "పడుతుందా", "కురుస్తుంది", "ఉష్ణోగ్రత", "గాలి", "తేమ", "ఎండ",
+    "చలి", "వాతావరణ అంచనా", "మంచు", "తుఫాను", "జల్లులు", "మేఘాలు",
 }
+
+# Known Telangana & Andhra Pradesh Districts/Cities for Query Extraction
+_KNOWN_DISTRICTS = {
+    # Telangana
+    "warangal": "Warangal",
+    "hanamkonda": "Warangal",
+    "వరంగల్": "Warangal",
+    "హనుమకొండ": "Warangal",
+    "karimnagar": "Karimnagar",
+    "కరీంనగర్": "Karimnagar",
+    "khammam": "Khammam",
+    "ఖమ్మం": "Khammam",
+    "guntur": "Guntur",
+    "గుంటూరు": "Guntur",
+    "nizamabad": "Nizamabad",
+    "నిజామాబాద్": "Nizamabad",
+    "nalgonda": "Nalgonda",
+    "నల్గొండ": "Nalgonda",
+    "mahabubnagar": "Mahabubnagar",
+    "మహబూబ్‌నగర్": "Mahabubnagar",
+    "medak": "Medak",
+    "మెదక్": "Medak",
+    "adilabad": "Adilabad",
+    "ఆదిలాబాద్": "Adilabad",
+    "rangareddy": "Rangareddy",
+    "రంగారెడ్డి": "Rangareddy",
+    "hyderabad": "Hyderabad",
+    "హైదరాబాద్": "Hyderabad",
+    "siddipet": "Siddipet",
+    "సిద్దిపేట": "Siddipet",
+    "suryapet": "Suryapet",
+    "సూర్యాపేట": "Suryapet",
+    "jagtial": "Jagtial",
+    "జగిత్యాల": "Jagtial",
+    "mancherial": "Mancherial",
+    "మంచిర్యాల": "Mancherial",
+    "bhadradri": "Bhadradri Kothagudem",
+    "భద్రాద్రి": "Bhadradri Kothagudem",
+    "kothagudem": "Bhadradri Kothagudem",
+    "కొత్తగూడెం": "Bhadradri Kothagudem",
+    "vikarabad": "Vikarabad",
+    "వికారాబాద్": "Vikarabad",
+    "sangareddy": "Sangareddy",
+    "సంగారెడ్డి": "Sangareddy",
+    "kamareddy": "Kamareddy",
+    "కామారెడ్డి": "Kamareddy",
+    "rajanna sircilla": "Rajanna Sircilla",
+    "సిరిసిల్ల": "Rajanna Sircilla",
+    "sircilla": "Rajanna Sircilla",
+    "peddapalli": "Peddapalli",
+    "పెద్దపల్లి": "Peddapalli",
+    "wanaparthy": "Wanaparthy",
+    "వనపర్తి": "Wanaparthy",
+    "jogulamba": "Jogulamba Gadwal",
+    "గద్వాల": "Jogulamba Gadwal",
+    "gadwal": "Jogulamba Gadwal",
+    "nagarkurnool": "Nagarkurnool",
+    "నాగర్‌కర్నూల్": "Nagarkurnool",
+    "narayanpet": "Narayanpet",
+    "నారాయణపేట": "Narayanpet",
+    "mulugu": "Mulugu",
+    "ములుగు": "Mulugu",
+    "jayashankar": "Jayashankar Bhupalpally",
+    "భూపాలపల్లి": "Jayashankar Bhupalpally",
+    "bhupalpally": "Jayashankar Bhupalpally",
+    "janagaon": "Jangaon",
+    "జనగామ": "Jangaon",
+    "jangaon": "Jangaon",
+    "yadadri": "Yadadri Bhuvanagiri",
+    "యాదాద్రి": "Yadadri Bhuvanagiri",
+    "bhuvanagiri": "Yadadri Bhuvanagiri",
+    "భూవనగిరి": "Yadadri Bhuvanagiri",
+    "asifabad": "Komaram Bheem Asifabad",
+    "ఆసిఫాబాద్": "Komaram Bheem Asifabad",
+    "nirmal": "Nirmal",
+    "నిర్మల్": "Nirmal",
+    "medchal": "Medchal-Malkajgiri",
+    "మేడ్చల్": "Medchal-Malkajgiri",
+
+    # Andhra Pradesh
+    "krishna": "Krishna",
+    "కృష్ణా": "Krishna",
+    "vijayawada": "Krishna",
+    "విజయవాడ": "Krishna",
+    "kurnool": "Kurnool",
+    "కర్నూలు": "Kurnool",
+    "anantapur": "Anantapur",
+    "అనంతపురం": "Anantapur",
+    "kadapa": "Kadapa",
+    "కడప": "Kadapa",
+    "ysr": "Kadapa",
+    "nellore": "Nellore",
+    "నెల్లూరు": "Nellore",
+    "prakasam": "Prakasam",
+    "ప్రకాశం": "Prakasam",
+    "ongole": "Prakasam",
+    "ఒంగోలు": "Prakasam",
+    "chittoor": "Chittoor",
+    "చిత్తూరు": "Chittoor",
+    "tirupati": "Tirupati",
+    "తిరుపతి": "Tirupati",
+    "visakhapatnam": "Visakhapatnam",
+    "విశాఖపట్నం": "Visakhapatnam",
+    "vizag": "Visakhapatnam",
+    "godavari": "Godavari",
+    "గోదావరి": "Godavari",
+    "kakinada": "Kakinada",
+    "కాకినాడ": "Kakinada",
+    "rajahmundry": "East Godavari",
+    "రాజమండ్రి": "East Godavari",
+    "eluru": "Eluru",
+    "ఏలూరు": "Eluru",
+    "srikakulam": "Srikakulam",
+    "శ్రీకాకుళం": "Srikakulam",
+    "vizianagaram": "Vizianagaram",
+    "విజయనగరం": "Vizianagaram",
+    "bapatla": "Bapatla",
+    "బాపట్ల": "Bapatla",
+    "palnadu": "Palnadu",
+    "పల్నాడు": "Palnadu",
+    "narasaraopet": "Palnadu",
+    "నరసరావుపేట": "Palnadu",
+    "nandyal": "Nandyal",
+    "నంద్యాల": "Nandyal",
+    "machilipatnam": "Krishna",
+    "మచిలీపట్నం": "Krishna",
+    "konaseema": "Dr. B.R. Ambedkar Konaseema",
+    "కోనసీమ": "Dr. B.R. Ambedkar Konaseema",
+    "amalapuram": "Dr. B.R. Ambedkar Konaseema",
+    "అమలాపురం": "Dr. B.R. Ambedkar Konaseema",
+    "anakapalli": "Anakapalli",
+    "అనకాపల్లి": "Anakapalli",
+    "alluri": "Alluri Sitharama Raju",
+    "అల్లూరి": "Alluri Sitharama Raju",
+    "parvathipuram": "Parvathipuram Manyam",
+    "పార్వతీపురం": "Parvathipuram Manyam",
+    "sri sathya sai": "Sri Sathya Sai",
+    "పుట్టపర్తి": "Sri Sathya Sai",
+    "puttaparthi": "Sri Sathya Sai",
+    "annamayya": "Annamayya",
+    "అన్నమయ్య": "Annamayya",
+    "rayachoty": "Annamayya",
+    "రాయచోటి": "Annamayya",
+}
+
+
+def _extract_district_from_query(query_text: str) -> Optional[str]:
+    """Extract known district or city from farmer query in English or Telugu."""
+    q = query_text.lower()
+    for kw, dist_name in _KNOWN_DISTRICTS.items():
+        if kw in q:
+            return dist_name
+    return None
+
 
 # ------------------------------------------------------------------
 # Static Labels for Telugu / English Replies
@@ -42,7 +198,8 @@ _TE_LABELS = {
     "source_local": "స్థానిక వాతావరణ డేటా",
     "rain_alert": "🌧️ రేపటి అంచనా: మీ ప్రాంతంలో వర్షం పడే అవకాశం ఉంది. దయచేసి పంటలపై తగిన రక్షణ చర్యలు తీసుకోండి.",
     "clear_alert": "☀️ రేపటి అంచనా: వాతావరణం పొడిగా మరియు అనుకూలంగా ఉంటుంది.",
-    "no_data": "క్షమించండి, ప్రస్తుతం వాతావరణ సమాచారం అందుబాటులో లేదు.",
+    "no_data": "ℹ️ గమనిక: ఈ ప్రాంతానికి సంబంధించిన వాతావరణ సమాచారం ప్రస్తుతం అందుబాటులో లేదు. దయచేసి స్థానిక వాతావరణ కేంద్రం లేదా కిసాన్ కాల్ సెంటర్ (1800-180-1551) ను సంప్రదించండి.",
+    "ask_location": "📍 మీ పంటలకు సంబంధించిన ఖచ్చితమైన వాతావరణ సమాచారం కోసం దయచేసి మీ జిల్లా లేదా ప్రాంతం పేరును తెలపండి (ఉదాహరణకు: వరంగల్, గుంటూరు).",
 }
 
 _EN_LABELS = {
@@ -56,7 +213,8 @@ _EN_LABELS = {
     "source_local": "Local Weather Data",
     "rain_alert": "🌧️ Tomorrow's Forecast: Rain is expected in your area. Please take necessary protective measures for your crops.",
     "clear_alert": "☀️ Tomorrow's Forecast: Weather is expected to be clear/partly cloudy and dry.",
-    "no_data": "Sorry, weather information is currently unavailable.",
+    "no_data": "ℹ️ Note: Weather forecast is currently unavailable for this location. Please check local agromet advisories or the Kisan Call Centre (1800-180-1551).",
+    "ask_location": "📍 Please provide your district or area name (e.g., Warangal, Guntur) to get accurate weather forecast information for your crops.",
 }
 
 
@@ -208,77 +366,83 @@ async def enrich_response_with_weather(
     farmer,
 ) -> str:
     """
-    Detect weather-forecast intent in the farmer's query.
+    Detect weather-forecast intent in the farmer's query or conversational follow-up.
     If detected, append a formatted weather forecast block to the AI response.
 
     Always returns the original ai_response unchanged if:
     - No weather intent is detected
-    - No location information is resolved
-    - Any error occurs
+    - Any unhandled error occurs
     """
     query_lower = query_text.lower()
+    language = getattr(farmer, "preferred_language", "en") or "en"
+    labels = _TE_LABELS if language == "te" else _EN_LABELS
 
     # Step 1: Detect weather intent
-    has_weather_intent = any(kw in query_lower for kw in WEATHER_KEYWORDS_EN)
-    if not has_weather_intent:
-        has_weather_intent = any(kw in query_lower for kw in WEATHER_KEYWORDS_TE)
+    has_weather_intent = any(kw in query_lower for kw in WEATHER_KEYWORDS_EN) or any(kw in query_text for kw in WEATHER_KEYWORDS_TE)
+
+    # Also detect if farmer just provided a district name as a follow-up to a previous weather question
+    query_district = _extract_district_from_query(query_text)
+    if not has_weather_intent and query_district:
+        ai_lower = ai_response.lower()
+        if any(kw in ai_lower for kw in WEATHER_KEYWORDS_EN) or any(kw in ai_response for kw in WEATHER_KEYWORDS_TE):
+            has_weather_intent = True
 
     if not has_weather_intent:
         return ai_response
 
-    # Step 2: Resolve Location (Priority-ordered)
+    # Step 2: Resolve Location (Priority-ordered: Query District -> GPS -> Profile District -> Memory District)
     latitude = None
     longitude = None
-    district = None
+    district = query_district
     state = None
-    language = getattr(farmer, "preferred_language", "en") or "en"
 
     try:
         from sqlalchemy import select
         from src.core.models import FarmerProfile
         from src.memory.models import FarmerMemory
 
-        # 1. Check FarmerMemory for GPS coordinates
-        memory_result = await db.execute(
-            select(FarmerMemory).where(FarmerMemory.farmer_id == farmer.id)
-        )
-        memory = memory_result.scalar_one_or_none()
+        # 1. Check FarmerMemory for GPS coordinates (only if not explicit query district override)
+        if not district:
+            memory_result = await db.execute(
+                select(FarmerMemory).where(FarmerMemory.farmer_id == farmer.id)
+            )
+            memory = memory_result.scalar_one_or_none()
 
-        if memory and memory.gps_coordinates:
-            gps_coords = memory.gps_coordinates
-            # Validate coordinates are floats
-            try:
-                lat = float(gps_coords.get("latitude") or 0.0)
-                lon = float(gps_coords.get("longitude") or 0.0)
-                if lat != 0.0 and lon != 0.0:
-                    latitude = lat
-                    longitude = lon
-            except (ValueError, TypeError):
-                pass
+            if memory and memory.gps_coordinates:
+                gps_coords = memory.gps_coordinates
+                try:
+                    lat = float(gps_coords.get("latitude") or 0.0)
+                    lon = float(gps_coords.get("longitude") or 0.0)
+                    if lat != 0.0 and lon != 0.0:
+                        latitude = lat
+                        longitude = lon
+                except (ValueError, TypeError):
+                    pass
 
-        # 2. Check FarmerProfile for district/state
-        profile_result = await db.execute(
-            select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
-        )
-        profile = profile_result.scalar_one_or_none()
+            # 2. Check FarmerProfile for district/state
+            if not district:
+                profile_result = await db.execute(
+                    select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
+                )
+                profile = profile_result.scalar_one_or_none()
 
-        if profile and profile.district:
-            district = profile.district
-            state = profile.state
+                if profile and profile.district:
+                    district = profile.district.strip()
+                    state = profile.state.strip() if profile.state else None
 
-        # 3. Check FarmerMemory for district/state if profile has none
-        if not district and memory and memory.district:
-            district = memory.district
-            state = memory.state
-
-        # 4. Fallback: Parse query text for known district names (optional future enhancement, skip for now)
+            # 3. Check FarmerMemory for district/state if profile has none
+            if not district and memory and memory.district:
+                district = memory.district.strip()
+                state = memory.state.strip() if memory.state else None
 
     except Exception as loc_err:
         logger.warning(f"[WEATHER ENRICH] Failed to resolve farmer location: {loc_err}")
 
-    # If no location information is resolved, return unchanged.
+    # If no location information is resolved, ask for district
     if (latitude is None or longitude is None) and not district:
-        logger.info("[WEATHER ENRICH] Weather intent detected but no location resolved. Bypassing.")
+        logger.info("[WEATHER ENRICH] Weather intent detected but no location resolved. Appending location prompt.")
+        if "location" not in ai_response.lower() and "ప్రాంతం" not in ai_response and "జిల్లా" not in ai_response and "district" not in ai_response.lower():
+            return ai_response + "\n\n" + labels["ask_location"]
         return ai_response
 
     # Step 3: Fetch Weather Forecast
@@ -300,13 +464,13 @@ async def enrich_response_with_weather(
             state=state,
         )
 
-        if weather_data.data_available:
+        if weather_data and weather_data.data_available:
             logger.info(f"[WEATHER ENRICH] Appending weather data for location '{weather_data.location_name}'.")
             weather_block = svc.format_whatsapp_reply(weather_data, language=language)
             return ai_response + "\n\n" + weather_block
 
-        logger.info("[WEATHER ENRICH] Weather data unavailable. Returning original response.")
-        return ai_response
+        logger.info("[WEATHER ENRICH] Weather data unavailable. Appending honest fallback.")
+        return ai_response + "\n\n" + labels["no_data"]
 
     except Exception as exc:
         logger.warning(f"[WEATHER ENRICH] Weather enrichment failed: {exc}")

@@ -390,15 +390,15 @@ async def test_enrich_weather_district_from_farmer_profile():
 
 
 # ---------------------------------------------------------------------------
-# 14. Integration: No location — returns original response unchanged
+# 14. Integration: No location — asks farmer for district/area
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_enrich_weather_no_location_returns_original():
-    """When farmer has no location data, enrichment returns AI response unchanged."""
+    """When farmer has no location data, enrichment prompts farmer to provide district."""
     from src.weather.service import enrich_response_with_weather
 
-    farmer = _make_mock_farmer()
+    farmer = _make_mock_farmer(language="en")
     db = _mock_db_with_location()  # No GPS, no district
     original = "Here is some farming advice."
 
@@ -406,16 +406,17 @@ async def test_enrich_weather_no_location_returns_original():
         db, "Will it rain tomorrow?", original, farmer
     )
 
-    assert result == original, "Response must be unchanged when no location is available"
+    assert original in result
+    assert "Please provide your district or area name" in result
 
 
 # ---------------------------------------------------------------------------
-# 15. Integration: API failure does not crash — returns original response
+# 15. Integration: API failure does not crash — returns original response with fallback
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
 async def test_enrich_weather_api_failure_returns_original():
-    """When weather API raises an exception, enrichment returns original response safely."""
+    """When weather API raises an exception, enrichment safely returns original response."""
     from src.weather.service import enrich_response_with_weather
     from src.weather.openweather_client import OpenWeatherClient
 
@@ -432,7 +433,7 @@ async def test_enrich_weather_api_failure_returns_original():
             db, "What is the weather forecast?", original, farmer
         )
 
-    assert result == original, "Original response must survive an API failure"
+    assert result == original, "Original response must survive an unhandled API exception"
 
 
 # ---------------------------------------------------------------------------
@@ -454,3 +455,144 @@ async def test_enrich_weather_non_weather_query_skips():
 
     assert result == original, "Response must be unchanged for non-weather queries"
     db.execute.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 17. Regression: Extract district from query in English & Telugu
+# ---------------------------------------------------------------------------
+
+def test_extract_district_from_weather_query():
+    """Extracts district correctly from various colloquial query formats."""
+    from src.weather.service import _extract_district_from_query
+
+    assert _extract_district_from_query("వరంగల్ ప్రాంతంలో రేపు వర్షం పడుతుందా?") == "Warangal"
+    assert _extract_district_from_query("వరంగల్లో వాతావరణం ఎలా ఉంది?") == "Warangal"
+    assert _extract_district_from_query("Will it rain tomorrow in Warangal?") == "Warangal"
+    assert _extract_district_from_query("What is the temperature in Karimnagar?") == "Karimnagar"
+    assert _extract_district_from_query("గుంటూరు జిల్లాలో వర్షం కురుస్తుందా?") == "Guntur"
+    assert _extract_district_from_query("weather forecast near vijayawada") == "Krishna"
+    assert _extract_district_from_query("రేపు వర్షం పడుతుందా?") is None
+
+
+# ---------------------------------------------------------------------------
+# 18. Regression: Telugu weather query with Warangal returns actual forecast
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_enrich_weather_query_with_warangal_telugu():
+    """Telugu weather query mentioning Warangal returns real forecast data without inventing info."""
+    from src.weather.service import enrich_response_with_weather
+    from src.weather.openweather_client import OpenWeatherClient
+
+    farmer = _make_mock_farmer(language="te")
+    db = _mock_db_with_location()  # Profile has no district, but query has 'వరంగల్'
+    original = "వ్యవసాయ సలహా."
+
+    mock_weather = _make_normalised_weather_dict(location_name="Warangal")
+    mock_weather["is_live"] = True
+
+    with patch.object(
+        OpenWeatherClient, "fetch_weather",
+        new_callable=AsyncMock,
+        return_value=mock_weather,
+    ):
+        result = await enrich_response_with_weather(
+            db, "వరంగల్ ప్రాంతంలో రేపు వర్షం పడుతుందా?", original, farmer
+        )
+
+    assert "వాతావరణ సమాచారం (Warangal)" in result
+    assert "ఉష్ణోగ్రత: 30.2°C" in result
+    assert "తేమ (Humidity): 65%" in result
+    assert "గాలి వేగం: 12.0 km/h" in result
+    assert "రేపటి అంచనా" in result
+    assert "ఓపెన్వెదర్ (లైవ్)" in result
+
+
+# ---------------------------------------------------------------------------
+# 19. Regression: English weather query with Warangal
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_enrich_weather_query_with_warangal_english():
+    """English weather query mentioning Warangal extracts location and formats English response."""
+    from src.weather.service import enrich_response_with_weather
+    from src.weather.openweather_client import OpenWeatherClient
+
+    farmer = _make_mock_farmer(language="en")
+    db = _mock_db_with_location()
+    original = "Here is your agricultural advisory."
+
+    mock_weather = _make_normalised_weather_dict(location_name="Warangal")
+    mock_weather["is_live"] = True
+
+    with patch.object(
+        OpenWeatherClient, "fetch_weather",
+        new_callable=AsyncMock,
+        return_value=mock_weather,
+    ):
+        result = await enrich_response_with_weather(
+            db, "Will it rain tomorrow in Warangal?", original, farmer
+        )
+
+    assert "Weather Information (Warangal)" in result
+    assert "Temperature: 30.2°C" in result
+    assert "Humidity: 65%" in result
+    assert "Tomorrow's Forecast" in result
+    assert "OpenWeather (Live)" in result
+
+
+# ---------------------------------------------------------------------------
+# 20. Regression: Weather API unavailable returns honest fallback note
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_enrich_weather_api_unavailable_fallback():
+    """When weather API returns no data, append honest fallback note without inventing data."""
+    from src.weather.service import enrich_response_with_weather
+    from src.weather.openweather_client import OpenWeatherClient
+
+    farmer = _make_mock_farmer(language="te")
+    db = _mock_db_with_location()
+    original = "వ్యవసాయ సలహా."
+
+    with patch.object(
+        OpenWeatherClient, "fetch_weather",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        result = await enrich_response_with_weather(
+            db, "వరంగల్ ప్రాంతంలో రేపు వర్షం పడుతుందా?", original, farmer
+        )
+
+    assert "ఈ ప్రాంతానికి సంబంధించిన వాతావరణ సమాచారం ప్రస్తుతం అందుబాటులో లేదు" in result
+    assert "1800-180-1551" in result
+
+
+# ---------------------------------------------------------------------------
+# 21. Regression: Conversational district follow-up after weather prompt
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_enrich_weather_conversational_district_followup():
+    """When user replies with just 'Warangal' following a weather question, triggers weather enrichment."""
+    from src.weather.service import enrich_response_with_weather
+    from src.weather.openweather_client import OpenWeatherClient
+
+    farmer = _make_mock_farmer(language="en")
+    db = _mock_db_with_location()
+    # AI response from Gemini acknowledges weather
+    ai_response = "Here is the weather forecast for Warangal district."
+
+    mock_weather = _make_normalised_weather_dict(location_name="Warangal")
+
+    with patch.object(
+        OpenWeatherClient, "fetch_weather",
+        new_callable=AsyncMock,
+        return_value=mock_weather,
+    ):
+        result = await enrich_response_with_weather(
+            db, "Warangal", ai_response, farmer
+        )
+
+    assert "Weather Information (Warangal)" in result
+    assert "Temperature: 30.2°C" in result
