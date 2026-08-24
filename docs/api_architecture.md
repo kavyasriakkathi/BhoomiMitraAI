@@ -2,53 +2,47 @@
 
 > **Document Type:** Backend API Architecture & Technical Specification  
 > **Audience:** Backend Engineers, DevOps, Frontend/Mobile Devs, PMs  
-> **Objective:** Define a production-ready, highly scalable REST and Event-Driven API architecture for BhoomiMitra AI.
+> **Objective:** Define a production-ready, highly scalable REST and asynchronous API architecture for BhoomiMitra AI.
 
 ---
 
 ## 1. System-Wide Architecture Principles
 
-### API Gateway & Load Balancing
-- **Tech:** AWS API Gateway / Cloudflare + Nginx.
-- **Purpose:** Acts as the single entry point. Handles SSL termination, WAF (Web Application Firewall), DDoS protection, and global rate limiting.
-- **Load Balancing:** Round-robin across stateless FastAPI application servers (Auto-Scaling Groups).
+### API Gateway & Entry Point
+- **Tech:** FastAPI ASGI application behind Uvicorn / Reverse Proxy (Nginx / Cloudflare / Render).
+- **Purpose:** Acts as the entry point, terminating SSL, enforcing CORS, handling HMAC-SHA256 signature verification, and routing requests to modular endpoints.
 
-### API Versioning
-- **Strategy:** URI Versioning (`/api/v1/...`). Major breaking changes bump the version (e.g., `v2`). Non-breaking changes are handled continuously.
+### API Versioning & Routing Structure
+- **Strategy:** Dedicated domain-prefixed routers registered on the central application instance (e.g. `/auth`, `/webhook`, `/ai`, `/rag`, `/market`, `/weather`, `/schemes`, `/shops`, `/inventory`, `/orders`, `/payments`, `/escalation`, `/memory`).
 
 ### Authentication & Authorization
-- **Farmers (WhatsApp):** Implicit auth via Meta's WhatsApp Webhook. The system authenticates Meta's webhook via HMAC-SHA256 signature verification.
-- **Web Dashboards (Experts, Admins, Shops):** OAuth 2.0 with JWT (JSON Web Tokens).
-- **Authorization:** Role-Based Access Control (RBAC). Roles: `admin`, `expert`, `shop_owner`.
+- **Farmers (WhatsApp):** Implicit authentication via Meta WhatsApp Webhook with cryptographic HMAC-SHA256 signature verification (`X-Hub-Signature-256`) against `WHATSAPP_APP_SECRET`.
+- **Web Dashboards (Experts, Admins, Shops):** JWT (JSON Web Tokens) with HTTP-only secure cookie support and bearer authorization headers.
+- **Authorization:** Role-Based Access Control (RBAC) supporting `admin`, `expert`, and `shop_owner` roles via dependency injection (`require_admin`, `require_expert`).
 
 ### Caching Strategy
-- **Tech:** Redis.
+- **Tech:** Redis (Asyncio).
 - **Strategy:** 
-  - *Short TTL (5-15 mins):* Real-time weather, nearby shop stock.
-  - *Medium TTL (24 hours):* Market prices, government schemes.
-  - *Permanent Cache:* Farmer profiles (invalidated on update).
+  - *Short TTL (30 mins):* Real-time weather forecasts (`weather:loc:...`).
+  - *Medium TTL (6 hours):* Mandi market prices (`market:prices:...`).
+  - *Dynamic Invalidation:* Farmer memory profiles and inventory stock counts.
 
-### Event-Driven Architecture (Async)
-- **Tech:** RabbitMQ / Apache Kafka.
-- **Use Case:** Webhooks, AI processing (STT, TTS, Image Gen), and bulk Notifications (Emergency Alerts). Synchronous API calls are reserved for CRUD; Heavy AI tasks are enqueued.
-
-### Monitoring & Logging
-- **Logging:** Structured JSON logs via ELK stack (Elasticsearch, Logstash, Kibana) / Datadog.
-- **Metrics:** Prometheus + Grafana (API latency, 5xx rates, Queue depths).
-- **Tracing:** OpenTelemetry for tracing an API call through the LLM and back.
+### Asynchronous Processing Architecture
+- **Tech:** Python `async`/`await` coroutines with SQLAlchemy 2.0 `asyncpg`/`aiosqlite` connection pooling and background task lifespans.
+- **Use Case:** Non-blocking multi-turn AI response generation, simultaneous tool enrichments (Mandi, Weather, Schemes, Shops, Escalation), and automatic memory extraction.
 
 ---
 
 ## 2. Global Request / Response Standards
 
-**Base URL:** `https://api.bhoomimitra.ai/api/v1`
+**Base URL:** `https://api.bhoomimitra.in` (Production) / `http://localhost:8000` (Local)
 
 **Success Response (200 OK):**
 ```json
 {
   "success": true,
   "data": { ... },
-  "meta": { "timestamp": "2026-07-12T00:00:00Z" }
+  "message": "Operation successful"
 }
 ```
 
@@ -57,178 +51,169 @@
 {
   "success": false,
   "error": {
-    "code": "VALIDATION_FAILED",
-    "message": "Invalid crop age provided.",
-    "details": { "crop_age": "Must be an integer." }
+    "code": "VALIDATION_ERROR",
+    "message": "Invalid location or district provided.",
+    "details": {}
   }
 }
 ```
 
 ---
 
-## 3. Core API Specifications
+## 3. Implemented API Specifications
 
-*(Note: For brevity without losing detail, APIs are grouped into functional domains. All follow the global security and rate-limiting standards unless specified otherwise).*
+### A. Authentication & RBAC (`/auth`)
 
-### A. WhatsApp Webhook & Media Processing (Async / Event-Driven)
+#### 1. Register User Account
+- **Endpoint:** `POST /auth/register`
+- **Request Body:** `{ "email": "officer@bhoomimitra.in", "password": "...", "role": "expert|shop_owner|admin", "admin_key": "..." }`
+- **Response:** `201 Created` with user ID, email, and role.
 
-#### 1. WhatsApp Message Webhook (Receive)
-- **Endpoint:** `POST /webhooks/whatsapp`
-- **Request Body:** Standard Meta WhatsApp JSON payload.
-- **Response:** `200 OK` (Ack immediately, process via RabbitMQ).
-- **Auth:** HMAC-SHA256 signature (`X-Hub-Signature`).
-- **Rate Limiting:** IP Whitelisted (Meta IPs only).
-- **Security:** Replay attack prevention via Message IDs.
+#### 2. User Login
+- **Endpoint:** `POST /auth/login`
+- **Request Body:** `OAuth2PasswordRequestForm` (username/email + password)
+- **Response:** JWT access token + Set-Cookie HTTP-only session.
 
-#### 2. Process Voice Message (Internal)
-- **Endpoint:** `POST /internal/media/voice/process`
-- **Request:** `{ "media_url": "...", "farmer_id": "uuid" }`
-- **Response:** `{ "transcript": "...", "language": "te" }`
+#### 3. Current User Profile
+- **Endpoint:** `GET /auth/me`
+- **Auth:** JWT / Cookie (`require_user`).
 
-#### 3. Image Analysis (Internal)
-- **Endpoint:** `POST /internal/media/image/analyze`
-- **Request:** `{ "media_url": "...", "type": "disease|pest|soil" }`
-- **Response:** `{ "classification": "Pink Bollworm", "confidence": 0.92 }`
+#### 4. Token Refresh & Logout
+- **Endpoints:** `POST /auth/refresh`, `POST /auth/logout`
 
 ---
 
-### B. Farmer Management
+### B. WhatsApp Webhook Gateway (`/webhook`)
 
-#### 4. Register/Update Farmer
-- **Endpoint:** `PUT /farmers/{phone_number}`
-- **Auth:** Webhook / JWT (Admin).
-- **Request:** `{ "language": "te", "district": "Warangal", "location": {"lat": 18.0, "lng": 79.5} }`
-- **Validation:** Valid Indian phone number (regex).
-- **Rate Limiting:** 5/min per IP.
+#### 5. WhatsApp Webhook Verification
+- **Endpoint:** `GET /webhook/whatsapp`
+- **Query Params:** `hub.mode`, `hub.verify_token`, `hub.challenge`
+- **Auth:** Validates against `WHATSAPP_VERIFY_TOKEN`.
 
-#### 5. Farmer Profile Details
-- **Endpoint:** `GET /farmers/{farmer_id}/profile`
-- **Response:** Complete JSON profile (Crops, land size, soil type).
+#### 6. Inbound WhatsApp Message Receiver
+- **Endpoint:** `POST /webhook/whatsapp`
+- **Header:** `X-Hub-Signature-256` (HMAC-SHA256 verification against `WHATSAPP_APP_SECRET`).
+- **Processing:** Async message deduplication via `message_id`, media/voice downloading, multi-turn AI decision pipeline with tool enrichment.
 
----
-
-### C. AI Engine & Recommendations
-
-#### 6. Chat Recommendation Engine (The Core AI Router)
-- **Endpoint:** `POST /ai/chat`
-- **Auth:** Internal (Triggered by queue worker).
-- **Request:** `{ "farmer_id": "uuid", "message_text": "...", "intent": "fertilizer_req" }`
-- **Response:** `{ "response_text": "...", "confidence": 0.88, "needs_expert": false }`
-- **Validation:** Context payload must exist in Redis.
-
-#### 7. Crop Recommendation API
-- **Endpoint:** `GET /recommendations/crops`
-- **Query Params:** `?district=Warangal&soil_type=Red&season=Kharif`
-- **Response:** List of suitable crops with expected ROI.
-- **Cache:** 24 Hours.
-
-#### 8. Disease Detection & 9. Pest Detection APIs
-- **Endpoint:** `POST /recommendations/diagnostics`
-- **Request:** `{ "crop_id": "uuid", "image_url": "...", "symptoms_text": "..." }`
-- **Response:** `{ "diagnosis": "Stem Borer", "treatments": [...] }`
-
-#### 10. Fertilizer & 11. Pesticide Recommendation APIs
-- **Endpoint:** `POST /recommendations/treatment`
-- **Request:** `{ "farmer_crop_id": "uuid", "issue_type": "deficiency|pest", "target": "Nitrogen" }`
-- **Response:** Chemical composition + local brand names + dosage calculation.
-- **Security:** Strict cross-check with banned chemicals database.
+#### 7. Webhook Health
+- **Endpoint:** `GET /webhook/whatsapp/health`
 
 ---
 
-### D. Commerce & Location APIs
+### C. AI Decision Engine & Grounded RAG (`/ai`, `/rag`)
 
-#### 12. Urea Availability & 13. Agro Shop Search
-- **Endpoint:** `GET /shops/nearby`
-- **Query Params:** `?lat=18.0&lng=79.5&radius_km=15&product=Urea`
-- **Response:** Array of shops, sorted by distance.
-- **Cache:** 15 Minutes (Redis GEO query).
+#### 8. AI Message Generation
+- **Endpoint:** `POST /ai/generate`
+- **Request Body:** `{ "farmer_id": "uuid", "conversation_id": "uuid", "message": "..." }`
+- **Response:** Grounded agronomic recommendation with confidence score.
 
-#### 14. Shop Inventory Update (For Shop Owners)
-- **Endpoint:** `PUT /shops/{shop_id}/inventory/{product_id}`
-- **Auth:** JWT (Role: `shop_owner`).
-- **Request:** `{ "stock_quantity": 50, "price": 266.00 }`
+#### 9. RAG Knowledge Documents & Search
+- **Endpoints:**
+  - `POST /rag/upload` (Upload and chunk ICAR/PJTSAU agricultural PDF/text guides)
+  - `POST /rag/query` (Hybrid vector + keyword search over indexed knowledge chunks)
+  - `POST /rag/rebuild` (Rebuild embeddings and metadata index)
+  - `GET /rag/search` (Search verified knowledge base)
+  - `GET /rag/documents` (List indexed agronomic source documents)
+  - `DELETE /rag/document/{document_id}` (Delete document and associated chunks)
 
 ---
 
-### E. External Context Data
+### D. Farmer Memory & Identity (`/memory`, `/farmers`, `/farmer-profiles`)
 
-#### 15. Weather Forecast API
+#### 10. Long-Term Dynamic Memory
+- **Endpoints:**
+  - `GET /memory/{farmer_id}` (Fetch structured memory: soil, farm size, crop cycles, preferences)
+  - `PUT /memory/{farmer_id}` (Update memory profile)
+  - `GET /memory/summary/{farmer_id}` (Formatted memory prompt for AI reasoning)
+  - `GET /memory/voice/{farmer_id}` (Preferred voice, speed, and language configuration)
+  - `POST /memory/refresh` (Sync memory from latest farmer profile state)
+
+#### 11. Core Farmer & Profile CRUD
+- **Endpoints:** Full CRUD on `/farmers` and `/farmer-profiles`.
+
+---
+
+### E. Live Market Prices & Mandis (`/market`)
+
+#### 12. Mandi Price Intelligence
+- **Endpoints:**
+  - `GET /market/prices` (Query commodity market prices by `commodity`, `district`, `state`)
+  - `GET /market/commodities` (List all standardized agricultural commodities)
+  - `GET /market/markets` (List tracked APMC mandis and locations)
+  - `POST /market/refresh` (Trigger asynchronous Agmarknet data synchronization)
+
+---
+
+### F. Weather Forecast & Climate Alerts (`/weather`)
+
+#### 13. Hyperlocal Weather Forecast
 - **Endpoint:** `GET /weather/forecast`
-- **Query Params:** `?district=Warangal`
-- **Response:** 7-day forecast, severe weather flags.
-- **Cache:** 1 Hour.
-
-#### 16. Market Price API
-- **Endpoint:** `GET /market-prices`
-- **Query Params:** `?crop=Tomato&district=Warangal`
-- **Response:** Latest Agmarknet data, modal price, min/max.
-
-#### 17. Government Schemes & 18. Scheme Eligibility
-- **Endpoint:** `POST /schemes/eligibility`
-- **Request:** `{ "farmer_id": "uuid" }`
-- **Response:** List of schemes farmer is mathematically eligible for.
+- **Query Params:** `latitude`, `longitude`, `district`, `state`
+- **Response:** Current condition, temperature, humidity, wind speed, 5-day / 3-hour forecast slots, and rain alerts.
 
 ---
 
-### F. Alerts & Notifications
+### G. Hyperlocal Agri Shops & Inventory (`/shops`, `/inventory`, `/orders`)
 
-#### 19. Emergency Alert Dispatch (Heavy Rain, Pest Outbreak)
-- **Endpoint:** `POST /notifications/emergency`
-- **Auth:** JWT (Role: `admin`).
-- **Request:** `{ "event_type": "flood", "affected_districts": ["Warangal"], "message_template_id": "T123" }`
-- **Processing:** Enqueues thousands of jobs in RabbitMQ for staggered WhatsApp delivery.
-- **Rate Limit:** Admins only.
+#### 14. Shop Directory & Geo-Search
+- **Endpoints:**
+  - `GET /shops/nearby` (Haversine spatial ranking by latitude/longitude or district)
+  - `GET /shops/search-product` (Search input retailers stocking specific fertilizers, seeds, pesticides)
+  - Full CRUD on `/shops/{shop_id}`
 
-#### 20. Reminder APIs (Harvest, Irrigation)
-- **Endpoint:** `POST /notifications/reminders/schedule`
-- **Request:** `{ "farmer_id": "uuid", "trigger_date": "2026-08-15", "type": "fertilizer_dose_2" }`
+#### 15. Inventory Stock Management
+- **Endpoints:**
+  - `GET /inventory/dashboard` (Shopkeeper stock summary and valuation metrics)
+  - `GET /inventory/low-stock` (Threshold low-stock warnings)
+  - `PATCH /inventory/{inventory_id}/stock` (Quick stock quantity adjustment)
+  - Full CRUD on `/inventory`
 
----
-
-### G. Human Expertise & Support
-
-#### 21. Expert Ticket Generation
-- **Endpoint:** `POST /experts/tickets`
-- **Auth:** Internal (Triggered by AI Low Confidence).
-- **Request:** `{ "farmer_id": "uuid", "context": "...", "images": [...] }`
-
-#### 22. Expert Reply
-- **Endpoint:** `POST /experts/tickets/{ticket_id}/reply`
-- **Auth:** JWT (Role: `expert`).
-- **Request:** `{ "reply_text": "...", "internal_notes": "..." }`
-- **Action:** Triggers translation -> TTS -> WhatsApp Webhook delivery to farmer.
-
-#### 23. Nearby Agriculture Officer API
-- **Endpoint:** `GET /officers/nearby`
-- **Query Params:** `?lat=18.0&lng=79.5`
-- **Response:** Government extension officer details for physical visits.
+#### 16. Farmer Order Requests
+- **Endpoints:**
+  - `POST /orders` (Place purchase request)
+  - `GET /orders/farmer/{farmer_id}` (Farmer order history)
+  - `GET /orders/shop/{shop_id}` (Retailer pending orders)
+  - `PATCH /orders/{order_id}/status` (Update fulfillment status: Pending, Confirmed, Delivered, Cancelled)
 
 ---
 
-### H. Analytics, Feedback & Soil
+### H. Payments & Checkout (`/payments`)
 
-#### 24. Feedback API
-- **Endpoint:** `POST /feedback`
-- **Request:** `{ "conversation_id": "uuid", "rating": 1, "comment": "..." }`
-- **Action:** Updates AI Model weights (RLHF data pipeline).
+#### 17. Razorpay Integration
+- **Endpoints:**
+  - `POST /payments/create-order` (Initiates Razorpay order for an existing `order_id`)
+  - `POST /payments/verify` (Cryptographically verifies `razorpay_signature` via HMAC-SHA256)
+  - `POST /payments/webhook` (Asynchronous payment capture and refund event webhook)
 
-#### 25. Soil Test Report Upload & Parsing
-- **Endpoint:** `POST /soil-tests/upload`
-- **Auth:** JWT (Role: `expert` or `admin`).
-- **Request:** PDF/Image of soil health card.
-- **Action:** OCR parsing, stores N-P-K, pH values to Farmer Profile.
+---
 
-#### 26. Admin Analytics APIs
-- **Endpoint:** `GET /admin/analytics/dashboard`
-- **Auth:** JWT (Role: `admin`).
-- **Response:** Aggregated data on queries, escalation rates, active users.
-- **Cache:** Refreshed every 15 minutes.
+### I. Government Subsidies & Schemes (`/schemes`)
+
+#### 18. Scheme Matching & Applications
+- **Endpoints:**
+  - `GET /schemes` (List available central & state agricultural schemes)
+  - `POST /schemes/evaluate` (Evaluate farmer eligibility against land size, crop, state, and category)
+  - `POST /schemes/apply` (Submit farmer scheme application)
+  - `GET /schemes/applications/{farmer_id}` (Track farmer application status)
+
+---
+
+### J. Human Expert Escalation (`/escalation`)
+
+#### 19. Extension Officer Ticket Queue & Resolution
+- **Endpoints:**
+  - `GET /escalation/experts` (List verified active agricultural scientists and AEOs)
+  - `GET /escalation/tickets` (Queue of escalation tickets for Admin & Expert dashboards)
+  - `PATCH /escalation/tickets/{ticket_id}/status` (Update status to Assigned / Resolved with agronomic notes)
+  - `GET /escalation/farmer/{farmer_id}/tickets` (Farmer consultation ticket history)
+
+> **Storage Architecture**: Escalation tickets are stored directly inside `FarmerMemory.expert_consultation_history` JSON for contextual retention and auditability.
 
 ---
 
 ## 4. API Security & Reliability Rules
 
-1. **Strict Input Validation:** All endpoints use Pydantic (FastAPI) for strict schema validation. Invalid types drop the request instantly.
-2. **Idempotency:** All `POST` requests (like creating a ticket or sending a notification) require an `Idempotency-Key` header to prevent double-charging or double-sending due to network retries.
-3. **Database Connection Pooling:** PgBouncer is used to prevent connection starvation during massive traffic spikes (e.g., during a widespread weather alert).
-4. **Graceful Degradation:** If the LLM provider (e.g., OpenAI/Gemini) goes down, the API falls back to a deterministic rules engine (e.g., cached weather, basic FAQs) while pausing complex recommendations.
+1. **Strict Input Validation:** All endpoints use Pydantic v2 schemas for strong type enforcement.
+2. **Cryptographic Webhook Verification:** Both WhatsApp (`X-Hub-Signature-256`) and Razorpay (`X-Razorpay-Signature`) webhooks are cryptographically authenticated before payload processing.
+3. **RBAC Protection:** Sensitive management endpoints (inventory updates, ticket resolutions, admin tools) enforce role validation via dependency injection.
+4. **Graceful Fallbacks & Zero Hallucination:** If external providers (OpenWeather, Agmarknet, Gemini) are unreachable, the system returns deterministic cached data or honest guidance without fabricating recommendations.

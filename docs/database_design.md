@@ -1,364 +1,297 @@
-# 🌾 KrishiMitra AI — Production Database Design
+# 🌾 BhoomiMitra AI — Production Database Design
 
-This document details the production-ready PostgreSQL database schema for KrishiMitra AI. It is designed for scalability, maintaining referential integrity, and fast querying across multiple domains.
+This document details the production-ready PostgreSQL and SQLite database schema for BhoomiMitra AI. It is designed for scalability, maintaining referential integrity, and fast spatial and contextual querying across agricultural domains.
 
 ---
 
-## 1. Entity-Relationship (ER) Diagram
+## 1. Entity-Relationship (ER) Architecture
 
 ```mermaid
 erDiagram
-    %% Core Entities
-    FARMER {
-        uuid id PK
-        string phone_number UK
-        string preferred_language
-        boolean is_active
-        timestamp created_at
-    }
-    
-    FARMER_PROFILE {
-        uuid id PK
-        uuid farmer_id FK
-        string full_name
-        float land_size_acres
-        string soil_type
-        string state
-        string district
-        string village
-        geometry location
-    }
-
-    AGRICULTURE_EXPERT {
-        uuid id PK
-        string full_name
-        string phone_number UK
-        string specialization
-        string language_spoken
-        boolean is_available
-    }
-
-    %% Crop & Domain Knowledge
-    CROP {
-        uuid id PK
-        string name UK
-        string scientific_name
-        string typical_season
-        int duration_days
-    }
-    
-    DISEASE {
-        uuid id PK
-        uuid crop_id FK
-        string name
-        string symptoms
-        string treatment_plan
-    }
-    
-    PEST {
-        uuid id PK
-        uuid crop_id FK
-        string name
-        string damage_signs
-        string control_measures
-    }
-    
-    GOVERNMENT_SCHEME {
-        uuid id PK
-        string scheme_name
-        string eligibility_criteria
-        string benefits
-        string state_applicable
-    }
-
-    %% Farmer Crop Management
-    FARMER_CROP {
-        uuid id PK
-        uuid farmer_id FK
-        uuid crop_id FK
-        date sowing_date
-        date expected_harvest
-        float area_acres
-        string status
-    }
-
-    %% Products & Inventory
-    PRODUCT_CATALOG {
-        uuid id PK
-        string type "Fertilizer, Pesticide, Micronutrient, Seed"
-        string name
-        string brand
-        string composition
-        string usage_instructions
-    }
-    
-    AGRO_SHOP {
-        uuid id PK
-        string shop_name
-        string owner_name
-        string phone_number UK
-        string address
-        geometry location
-        boolean is_verified
-    }
-    
-    SHOP_INVENTORY {
-        uuid id PK
-        uuid shop_id FK
-        uuid product_id FK
-        float price
-        int stock_quantity
-        boolean in_stock
-    }
-
-    %% External Data (Time-series / Volatile)
-    MARKET_PRICE {
-        uuid id PK
-        uuid crop_id FK
-        string mandi_name
-        string state
-        date record_date
-        float min_price
-        float max_price
-        float modal_price
-    }
-    
-    WEATHER_RECORD {
-        uuid id PK
-        string district
-        date record_date
-        float min_temp
-        float max_temp
-        float rainfall_mm
-        string weather_condition
-    }
-
-    %% Interactions & System Actions
-    CONVERSATION {
-        uuid id PK
-        uuid farmer_id FK
-        string session_id
-        text user_message
-        text ai_response
-        string intent
-        float confidence_score
-        timestamp created_at
-    }
-    
-    AI_RECOMMENDATION {
-        uuid id PK
-        uuid conversation_id FK
-        uuid farmer_id FK
-        string recommendation_type
-        text content
-        boolean applied_by_farmer
-    }
-
-    REMINDER_SCHEDULE {
-        uuid id PK
-        uuid farmer_id FK
-        uuid farmer_crop_id FK
-        string reminder_type
-        date scheduled_date
-        string status
-    }
-    
-    NOTIFICATION {
-        uuid id PK
-        uuid farmer_id FK
-        string title
-        text content
-        string channel
-        string status
-        timestamp sent_at
-    }
-
-    %% Relationships
     FARMER ||--o| FARMER_PROFILE : "has"
-    FARMER ||--o{ FARMER_CROP : "grows"
+    FARMER ||--o| FARMER_MEMORY : "maintains"
+    FARMER ||--o{ FARM : "owns"
     FARMER ||--o{ CONVERSATION : "initiates"
-    FARMER ||--o{ REMINDER_SCHEDULE : "has"
-    FARMER ||--o{ NOTIFICATION : "receives"
-    
-    CROP ||--o{ DISEASE : "susceptible to"
-    CROP ||--o{ PEST : "attacked by"
-    CROP ||--o{ FARMER_CROP : "is"
-    CROP ||--o{ MARKET_PRICE : "priced at"
-    
-    AGRO_SHOP ||--o{ SHOP_INVENTORY : "maintains"
-    PRODUCT_CATALOG ||--o{ SHOP_INVENTORY : "listed in"
-    
-    CONVERSATION ||--o{ AI_RECOMMENDATION : "generates"
-    FARMER_CROP ||--o{ REMINDER_SCHEDULE : "triggers"
+    FARMER ||--o{ ORDER_REQUEST : "places"
+    FARMER ||--o{ SCHEME_APPLICATION : "submits"
+
+    FARM ||--o{ CROP : "contains"
+    FARM ||--o{ CROP_HEALTH : "records"
+    FARM ||--o{ ADVISORY : "receives"
+
+    SHOP ||--o{ INVENTORY : "stocks"
+    SHOP ||--o{ ORDER_REQUEST : "fulfills"
+
+    GOVERNMENT_SCHEME ||--o{ SCHEME_APPLICATION : "receives"
+
+    KNOWLEDGE_DOCUMENT ||--o{ KNOWLEDGE_CHUNK : "segmented into"
+    KNOWLEDGE_CHUNK ||--o| EMBEDDING_METADATA : "embedded in"
+
+    USER_ACCOUNT ||--o| EXPERT : "associates"
 ```
 
 ---
 
-## 2. Table Definitions & Indexes
+## 2. Table Definitions & Schemas
 
-### A. Core User Management
+### A. Core Farmer & Identity
 
 **1. `farmers`**
 - `id` (UUID, PK)
-- `phone_number` (VARCHAR, Unique, Indexed)
-- `preferred_language` (VARCHAR)
+- `phone_number` (VARCHAR(20), Unique, Indexed)
+- `preferred_language` (VARCHAR(10), Default 'te')
 - `is_active` (BOOLEAN, Default True)
 - `created_at`, `updated_at` (TIMESTAMP)
 
 **2. `farmer_profiles`**
 - `id` (UUID, PK)
-- `farmer_id` (UUID, FK -> farmers.id, Unique)
-- `full_name` (VARCHAR)
-- `land_size_acres` (DECIMAL)
-- `soil_type` (VARCHAR)
-- `state`, `district`, `village` (VARCHAR, Indexed for regional queries)
-- `location` (POSTGIS GEOMETRY(Point, 4326), Indexed with GIST for spatial queries)
+- `farmer_id` (UUID, FK -> farmers.id, Unique, Indexed)
+- `full_name` (VARCHAR(100))
+- `state` (VARCHAR(50), Indexed)
+- `district` (VARCHAR(50), Indexed)
+- `mandal` (VARCHAR(50))
+- `village` (VARCHAR(50))
+- `land_size_acres` (FLOAT)
+- `current_crop` (VARCHAR(50))
+- `created_at`, `updated_at` (TIMESTAMP)
 
-**3. `agriculture_experts`**
+**3. `farmer_memory`**
 - `id` (UUID, PK)
-- `full_name` (VARCHAR)
-- `phone_number` (VARCHAR, Unique)
-- `specialization` (VARCHAR)
-- `language_spoken` (VARCHAR ARRAY)
-- `is_available` (BOOLEAN)
+- `farmer_id` (UUID, FK -> farmers.id, Unique, Indexed)
+- `preferred_voice`, `voice_speed`, `voice_gender` (VARCHAR)
+- `farm_size`, `village`, `district`, `state` (VARCHAR)
+- `soil_type`, `water_source`, `irrigation_method` (VARCHAR)
+- `crop_history` (JSON: list of historical crops and seasons)
+- `disease_history` (JSON: past diagnoses and treatments)
+- `fertilizer_history` (JSON: application logs)
+- `pesticide_history` (JSON: spray records)
+- `scheme_history` (JSON: applied schemes and subsidies)
+- `expert_consultation_history` (JSON: human expert escalation tickets, assigned AEOs, statuses, and resolution notes)
+- `gps_coordinates` (JSON: latitude/longitude)
+- `created_at`, `updated_at` (TIMESTAMP)
 
 ---
 
-### B. Agricultural Knowledge Base
+### B. Farm Parcels, Crops & Diagnostics
 
-**4. `crops`**
-- `id` (UUID, PK)
-- `name` (VARCHAR, Unique)
-- `scientific_name` (VARCHAR)
-- `typical_season` (VARCHAR)
-- `duration_days` (INT)
-
-**5. `diseases` & `pests`** (Similar structure)
-- `id` (UUID, PK)
-- `crop_id` (UUID, FK -> crops.id)
-- `name` (VARCHAR)
-- `damage_signs` / `symptoms` (TEXT)
-- `control_measures` / `treatment_plan` (TEXT)
-- *Index on `crop_id`*
-
-**6. `government_schemes`**
-- `id` (UUID, PK)
-- `scheme_name` (VARCHAR)
-- `eligibility_criteria` (TEXT)
-- `benefits` (TEXT)
-- `state_applicable` (VARCHAR, Indexed)
-
----
-
-### C. Farmer Crop Management
-
-**7. `farmer_crops`**
+**4. `farms`**
 - `id` (UUID, PK)
 - `farmer_id` (UUID, FK -> farmers.id, Indexed)
-- `crop_id` (UUID, FK -> crops.id)
+- `name` (VARCHAR(100))
+- `size_acres` (FLOAT)
+- `soil_type` (VARCHAR(50))
+- `irrigation_type` (VARCHAR(50))
+- `latitude`, `longitude` (FLOAT)
+- `state`, `district`, `mandal`, `village` (VARCHAR(50))
+- `created_at`, `updated_at` (TIMESTAMP)
+
+**5. `crops`**
+- `id` (UUID, PK)
+- `farm_id` (UUID, FK -> farms.id, Indexed)
+- `name` (VARCHAR(100), Indexed)
+- `variety` (VARCHAR(100))
 - `sowing_date` (DATE)
-- `expected_harvest` (DATE)
-- `area_acres` (DECIMAL)
-- `status` (VARCHAR: 'Active', 'Harvested', 'Failed')
+- `stage` (VARCHAR(50))
+- `status` (VARCHAR(20), Default 'active')
+- `created_at`, `updated_at` (TIMESTAMP)
+
+**6. `crop_health`**
+- `id` (UUID, PK)
+- `farm_id` (UUID, FK -> farms.id, Indexed)
+- `crop_name` (VARCHAR(100))
+- `image_url` (VARCHAR(500))
+- `symptoms` (TEXT)
+- `diagnosis` (TEXT)
+- `confidence_score` (FLOAT)
+- `is_healthy` (BOOLEAN, Default True)
+- `disease_name` (VARCHAR(100))
+- `severity` (VARCHAR(20))
+- `created_at`, `updated_at` (TIMESTAMP)
+
+**7. `advisories`**
+- `id` (UUID, PK)
+- `farm_id` (UUID, FK -> farms.id, Indexed)
+- `crop_name` (VARCHAR(100))
+- `advisory_type` (VARCHAR(50))
+- `title` (VARCHAR(200))
+- `content` (TEXT)
+- `priority` (VARCHAR(20), Default 'normal')
+- `created_at`, `updated_at` (TIMESTAMP)
 
 ---
 
-### D. Products & Agro Shops
+### C. Authentication & Expert Management
 
-**8. `product_catalog`** (Covers Fertilizers, Pesticides, Micronutrients, Seeds)
+**8. `user_accounts`**
 - `id` (UUID, PK)
-- `type` (VARCHAR: 'Fertilizer', 'Pesticide', 'Micronutrient', 'Seed', Indexed)
-- `name` (VARCHAR)
-- `brand` (VARCHAR)
-- `composition` (TEXT)
-- `usage_instructions` (TEXT)
+- `email` (VARCHAR(255), Unique, Indexed)
+- `hashed_password` (VARCHAR(255))
+- `full_name` (VARCHAR(255))
+- `phone_number` (VARCHAR(20), Unique)
+- `role` (VARCHAR(50), Default 'expert': 'admin', 'expert', 'shop_owner')
+- `is_active` (BOOLEAN, Default True)
+- `created_at`, `updated_at` (TIMESTAMP)
 
-**9. `agro_shops`**
+**9. `experts`**
 - `id` (UUID, PK)
-- `shop_name` (VARCHAR)
-- `owner_name` (VARCHAR)
-- `phone_number` (VARCHAR, Unique)
+- `name` (VARCHAR(100))
+- `designation` (VARCHAR(100))
+- `department` (VARCHAR(100))
+- `specialization` (VARCHAR(100))
+- `phone` (VARCHAR(20), Unique)
+- `email` (VARCHAR(100), Unique)
+- `district` (VARCHAR(50), Indexed)
+- `state` (VARCHAR(50), Indexed)
+- `is_active` (BOOLEAN, Default True)
+- `rating` (FLOAT, Default 5.0)
+- `total_consultations` (INT, Default 0)
+- `created_at`, `updated_at` (TIMESTAMP)
+
+---
+
+### D. Hyperlocal Input Commerce & Orders
+
+**10. `shops`**
+- `id` (UUID, PK)
+- `name` (VARCHAR(150), Indexed)
+- `owner_name` (VARCHAR(100))
+- `phone` (VARCHAR(20), Unique)
+- `email` (VARCHAR(100))
 - `address` (TEXT)
-- `location` (POSTGIS GEOMETRY(Point, 4326), Indexed with GIST for proximity search)
-- `is_verified` (BOOLEAN)
+- `village`, `mandal`, `district`, `state` (VARCHAR(50), Indexed)
+- `pincode` (VARCHAR(10))
+- `latitude`, `longitude` (FLOAT)
+- `delivery_radius_km` (FLOAT, Default 15.0)
+- `rating` (FLOAT, Default 4.5)
+- `status` (VARCHAR(20), Default 'active')
+- `license_number` (VARCHAR(50))
+- `created_at`, `updated_at` (TIMESTAMP)
 
-**10. `shop_inventory`**
+**11. `inventory`**
 - `id` (UUID, PK)
-- `shop_id` (UUID, FK -> agro_shops.id)
-- `product_id` (UUID, FK -> product_catalog.id)
-- `price` (DECIMAL)
-- `stock_quantity` (INT)
-- `in_stock` (BOOLEAN)
-- *Composite Unique Index on `(shop_id, product_id)`*
+- `shop_id` (UUID, FK -> shops.id, Indexed)
+- `product_name` (VARCHAR(150), Indexed)
+- `category` (VARCHAR(50): 'fertilizer', 'pesticide', 'seed', 'machinery', 'micronutrient', Indexed)
+- `brand` (VARCHAR(100), Indexed)
+- `unit` (VARCHAR(20): 'kg', 'litre', 'packet', 'bag')
+- `price_per_unit` (FLOAT)
+- `quantity_available` (FLOAT)
+- `reorder_threshold` (FLOAT, Default 10.0)
+- `available` (BOOLEAN, Default True, Indexed)
+- `created_at`, `updated_at` (TIMESTAMP)
 
----
-
-### E. Time-Series & Market Data
-
-**11. `market_prices`**
-- `id` (UUID, PK)
-- `crop_id` (UUID, FK -> crops.id)
-- `mandi_name` (VARCHAR)
-- `state` (VARCHAR)
-- `record_date` (DATE)
-- `min_price`, `max_price`, `modal_price` (DECIMAL)
-- *Composite Index on `(crop_id, mandi_name, record_date)` for fast trend lookups.*
-
-**12. `weather_records`**
-- `id` (UUID, PK)
-- `district` (VARCHAR, Indexed)
-- `record_date` (DATE)
-- `min_temp`, `max_temp`, `rainfall_mm` (DECIMAL)
-- `weather_condition` (VARCHAR)
-- *Index on `(district, record_date)`*
-
----
-
-### F. Interactions & System Operations
-
-**13. `conversations`**
+**12. `order_requests`**
 - `id` (UUID, PK)
 - `farmer_id` (UUID, FK -> farmers.id, Indexed)
-- `session_id` (VARCHAR)
-- `user_message` (TEXT)
-- `ai_response` (TEXT)
-- `intent` (VARCHAR)
-- `confidence_score` (DECIMAL)
+- `shop_id` (UUID, FK -> shops.id, Indexed)
+- `inventory_id` (UUID, FK -> inventory.id)
+- `product_name` (VARCHAR(150))
+- `quantity` (FLOAT)
+- `unit` (VARCHAR(20))
+- `total_price` (FLOAT)
+- `status` (VARCHAR(20): 'pending', 'confirmed', 'delivered', 'cancelled', Default 'pending')
+- `delivery_address` (TEXT)
+- `farmer_phone` (VARCHAR(20))
+- `payment_status` (VARCHAR(20): 'unpaid', 'paid', 'refunded', Default 'unpaid')
+- `notes` (TEXT)
+- `created_at`, `updated_at` (TIMESTAMP)
+
+---
+
+### E. Government Schemes & Subsidies
+
+**13. `government_schemes`**
+- `id` (UUID, PK)
+- `name` (VARCHAR(200), Indexed)
+- `name_te` (VARCHAR(200))
+- `name_hi` (VARCHAR(200))
+- `category` (VARCHAR(50))
+- `description`, `description_te` (TEXT)
+- `benefits` (TEXT)
+- `subsidy_percentage` (FLOAT)
+- `max_subsidy_amount` (FLOAT)
+- `min_land_acres`, `max_land_acres` (FLOAT)
+- `eligible_crops` (TEXT)
+- `eligible_states` (TEXT)
+- `application_url` (VARCHAR(500))
+- `deadline` (DATE)
+- `status` (VARCHAR(20), Default 'active')
+- `created_at`, `updated_at` (TIMESTAMP)
+
+**14. `scheme_applications`**
+- `id` (UUID, PK)
+- `farmer_id` (UUID, FK -> farmers.id, Indexed)
+- `scheme_id` (UUID, FK -> government_schemes.id, Indexed)
+- `status` (VARCHAR(20): 'submitted', 'in_review', 'approved', 'rejected', Default 'submitted')
+- `applied_at` (TIMESTAMP)
+- `notes` (TEXT)
+
+---
+
+### F. APMC Mandi Market Prices
+
+**15. `market_prices`**
+- `id` (UUID, PK)
+- `commodity` (VARCHAR(100), Indexed)
+- `variety` (VARCHAR(100))
+- `market` (VARCHAR(100), Indexed)
+- `district` (VARCHAR(100), Indexed)
+- `state` (VARCHAR(100), Indexed)
+- `min_price`, `max_price`, `modal_price` (FLOAT)
+- `arrivals_tonnes` (FLOAT)
+- `price_date` (DATE, Indexed)
+- `created_at`, `updated_at` (TIMESTAMP)
+
+---
+
+### G. Grounded RAG Knowledge Engine
+
+**16. `knowledge_documents`**
+- `id` (UUID, PK)
+- `filename` (VARCHAR(255))
+- `title` (VARCHAR(255))
+- `source_institution` (VARCHAR(100))
+- `crop` (VARCHAR(100))
+- `category` (VARCHAR(100))
+- `total_chunks` (INT, Default 0)
+- `created_at`, `updated_at` (TIMESTAMP)
+
+**17. `knowledge_chunks`**
+- `id` (UUID, PK)
+- `document_id` (UUID, FK -> knowledge_documents.id, Indexed)
+- `chunk_index` (INT)
+- `page_number` (INT)
+- `content` (TEXT)
+- `metadata_json` (JSON)
 - `created_at` (TIMESTAMP)
 
-**14. `ai_recommendations`**
+**18. `embedding_metadata`**
 - `id` (UUID, PK)
-- `conversation_id` (UUID, FK -> conversations.id)
-- `farmer_id` (UUID, FK -> farmers.id)
-- `recommendation_type` (VARCHAR)
-- `content` (TEXT)
-- `applied_by_farmer` (BOOLEAN, Default False)
-
-**15. `reminder_schedules`**
-- `id` (UUID, PK)
-- `farmer_id` (UUID, FK -> farmers.id)
-- `farmer_crop_id` (UUID, FK -> farmer_crops.id, Nullable)
-- `reminder_type` (VARCHAR: 'Fertilizer', 'Pesticide', 'Harvest')
-- `scheduled_date` (DATE, Indexed)
-- `status` (VARCHAR: 'Pending', 'Sent', 'Cancelled')
-
-**16. `notifications`**
-- `id` (UUID, PK)
-- `farmer_id` (UUID, FK -> farmers.id)
-- `title` (VARCHAR)
-- `content` (TEXT)
-- `channel` (VARCHAR: 'WhatsApp', 'SMS')
-- `status` (VARCHAR: 'Sent', 'Failed', 'Delivered')
-- `sent_at` (TIMESTAMP, Indexed)
+- `chunk_id` (UUID, FK -> knowledge_chunks.id, Indexed)
+- `embedding_vector` (TEXT / Array: 768-dimension Gemini vector)
+- `dimension` (INT, Default 768)
+- `model_name` (VARCHAR(100))
+- `created_at` (TIMESTAMP)
 
 ---
 
-## 3. Database Scalability & Performance Details
+### H. Multi-Turn Conversations
 
-1. **PostGIS for Location Data:** The `location` fields in `farmer_profiles` and `agro_shops` utilize the `GEOMETRY(Point, 4326)` type. Using GiST indexing allows incredibly fast spatial queries (e.g., "Find agro shops within 15km of the farmer's location").
-2. **UUIDs for Primary Keys:** Prevents ID enumeration attacks and makes data merging/migration safe across distributed systems.
-3. **Partitioning Strategy:**
-    - `conversations`: Partitioned by Month/Year as this will grow massive quickly.
-    - `market_prices` & `weather_records`: Partitioned by Year.
-4. **Denormalization (Where Necessary):** While normalized, the `farmer_profiles` table caches `state` and `district` to avoid heavy spatial joins every time region-based querying is needed (e.g. for weather or schemes). 
-5. **JSONB Columns (Optional):** If product metadata varies wildly between fertilizers and seeds, a `metadata` JSONB column can be added to `product_catalog` to avoid sparse table schemas.
+**19. `conversations`**
+- `id` (UUID, PK)
+- `farmer_id` (UUID, FK -> farmers.id, Indexed)
+- `user_message` (TEXT)
+- `ai_response` (TEXT)
+- `language` (VARCHAR(10))
+- `intent` (VARCHAR(50))
+- `confidence_score` (FLOAT)
+- `message_id` (VARCHAR(100), Unique, Indexed)
+- `created_at` (TIMESTAMP)
+
+---
+
+## 3. Storage Architecture Highlights
+
+1. **Haversine Geo-Computation**: Nearby shop discovery computes spherical distance in Python/SQL without requiring heavy GIS extensions for lightweight edge deployment.
+2. **Dynamic JSON Contextual Storage**: Dynamic agricultural parameters (past diagnoses, spray logs, crop cycles, and human escalation tickets) are stored within `FarmerMemory` JSON fields for fast single-query ingestion into Gemini system prompts.
+3. **Hybrid Vector & Keyword Indexing**: Chunk embeddings and keyword frequencies are paired with document metadata scoring for verified, zero-hallucination agronomic retrieval.
