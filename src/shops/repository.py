@@ -104,25 +104,29 @@ class ShopRepository:
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
-    async def search_shops_by_product(self, product_query: str) -> List[Tuple[Shop, Inventory]]:
+    async def search_shops_by_product(
+        self, product_query: str, only_available: bool = False
+    ) -> List[Tuple[Shop, Inventory]]:
         """Search shops selling a specific product (case-insensitive substring match)."""
+        conditions = [
+            Shop.status == "active",
+            or_(
+                Inventory.product_name.ilike(f"%{product_query}%"),
+                Inventory.brand.ilike(f"%{product_query}%"),
+                Inventory.category.ilike(f"%{product_query}%"),
+            ),
+        ]
+        if only_available:
+            conditions.append(Inventory.available == True)
+
         stmt = (
             select(Shop, Inventory)
             .join(Inventory, Shop.id == Inventory.shop_id)
-            .where(
-                and_(
-                    Shop.status == "active",
-                    Inventory.available == True,
-                    or_(
-                        Inventory.product_name.ilike(f"%{product_query}%"),
-                        Inventory.brand.ilike(f"%{product_query}%"),
-                        Inventory.category.ilike(f"%{product_query}%"),
-                    ),
-                )
-            )
+            .where(and_(*conditions))
         )
         result = await self.db.execute(stmt)
         return list(result.all())
+
 
     async def get_nearby_shops(
         self, latitude: float, longitude: float, max_radius_km: float = 50.0
