@@ -363,6 +363,25 @@ async def process_image_message(
         except Exception as mem_err:
             logger.warning(f"Memory update failed for image message: {mem_err}")
 
+        # Check if escalation is required for unknown disease or explicit farmer request
+        try:
+            from src.escalation.service import enrich_response_with_escalation, _detect_escalation_intent
+            caption_lower = user_caption.lower() if user_caption else ""
+            has_caption_intent, _ = _detect_escalation_intent(caption_lower, user_caption or "")
+            is_unidentified = not diagnosis_data.disease_name or diagnosis_data.disease_name.lower() in ("unknown", "unidentified", "none")
+
+            if has_caption_intent or is_unidentified:
+                reply_text = await enrich_response_with_escalation(
+                    db,
+                    user_caption or "Image Crop Diagnosis",
+                    reply_text,
+                    farmer,
+                    force_escalation=is_unidentified,
+                    force_reason="inspection" if is_unidentified else None,
+                )
+        except Exception as esc_err:
+            logger.warning(f"Failed to enrich image response with escalation: {esc_err}")
+
     except Exception as e:
         logger.warning(f"AI Vision unavailable or failed to parse for farmer {farmer.id}: {e}")
         reply_text = get_fallback_response(farmer.preferred_language)
@@ -372,3 +391,4 @@ async def process_image_message(
     await db.commit()
     
     return reply_text
+

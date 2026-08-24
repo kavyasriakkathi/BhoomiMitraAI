@@ -3,9 +3,10 @@ from uuid import UUID, uuid4
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from src.core.models import Expert
+from src.core.models import Expert, Farmer, FarmerProfile
 from src.memory.models import FarmerMemory
 from src.escalation.schemas import ExpertCreate, ExpertUpdate
+from sqlalchemy.orm.attributes import flag_modified
 
 
 class EscalationRepository:
@@ -13,7 +14,7 @@ class EscalationRepository:
         self.db = db
 
     async def seed_default_experts_if_empty(self) -> List[Expert]:
-        """Idempotently seeds standard agricultural officers and specialists if table is empty."""
+        """Idempotently seeds standard agricultural officers and specialists if table is empty (demo / dev seed)."""
         count_res = await self.db.execute(select(func.count(Expert.id)))
         count = count_res.scalar() or 0
         if count > 0:
@@ -128,7 +129,92 @@ class EscalationRepository:
             history = list(memory.expert_consultation_history or [])
             history.append(ticket_data)
             memory.expert_consultation_history = history
+            flag_modified(memory, "expert_consultation_history")
             self.db.add(memory)
 
         await self.db.commit()
         return True
+
+    async def get_all_tickets(
+        self,
+        status_filter: Optional[str] = None,
+        expert_id: Optional[UUID] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetch all escalation tickets across all farmers with metadata for the expert dashboard queue."""
+        result = await self.db.execute(
+            select(FarmerMemory, Farmer, FarmerProfile)
+            .outerjoin(Farmer, Farmer.id == FarmerMemory.farmer_id)
+            .outerjoin(FarmerProfile, FarmerProfile.farmer_id == FarmerMemory.farmer_id)
+            .where(FarmerMemory.expert_consultation_history.is_not(None))
+        )
+        rows = result.all()
+
+        all_tickets = []
+        for mem, farmer, profile in rows:
+            history = mem.expert_consultation_history or []
+            farmer_name = profile.full_name if profile else None
+            farmer_phone = farmer.phone_number if farmer else None
+            crop = (mem.primary_crops[0] if (mem.primary_crops and len(mem.primary_crops) > 0) else (profile.current_crop if profile else None))
+            lang = mem.preferred_language or (farmer.preferred_language if farmer else "en")
+
+            for t in history:
+                if status_filter and t.get("status", "").lower() != status_filter.lower():
+                    continue
+                if expert_id and t.get("expert_id") and str(expert_id) != str(t.get("expert_id")):
+                    continue
+
+                item = dict(t)
+                item["farmer_id"] = mem.farmer_id
+                item["farmer_name"] = farmer_name or "Farmer"
+                item["farmer_phone"] = farmer_phone
+                item["crop"] = crop
+                item["language"] = lang
+                all_tickets.append(item)
+
+        # Sort descending by created_at
+        all_tickets.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+        return all_tickets
+
+    async def get_ticket_by_id(self, ticket_id: str) -> Optional[Tuple[FarmerMemory, Dict[str, Any]]]:
+        """Find a ticket and its parent FarmerMemory by unique ticket_id."""
+        result = await self.db.execute(
+            select(FarmerMemory).where(FarmerMemory.expert_consultation_history.is_not(None))
+        )
+        memories = result.scalars().all()
+        for mem in memories:
+            for t in (mem.expert_consultation_history or []):
+                if t.get("ticket_id") == ticket_id:
+                    return mem, t
+        return None
+
+    async def update_ticket_status(
+        self,
+        ticket_id: str,
+        new_status: str,
+        notes: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Safely update status and resolution notes of a single ticket in FarmerMemory."""
+        found = await self.get_ticket_by_id(ticket_id)
+        if not found:
+            return None
+
+        memory, target_ticket = found
+        history = list(memory.expert_consultation_history or [])
+        updated_ticket = None
+
+        for item in history:
+            if item.get("ticket_id") == ticket_id:
+                item["status"] = new_status
+                if notes:
+                    item["notes"] = notes
+                item["updated_at"] = datetime.utcnow().isoformat()
+                updated_ticket = dict(item)
+                break
+
+        memory.expert_consultation_history = history
+        flag_modified(memory, "expert_consultation_history")
+        self.db.add(memory)
+        await self.db.commit()
+        await self.db.refresh(memory)
+        return updated_ticket
+

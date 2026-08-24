@@ -1570,4 +1570,134 @@ async function executeRagSearch() {
   }
 }
 
+// ===========================================================================
+// EXPERT ESCALATION DASHBOARD LOGIC
+// ===========================================================================
+
+async function loadExpertDashboardData() {
+  const tableBody = document.getElementById('expert-tickets-table-body');
+  const statTotal = document.getElementById('expert-stat-total');
+  const statPending = document.getElementById('expert-stat-pending');
+  const badgeCount = document.getElementById('expert-tickets-count');
+
+  if (!tableBody) return;
+
+  // 1. Populate expert profile inputs if expert is logged in
+  if (currentUser && currentUser.expert_id) {
+    try {
+      const expRes = await fetch(`/escalation/experts/${currentUser.expert_id}`, { credentials: 'include' });
+      if (expRes.ok) {
+        const expData = await expRes.json();
+        const nameInput = document.getElementById('expert-name-input');
+        const specialtyInput = document.getElementById('expert-specialty-input');
+        const phoneInput = document.getElementById('expert-phone-input');
+        if (nameInput) nameInput.value = expData.name || '';
+        if (specialtyInput) specialtyInput.value = expData.specialty || '';
+        if (phoneInput) phoneInput.value = expData.phone_number || '';
+      }
+    } catch (e) {
+      console.warn("Could not load expert profile:", e);
+    }
+  }
+
+  // 2. Fetch escalation tickets queue
+  try {
+    const res = await fetch('/escalation/tickets', { credentials: 'include' });
+    if (!res.ok) {
+      tableBody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">Please log in as an Agricultural Expert or Admin to view consultations.</td></tr>`;
+      return;
+    }
+
+    const data = await res.json();
+    const items = data.items || [];
+
+    if (statTotal) statTotal.textContent = data.total;
+    if (statPending) statPending.textContent = data.pending;
+    if (badgeCount) badgeCount.textContent = `${data.total} Tickets`;
+
+    if (items.length === 0) {
+      tableBody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:2rem;">No pending escalation tickets assigned.</td></tr>`;
+      return;
+    }
+
+    tableBody.innerHTML = items.map(ticket => {
+      const statusClass = ticket.status.toLowerCase() === 'resolved' ? 'badge-completed' : (ticket.status.toLowerCase() === 'pending' ? 'badge-open' : 'badge-accepted');
+      const dateStr = ticket.created_at ? new Date(ticket.created_at).toLocaleString() : 'N/A';
+      return `
+        <tr>
+          <td><strong>#${escapeHtml(ticket.ticket_id)}</strong></td>
+          <td>${escapeHtml(ticket.farmer_name || 'Farmer')} <small style="color:var(--text-muted); font-size:0.75rem;"><br>${escapeHtml(ticket.farmer_phone || '')}</small></td>
+          <td>${escapeHtml(ticket.topic || 'Crop Diagnosis')} <small style="color:var(--text-muted);"><br>${escapeHtml(ticket.crop || 'General')}</small></td>
+          <td><span class="badge" style="background:#e0e7ff; color:#3730a3;">${escapeHtml((ticket.language || 'en').toUpperCase())}</span></td>
+          <td><small>${escapeHtml(dateStr)}</small></td>
+          <td><span class="badge ${statusClass}">${escapeHtml(ticket.status)}</span></td>
+          <td>
+            ${ticket.status !== 'Resolved' ? `
+              <button class="btn btn-sm btn-primary" onclick="updateDashboardTicketStatus('${escapeHtml(ticket.ticket_id)}', 'Resolved')" style="font-size:0.75rem; padding:0.25rem 0.5rem;">Mark Resolved</button>
+            ` : `<span style="color:#10b981; font-size:0.8rem;">✅ Resolved</span>`}
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+  } catch (err) {
+    tableBody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:red; padding:2rem;">Error loading tickets: ${escapeHtml(err.message)}</td></tr>`;
+  }
+}
+
+async function saveExpertProfile(event) {
+  event.preventDefault();
+  if (!currentUser || !currentUser.expert_id) {
+    alert("You must be logged in as an expert with an assigned expert ID to update profile.");
+    return;
+  }
+
+  const name = document.getElementById('expert-name-input').value.trim();
+  const specialty = document.getElementById('expert-specialty-input').value.trim();
+  const phone = document.getElementById('expert-phone-input').value.trim();
+
+  try {
+    const res = await fetch(`/escalation/experts/${currentUser.expert_id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ name, specialty, phone_number: phone })
+    });
+
+    if (res.ok) {
+      alert("✅ Expert Profile updated successfully!");
+      loadExpertDashboardData();
+    } else {
+      const err = await res.json();
+      alert("Update Failed: " + (err.detail || "Error updating profile"));
+    }
+  } catch (e) {
+    alert("Profile Exception: " + e.message);
+  }
+}
+
+async function updateDashboardTicketStatus(ticketId, newStatus) {
+  const notes = prompt(`Enter consultation / resolution notes for ticket #${ticketId} (optional):`, "Consulted farmer and provided pest remedy.");
+  if (notes === null) return; // Cancelled
+
+  try {
+    const res = await fetch(`/escalation/tickets/${ticketId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ status: newStatus, notes: notes.trim() || undefined })
+    });
+
+    if (res.ok) {
+      alert(`✅ Ticket #${ticketId} marked as ${newStatus}!`);
+      loadExpertDashboardData();
+    } else {
+      const err = await res.json();
+      alert("Status Update Failed: " + (err.detail || "Error updating status"));
+    }
+  } catch (e) {
+    alert("Ticket Status Exception: " + e.message);
+  }
+}
+
 

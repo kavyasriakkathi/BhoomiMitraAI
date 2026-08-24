@@ -1,10 +1,10 @@
 from typing import Optional, List, Dict, Any, Tuple
 from uuid import UUID
-from datetime import datetime, timedelta
+from datetime import datetime
 import random
 from fastapi import HTTPException, status
 from src.core.logging import logger
-from src.core.models import Expert
+from src.core.models import Expert, UserAccount
 from src.escalation.repository import EscalationRepository
 from src.escalation.schemas import (
     ExpertCreate,
@@ -13,14 +13,18 @@ from src.escalation.schemas import (
     PaginatedExpertResponse,
     EscalationTicketResponse,
     FarmerEscalationHistoryResponse,
+    TicketStatusUpdate,
+    TicketQueueItem,
+    TicketQueueResponse,
 )
 
 
 # ---------------------------------------------------------------------------
-# Intent Detection Keywords
+# Conservative Intent & Hazard Detection Keywords
 # ---------------------------------------------------------------------------
 
-_ESCALATION_KEYWORDS_EN = {
+# 1. Explicit request for human agricultural officer / extension officer
+_EXPLICIT_ESCALATION_EN = {
     "expert", "specialist", "agronomist", "officer", "aeo",
     "human agent", "agent", "call me back", "callback", "talk to",
     "connect me", "escalate", "escalation", "human support",
@@ -28,10 +32,33 @@ _ESCALATION_KEYWORDS_EN = {
     "speak to", "speak with", "talk with",
 }
 
-_ESCALATION_KEYWORDS_TE = {
+_EXPLICIT_ESCALATION_TE = {
     "వ్యవసాయ అధికారి", "నిపుణుడు", "నిపుణులు", "అధికారి", "సంప్రదించాలి",
     "మాట్లాడాలి", "కాల్ చేయండి", "హెల్ప్‌లైన్", "సహాయం కావాలి", "ఏఈవో",
     "ఆఫీసర్", "కాల్ బ్యాక్", "అధికారితో", "నిపుణుడితో",
+}
+
+# 2. Banned, highly hazardous chemicals & acute poisoning safety triggers
+_HAZARDOUS_CHEMICALS_EN = {
+    "paraquat", "endosulfan", "monocrotophos", "phorate", "methyl parathion",
+    "pesticide poison", "swallowed pesticide", "ingested pesticide",
+    "pesticide poisoning", "chemical poisoning", "drank pesticide",
+}
+
+_HAZARDOUS_CHEMICALS_TE = {
+    "విషం", "పురుగుల మందు తాగడం", "విషపూరితం", "ఎండోసల్ఫాన్", "మోనోక్రోటోఫాస్", "పారాక్వాట్",
+}
+
+# 3. Physical on-field inspection and sudden catastrophic crop mortality
+_PHYSICAL_INSPECTION_EN = {
+    "field inspection", "visit my field", "farm visit", "inspect my farm",
+    "crop dying completely", "mysterious rot", "total crop failure",
+    "all plants dying suddenly", "on-site inspection",
+}
+
+_PHYSICAL_INSPECTION_TE = {
+    "పొలం పరిశీలన", "తోట పరిశీలన", "పొలం చూడండి", "మొక్కలు అన్నీ ఎండిపోతున్నాయి",
+    "పంట పూర్తిగా చనిపోతుంది", "క్షేత్ర పరిశీలన",
 }
 
 # ---------------------------------------------------------------------------
@@ -52,6 +79,8 @@ _EN_LABELS = {
     "helpline_number": "📞 1800-180-1551 (6:00 AM - 10:00 PM, Daily)",
     "existing_ticket": "ℹ️ You already have an active escalation ticket (#{ticket_id}). Our officer is reviewing your case.",
     "no_local_expert": "ℹ️ No local officer is currently on duty. Your ticket has been logged and our team will connect with you.",
+    "hazard_warning":  "⚠️ **URGENT SAFETY CAUTION**: The query involves hazardous/banned chemicals or immediate toxicity. Please do not handle unsafe substances without protective gear. Contact medical or agriculture authorities immediately.",
+    "inspection_note": "🌾 **Field Inspection Request Logged**: An agricultural officer has been notified for regional on-field assessment.",
 }
 
 _TE_LABELS = {
@@ -68,16 +97,30 @@ _TE_LABELS = {
     "helpline_number": "📞 1800-180-1551 (ఉదయం 6:00 - రాత్రి 10:00)",
     "existing_ticket": "ℹ️ మీకు ఇప్పటికే ఒక యాక్టివ్ సంప్రదింపు టికెట్ (#{ticket_id}) ఉంది. మా అధికారి మీ సమస్యను పరిశీలిస్తున్నారు.",
     "no_local_expert": "ℹ️ ప్రస్తుతం స్థానిక అధికారి అందుబాటులో లేరు. మీ టికెట్ నమోదు చేయబడింది, మా బృందం మిమ్మల్ని సంప్రదిస్తుంది.",
+    "hazard_warning":  "⚠️ **ముఖ్యమైన భద్రతా హెచ్చరిక**: ఇది ప్రమాదకరమైన/నిషేధిత రసాయనాలకు సంబంధించినది. సురక్షితమైన జాగ్రత్తలు పాటించండి మరియు వెంటనే అధికారులను సంప్రదించండి.",
+    "inspection_note": "🌾 **క్షేత్ర పరిశీలన అభ్యర్థన నమోదు చేయబడింది**: మీ పంట పరిశీలన కోసం వ్యవసాయ అధికారికి సమాచారం అందించబడింది.",
 }
 
 
-def _detect_escalation_intent(query_lower: str, query_text: str) -> bool:
-    """Detect if query has human / expert escalation intent in English or Telugu."""
-    if any(kw in query_lower for kw in _ESCALATION_KEYWORDS_EN):
-        return True
-    if any(kw in query_text for kw in _ESCALATION_KEYWORDS_TE):
-        return True
-    return False
+def _detect_escalation_intent(query_lower: str, query_text: str) -> Tuple[bool, Optional[str]]:
+    """
+    Conservatively detect if query warrants escalation.
+    Returns (should_escalate, trigger_reason).
+    Trigger reasons: 'explicit', 'hazard', 'inspection'
+    """
+    # 1. Hazardous chemicals / poisoning (Highest priority safety trigger)
+    if any(kw in query_lower for kw in _HAZARDOUS_CHEMICALS_EN) or any(kw in query_text for kw in _HAZARDOUS_CHEMICALS_TE):
+        return True, "hazard"
+
+    # 2. Physical inspection / catastrophic crop death
+    if any(kw in query_lower for kw in _PHYSICAL_INSPECTION_EN) or any(kw in query_text for kw in _PHYSICAL_INSPECTION_TE):
+        return True, "inspection"
+
+    # 3. Explicit officer / expert request
+    if any(kw in query_lower for kw in _EXPLICIT_ESCALATION_EN) or any(kw in query_text for kw in _EXPLICIT_ESCALATION_TE):
+        return True, "explicit"
+
+    return False, None
 
 
 def _detect_specialty_hint(query_text: str) -> Optional[str]:
@@ -105,7 +148,7 @@ def _find_recent_pending_ticket(history: List[Dict[str, Any]]) -> Optional[Dict[
     """Check if farmer already has an unresolved ticket raised today."""
     today_prefix = datetime.utcnow().strftime("%Y%m%d")
     for t in reversed(history):
-        if t.get("status") in ("Pending", "Assigned"):
+        if t.get("status") in ("Pending", "Assigned", "In Progress"):
             ticket_id = t.get("ticket_id", "")
             if today_prefix in ticket_id:
                 return t
@@ -152,6 +195,73 @@ class EscalationService:
             tickets=history,
         )
 
+    async def list_tickets(
+        self,
+        status_filter: Optional[str] = None,
+        current_user: Optional[UserAccount] = None,
+    ) -> TicketQueueResponse:
+        """List tickets across all farmers for the expert/admin dashboard."""
+        expert_id = None
+        if current_user and current_user.role == "expert" and current_user.expert_id:
+            expert_id = current_user.expert_id
+
+        raw_tickets = await self.repository.get_all_tickets(
+            status_filter=status_filter,
+            expert_id=expert_id,
+        )
+
+        items = [TicketQueueItem(**t) for t in raw_tickets]
+        total = len(items)
+        pending = sum(1 for t in items if t.status.lower() == "pending")
+        assigned = sum(1 for t in items if t.status.lower() in ("assigned", "in progress"))
+        resolved = sum(1 for t in items if t.status.lower() == "resolved")
+
+        return TicketQueueResponse(
+            total=total,
+            pending=pending,
+            assigned=assigned,
+            resolved=resolved,
+            items=items,
+        )
+
+    async def update_ticket_status(
+        self,
+        ticket_id: str,
+        payload: TicketStatusUpdate,
+        current_user: Optional[UserAccount] = None,
+    ) -> TicketQueueItem:
+        """Update status and resolution notes of an escalation ticket."""
+        found = await self.repository.get_ticket_by_id(ticket_id)
+        if not found:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Escalation ticket '{ticket_id}' not found.",
+            )
+
+        _, target_ticket = found
+
+        # Enforce RBAC: If expert user, verify assigned or unassigned
+        if current_user and current_user.role == "expert":
+            assigned_exp = target_ticket.get("expert_id")
+            if assigned_exp and str(current_user.expert_id) != str(assigned_exp):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Access forbidden: You cannot modify tickets assigned to another expert.",
+                )
+
+        updated = await self.repository.update_ticket_status(
+            ticket_id=ticket_id,
+            new_status=payload.status,
+            notes=payload.notes,
+        )
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update ticket status.",
+            )
+
+        return TicketQueueItem(**updated)
+
 
 # ---------------------------------------------------------------------------
 # Pipeline Integration Function — called from ai/service.py
@@ -162,26 +272,26 @@ async def enrich_response_with_escalation(
     query_text: str,
     ai_response: str,
     farmer=None,
+    force_escalation: bool = False,
+    force_reason: Optional[str] = None,
 ) -> str:
     """
-    Detect explicit human/expert escalation intent in the farmer's query.
-    If detected, creates or retrieves an escalation ticket, assigns an active specialist,
-    and appends a formatted ticket card with official helpline numbers.
-
-    Always returns original ai_response unchanged if:
-    - No escalation intent is detected
-    - Any exception occurs
+    Conservatively detect if query warrants escalation.
+    If detected (or forced by vision diagnosis), creates or retrieves an escalation ticket,
+    assigns an active specialist from the database, and appends a formatted ticket card
+    with the verified official Kisan Call Centre 1800-180-1551 fallback.
     """
     from src.escalation.repository import EscalationRepository
 
     query_lower = query_text.lower()
     logger.info(f"[ENRICH ESCALATION] Checking query: '{query_text}' | ai_response length: {len(ai_response)}")
 
-    # Step 1: Detect intent (English or Telugu)
-    has_intent = _detect_escalation_intent(query_lower, query_text)
-    if not has_intent:
+    # Step 1: Detect conservative intent (English or Telugu)
+    has_intent, trigger_reason = _detect_escalation_intent(query_lower, query_text)
+    if not has_intent and not force_escalation:
         return ai_response
 
+    reason = force_reason or trigger_reason or "explicit"
     language = getattr(farmer, "preferred_language", "en") or "en"
     labels = _TE_LABELS if language == "te" else _EN_LABELS
     farmer_id = getattr(farmer, "id", None)
@@ -239,10 +349,11 @@ async def enrich_response_with_escalation(
 
         # Step 5: Build Ticket Record
         new_ticket_id = _generate_ticket_id()
+        topic_suffix = f" [{reason.upper()}]" if reason != "explicit" else ""
         ticket_data = {
             "ticket_id": new_ticket_id,
             "status": "Assigned" if assigned_expert else "Pending",
-            "topic": query_text[:120],
+            "topic": (query_text[:100] + topic_suffix) if query_text else f"Crop Diagnosis{topic_suffix}",
             "expert_id": str(assigned_expert.id) if assigned_expert else None,
             "expert_name": assigned_expert.name if assigned_expert else None,
             "expert_specialty": assigned_expert.specialty if assigned_expert else None,
@@ -258,11 +369,19 @@ async def enrich_response_with_escalation(
         header = labels["header"].format(ticket_id=new_ticket_id)
         status_text = labels["status_assigned"] if assigned_expert else labels["status_pending"]
 
-        lines = [
+        lines = []
+        if reason == "hazard":
+            lines.append(labels["hazard_warning"])
+            lines.append("")
+        elif reason == "inspection":
+            lines.append(labels["inspection_note"])
+            lines.append("")
+
+        lines.extend([
             header,
             "━━━━━━━━━━━━━━━━━━━━━━",
             f"{labels['status']}: {status_text}",
-        ]
+        ])
 
         if assigned_expert:
             lines.append(f"{labels['specialist']}: {assigned_expert.name} ({assigned_expert.specialty})")
@@ -284,3 +403,4 @@ async def enrich_response_with_escalation(
     except Exception as esc_err:
         logger.warning(f"[ENRICH ESCALATION] Escalation enrichment failed: {esc_err}")
         return ai_response
+
