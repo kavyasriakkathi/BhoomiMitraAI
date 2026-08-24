@@ -362,5 +362,126 @@ async def test_cotton_alternaria_multi_turn_dosage_grounded_response():
         assert "మాంకోజెబ్" in result
 
 
+@pytest.mark.asyncio
+async def test_exact_telugu_alternaria_rag_grounded_response():
+    """Verify exact Telugu Alternaria query extracts Cotton and retrieves verified RAG treatment."""
+    from src.rag.service import extract_crop_from_text, RAGService
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+
+    exact_query = "నా పత్తి పంటకు ఆకులపై గోధుమ రంగు మచ్చలు ఉన్నాయి. ఇది Alternaria ఆకు మచ్చ తెగులా? దీనికి ఏం చేయాలి?"
+
+    # 1. Crop extraction
+    extracted_crop = extract_crop_from_text(exact_query)
+    assert extracted_crop == "Cotton"
+
+    # 2. RAG retrieval
+    mock_rag_repo = AsyncMock()
+    mock_rag_repo.get_all_chunks_with_embeddings.return_value = []
+    rag_service = RAGService(mock_rag_repo)
+    rag_results = await rag_service.search_knowledge(query=exact_query, top_k=3, crop=extracted_crop)
+
+    assert len(rag_results) > 0
+    top_doc = rag_results[0]
+    assert "Alternaria" in top_doc.document_title or "Alternaria" in top_doc.chunk_text
+    assert "Mancozeb" in top_doc.chunk_text
+    assert "2.5 to 3.0 g per litre" in top_doc.chunk_text
+
+    # 3. AIService prompt construction & response verification
+    mock_ai_repo = AsyncMock()
+    mock_ai_repo.get_farmer_profile.return_value = None
+    mock_ai_repo.get_conversation_history.return_value = []
+    mock_ai_repo.session = mock_rag_repo.session
+
+    ai_service = AIService(mock_ai_repo)
+    req = AIGenerateRequest(farmer_id=uuid4(), message=exact_query)
+
+    captured_prompts = {}
+    async def mock_generate_response(system_prompt, conversation_history, user_message, **kwargs):
+        captured_prompts["system_prompt"] = system_prompt
+        return "పత్తిలో ఆకులపై గోధుమ రంగు మచ్చలు ఆల్టర్నేరియా ఆకుమచ్చ తెగులు లక్షణాలు. దీని నివారణకు లీటరు నీటికి 2.5-3.0 గ్రాముల మాంకోజెబ్ (Mancozeb 75% WP) కలిపి పిచికారీ చేయండి."
+
+    with patch("src.ai.service.generate_response", side_effect=mock_generate_response), \
+         patch("src.rag.service.RAGRepository", return_value=mock_rag_repo), \
+         patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", return_value=""), \
+         patch("src.memory.service.FarmerMemoryService.extract_and_update_memory", return_value=None):
+
+        response = await ai_service.generate_ai_response(req)
+        assert "RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE" in captured_prompts["system_prompt"]
+        assert "Alternaria" in captured_prompts["system_prompt"]
+        assert "Mancozeb" in captured_prompts["system_prompt"]
+        assert "మాంకోజెబ్" in response.response_text or "Mancozeb" in response.response_text
+
+
+@pytest.mark.asyncio
+async def test_rag_db_failure_fallback_to_verified_knowledge():
+    """Verify that when database chunk query raises an exception, RAG still evaluates verified knowledge."""
+    from src.rag.service import RAGService
+
+    mock_rag_repo = AsyncMock()
+    mock_rag_repo.get_all_chunks_with_embeddings.side_effect = RuntimeError("Database connection or query failed")
+
+    rag_service = RAGService(mock_rag_repo)
+    exact_query = "నా పత్తి పంటకు ఆకులపై గోధుమ రంగు మచ్చలు ఉన్నాయి. ఇది Alternaria ఆకు మచ్చ తెగులా? దీనికి ఏం చేయాలి?"
+
+    # Search should NOT raise an exception and should return verified Alternaria guide
+    results = await rag_service.search_knowledge(query=exact_query, top_k=3, crop="Cotton")
+    assert len(results) > 0
+    assert "Alternaria" in results[0].document_title or "Alternaria" in results[0].chunk_text
+    assert "Mancozeb 75% WP" in results[0].chunk_text
+    assert "2.5 to 3.0 g per litre" in results[0].chunk_text
+
+
+@pytest.mark.asyncio
+async def test_rag_db_success_path():
+    """Verify that when database chunk query succeeds, DB chunks are evaluated and returned."""
+    from src.rag.service import RAGService
+    from src.core.models import KnowledgeDocument, KnowledgeChunk, EmbeddingMetadata
+    from uuid import uuid4
+
+    doc_id = uuid4()
+    chunk_id = uuid4()
+
+    mock_doc = KnowledgeDocument(
+        id=doc_id,
+        title="Custom Database Advisory",
+        source="State Agri Dept",
+        category="Pest Control",
+        language="te",
+        state="Telangana",
+        crop="Cotton",
+    )
+    chunk_content = "Custom DB Knowledge: Cotton pest control using verified bio-agents."
+    mock_chunk = KnowledgeChunk(
+        id=chunk_id,
+        document_id=doc_id,
+        chunk_index=0,
+        page_number=1,
+        chunk_text=chunk_content,
+        embedding_id="emb_1",
+    )
+
+    mock_rag_repo = AsyncMock()
+    rag_service = RAGService(mock_rag_repo)
+    chunk_vec = rag_service.generate_embedding(chunk_content)
+
+    mock_emb = EmbeddingMetadata(
+        id=uuid4(),
+        chunk_id=chunk_id,
+        embedding_id="emb_1",
+        vector=chunk_vec,
+        dimension=len(chunk_vec),
+    )
+
+    mock_rag_repo.get_all_chunks_with_embeddings.return_value = [(mock_chunk, mock_emb, mock_doc)]
+
+    results = await rag_service.search_knowledge(query="Cotton pest control using verified bio-agents", top_k=3, crop="Cotton")
+    assert len(results) > 0
+    assert any("Custom Database Advisory" in r.document_title for r in results)
+
+
+
+
+
 
 

@@ -92,7 +92,11 @@ class AIService:
                 )
                 if rag_results:
                     rag_snippets = [f"• Document: {r.document_title} (Crop: {r.crop or 'General'}, Source: {r.source}): {r.chunk_text}" for r in rag_results]
-                    rag_context_text = "=== RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE (GROUND TRUTH) ===\n" + "\n".join(rag_snippets)
+                    rag_context_text = (
+                        "=== RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE (GROUND TRUTH) ===\n"
+                        "CRITICAL INSTRUCTION: The following knowledge is verified agronomic ground truth. When the farmer asks about disease diagnosis, symptoms, management, or dosage, you MUST prioritize and use these verified treatments/dosages and translate them directly into the response in the farmer's language (Telugu or English):\n"
+                        + "\n".join(rag_snippets)
+                    )
             except Exception as rag_err:
                 logger.warning(f"RAG knowledge retrieval warning: {rag_err}")
 
