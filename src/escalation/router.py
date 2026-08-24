@@ -6,6 +6,9 @@ from src.escalation.schemas import (
     ExpertUpdate,
     ExpertResponse,
     FarmerEscalationHistoryResponse,
+    TicketStatusUpdate,
+    TicketQueueItem,
+    TicketQueueResponse,
 )
 from src.escalation.service import EscalationService
 from src.escalation.dependencies import get_escalation_service
@@ -56,6 +59,27 @@ async def update_expert(
     return await service.update_expert(expert_id, payload)
 
 
+@router.get("/tickets", response_model=TicketQueueResponse)
+async def list_escalation_tickets(
+    status: Optional[str] = Query(None, description="Filter tickets by status: Pending, Assigned, In Progress, Resolved"),
+    current_user: UserAccount = Depends(require_expert),
+    service: EscalationService = Depends(get_escalation_service),
+):
+    """Fetch all active escalation tickets in queue (Admin / Expert only)."""
+    return await service.list_tickets(status_filter=status, current_user=current_user)
+
+
+@router.patch("/tickets/{ticket_id}/status", response_model=TicketQueueItem)
+async def update_ticket_status(
+    ticket_id: str,
+    payload: TicketStatusUpdate,
+    current_user: UserAccount = Depends(require_expert),
+    service: EscalationService = Depends(get_escalation_service),
+):
+    """Update status and resolution notes of an escalation ticket (Admin / Assigned Expert)."""
+    return await service.update_ticket_status(ticket_id=ticket_id, payload=payload, current_user=current_user)
+
+
 @router.get("/tickets/farmer/{farmer_id}", response_model=FarmerEscalationHistoryResponse)
 async def get_farmer_escalation_tickets(
     farmer_id: UUID,
@@ -64,4 +88,5 @@ async def get_farmer_escalation_tickets(
 ):
     """Fetch past escalation tickets and consultation history for a farmer (Admin / Expert only)."""
     return await service.get_farmer_escalations(farmer_id)
+
 

@@ -54,3 +54,36 @@ class FarmerEscalationHistoryResponse(BaseModel):
     farmer_id: UUID
     total_tickets: int
     tickets: List[Dict[str, Any]]
+
+
+class TicketStatusUpdate(BaseModel):
+    status: str = Field(..., description="Status: Pending, Assigned, In Progress, Resolved")
+    notes: Optional[str] = Field(None, max_length=500, description="Resolution or consultation notes from expert")
+
+
+class TicketQueueItem(BaseModel):
+    ticket_id: str
+    farmer_id: Optional[UUID] = None
+    farmer_name: Optional[str] = None
+    farmer_phone: Optional[str] = None
+    status: str
+    topic: str
+    crop: Optional[str] = None
+    language: Optional[str] = None
+    expert_id: Optional[UUID] = None
+    expert_name: Optional[str] = None
+    expert_specialty: Optional[str] = None
+    expert_phone: Optional[str] = None
+    region: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class TicketQueueResponse(BaseModel):
+    total: int
+    pending: int
+    assigned: int
+    resolved: int
+    items: List[TicketQueueItem]
+
