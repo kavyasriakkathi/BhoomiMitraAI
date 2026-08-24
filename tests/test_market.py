@@ -381,3 +381,181 @@ def test_paddy_intent_detection():
             matched = canonical
             break
     assert matched == "Paddy"
+
+
+def _mock_price_model(**kwargs):
+    from src.core.models import MarketPrice
+    defaults = dict(
+        id=uuid4(),
+        commodity="Tomato",
+        commodity_telugu="టమాటా",
+        market_name="Warangal Mandi",
+        district="Warangal",
+        state="Telangana",
+        min_price=900.0,
+        max_price=1500.0,
+        modal_price=1200.0,
+        unit="Quintal",
+        price_date=PRICE_DATE,
+        source="agmarknet_api",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    defaults.update(kwargs)
+    return MarketPrice(**defaults)
+
+
+# ---------------------------------------------------------------------------
+# 16. Regression Tests: Telugu Market Queries & Unrelated Query Guard
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_market_enrichment_telugu_query_1():
+    """Verify 'ఈరోజు పత్తి ధర ఎంత?' detects intent and enriches response with Cotton prices."""
+    from src.market.service import enrich_response_with_market_prices
+
+    db_mock = AsyncMock()
+    mock_count_res = MagicMock()
+    mock_count_res.scalar.return_value = 0
+
+    mock_price = _mock_price_model(
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Warangal Mandi",
+        district="Warangal",
+        state="Telangana",
+        modal_price=7450.0,
+        min_price=7100.0,
+        max_price=7650.0,
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_price]
+    mock_query_res = MagicMock()
+    mock_query_res.scalars.return_value = mock_scalars
+    mock_profile_res = MagicMock()
+    mock_profile_res.scalar_one_or_none.return_value = None
+
+    db_mock.execute.side_effect = [mock_profile_res, mock_count_res, mock_query_res, mock_query_res, mock_query_res]
+
+    farmer = MagicMock()
+    farmer.id = uuid4()
+    farmer.preferred_language = "te"
+
+    base_ai_response = "పత్తి పంట మార్కెట్ వివరాలు క్రింద ఇవ్వబడ్డాయి."
+    result = await enrich_response_with_market_prices(
+        db_mock, "ఈరోజు పత్తి ధర ఎంత?", base_ai_response, farmer
+    )
+
+    assert "మార్కెట్ ధరలు" in result
+    assert "Warangal Mandi" in result
+    assert "7,450" in result
+    assert "మోడల్ ధర" in result
+
+
+@pytest.mark.asyncio
+async def test_market_enrichment_telugu_query_2():
+    """Verify 'పత్తి క్వింటాల్ ధర ఎంత?' detects intent and enriches response with Cotton prices."""
+    from src.market.service import enrich_response_with_market_prices
+
+    db_mock = AsyncMock()
+    mock_count_res = MagicMock()
+    mock_count_res.scalar.return_value = 0
+
+    mock_price = _mock_price_model(
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Adilabad Mandi",
+        district="Adilabad",
+        state="Telangana",
+        modal_price=7350.0,
+        min_price=7000.0,
+        max_price=7550.0,
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_price]
+    mock_query_res = MagicMock()
+    mock_query_res.scalars.return_value = mock_scalars
+    mock_profile_res = MagicMock()
+    mock_profile_res.scalar_one_or_none.return_value = None
+
+    db_mock.execute.side_effect = [mock_profile_res, mock_count_res, mock_query_res, mock_query_res, mock_query_res]
+
+    farmer = MagicMock()
+    farmer.id = uuid4()
+    farmer.preferred_language = "te"
+
+    base_ai_response = "పత్తి పంట ధర సమాచారం."
+    result = await enrich_response_with_market_prices(
+        db_mock, "పత్తి క్వింటాల్ ధర ఎంత?", base_ai_response, farmer
+    )
+
+    assert "మార్కెట్ ధరలు" in result
+    assert "Adilabad Mandi" in result
+    assert "7,350" in result
+
+
+@pytest.mark.asyncio
+async def test_market_enrichment_telugu_query_3():
+    """Verify 'నా దగ్గర పత్తి మార్కెట్ ధర ఎంత?' detects intent and enriches response with Cotton prices."""
+    from src.market.service import enrich_response_with_market_prices
+
+    db_mock = AsyncMock()
+    mock_count_res = MagicMock()
+    mock_count_res.scalar.return_value = 0
+
+    mock_price = _mock_price_model(
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Khammam Mandi",
+        district="Khammam",
+        state="Telangana",
+        modal_price=7400.0,
+        min_price=7050.0,
+        max_price=7600.0,
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_price]
+    mock_query_res = MagicMock()
+    mock_query_res.scalars.return_value = mock_scalars
+    mock_profile_res = MagicMock()
+    mock_profile_res.scalar_one_or_none.return_value = None
+
+    db_mock.execute.side_effect = [mock_profile_res, mock_count_res, mock_query_res, mock_query_res, mock_query_res]
+
+    farmer = MagicMock()
+    farmer.id = uuid4()
+    farmer.preferred_language = "te"
+
+    base_ai_response = "పత్తి మార్కెట్ సమాచారం."
+    result = await enrich_response_with_market_prices(
+        db_mock, "నా దగ్గర పత్తి మార్కెట్ ధర ఎంత?", base_ai_response, farmer
+    )
+
+    assert "మార్కెట్ ధరలు" in result
+    assert "Khammam Mandi" in result
+    assert "7,400" in result
+
+
+@pytest.mark.asyncio
+async def test_market_enrichment_unrelated_query_no_trigger():
+    """Verify that unrelated agricultural queries do NOT trigger market price enrichment."""
+    from src.market.service import enrich_response_with_market_prices
+
+    db_mock = AsyncMock()
+    farmer = MagicMock()
+    farmer.id = uuid4()
+    farmer.preferred_language = "te"
+
+    unrelated_msg = "నా పత్తి పంటకు ఎరువులు ఎలా వేయాలి?"
+    original_ai = "పత్తి పంటకు ఎకరానికి 50 కేజీల యూరియా వేయండి."
+
+    result = await enrich_response_with_market_prices(
+        db_mock, unrelated_msg, original_ai, farmer
+    )
+
+    # Must be returned completely unmodified
+    assert result == original_ai
+    assert "మార్కెట్ ధరలు" not in result
+    assert "మండి" not in result
+
+

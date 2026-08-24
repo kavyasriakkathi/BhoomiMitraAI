@@ -77,8 +77,9 @@ PRICE_INTENT_KEYWORDS_EN = {
     "how much", "selling price", "market rate", "crop price",
 }
 PRICE_INTENT_KEYWORDS_TE = {
-    "ధర", "మండి", "రేటు", "ఎంత", "నేటి ధర", "మార్కెట్ ధర",
-    "ఎంత ధర", "అమ్మకం ధర",
+    "ధర", "ధరలు", "మండి", "రేటు", "రేట్లు", "ఎంత", "నేటి ధర", "మార్కెట్ ధర",
+    "మార్కెట్ ధరలు", "మండి ధర", "మండి ధరలు", "ఎంత ధర", "అమ్మకం ధర",
+    "క్వింటాల్", "క్వింటాలు", "ఖరీదు", "మార్కెట్", "మార్కెట్లో", "ధర ఎంత",
 }
 
 # Telugu labels for formatted reply
@@ -334,6 +335,11 @@ async def enrich_response_with_market_prices(
     if not has_price_intent:
         has_price_intent = any(kw in query_lower for kw in PRICE_INTENT_KEYWORDS_TE)
 
+    logger.info(
+        f"[MARKET ENRICH] Diagnostic check -> query='{query_text}' | "
+        f"has_price_intent={has_price_intent}"
+    )
+
     if not has_price_intent:
         return ai_response
 
@@ -344,27 +350,49 @@ async def enrich_response_with_market_prices(
             matched_commodity = canonical
             break
 
+    # Fallback to extract_crop_from_text if not matched directly in COMMODITY_MAP
     if not matched_commodity:
-        logger.info("[MARKET ENRICH] Price intent detected but no commodity matched.")
-        return ai_response
+        try:
+            from src.rag.service import extract_crop_from_text
+            matched_commodity = extract_crop_from_text(query_text)
+        except Exception:
+            matched_commodity = None
 
-    # Step 3: Get farmer location from profile
+    # Step 3: Get farmer location and profile
     district = None
     state = None
-    language = "en"
+    language = getattr(farmer, "preferred_language", "te") or "te"
+
+    # Infer language from query text if Telugu characters present
+    if any(ord(c) > 127 for c in query_text):
+        language = "te"
+
     try:
         from sqlalchemy import select
         from src.core.models import FarmerProfile
-        profile_result = await db.execute(
-            select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
-        )
-        profile = profile_result.scalar_one_or_none()
-        if profile:
-            district = profile.district
-            state = profile.state
-        language = getattr(farmer, "preferred_language", "en") or "en"
+        if farmer and hasattr(farmer, "id"):
+            profile_result = await db.execute(
+                select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
+            )
+            profile = profile_result.scalar_one_or_none()
+            if profile:
+                if isinstance(getattr(profile, "district", None), str):
+                    district = profile.district
+                if isinstance(getattr(profile, "state", None), str):
+                    state = profile.state
+                if not matched_commodity and isinstance(getattr(profile, "current_crop", None), str) and profile.current_crop:
+                    matched_commodity = profile.current_crop
     except Exception as exc:
         logger.warning(f"[MARKET ENRICH] Could not load farmer profile: {exc}")
+
+    logger.info(
+        f"[MARKET ENRICH] Parameters -> matched_commodity='{matched_commodity}', "
+        f"district='{district}', state='{state}', language='{language}'"
+    )
+
+    if not matched_commodity:
+        logger.info("[MARKET ENRICH] Price intent detected but no commodity matched.")
+        return ai_response
 
     # Step 4: Fetch prices
     try:
@@ -372,6 +400,10 @@ async def enrich_response_with_market_prices(
         from src.market.repository import MarketPriceRepository
         settings = get_settings()
         repo = MarketPriceRepository(db)
+
+        # Idempotently seed default market prices if table is empty
+        await repo.seed_default_prices_if_empty()
+
         client = AgmarknetClient(
             api_key=settings.data_gov_api_key,
             api_url=settings.agmarknet_api_url,
@@ -384,6 +416,11 @@ async def enrich_response_with_market_prices(
             state=state,
         )
 
+        logger.info(
+            f"[MARKET ENRICH] Query response -> data_available={query_response.data_available}, "
+            f"record_count={len(query_response.results)}, is_live={query_response.is_live}"
+        )
+
         price_block = svc.format_whatsapp_reply(query_response, language=language)
 
         if query_response.data_available:
@@ -391,7 +428,9 @@ async def enrich_response_with_market_prices(
                 f"[MARKET ENRICH] Appending {len(query_response.results)} price records "
                 f"for '{matched_commodity}' to AI response."
             )
-            return ai_response + "\n\n" + price_block
+            final_enriched = ai_response + "\n\n" + price_block
+            logger.info(f"[MARKET ENRICH] Final enriched response length={len(final_enriched)}")
+            return final_enriched
         else:
             # Data unavailable — do NOT append anything (Gemini's general answer still goes)
             logger.info(
