@@ -614,3 +614,92 @@ class RAGService:
             source_documents=search_results,
             confidence_score=confidence,
         )
+
+
+# ------------------------------------------------------------------
+# Crop Name Extraction & Normalization Helper
+# ------------------------------------------------------------------
+
+CROP_ALIASES: List[Tuple[str, str]] = [
+    # Multi-word aliases first (longer first)
+    ("pigeon pea", "Red Gram"),
+    ("red gram", "Red Gram"),
+    ("black gram", "Black Gram"),
+    ("green gram", "Green Gram"),
+    ("వేరుశెనగ", "Groundnut"),
+    ("వేరుశనగ", "Groundnut"),
+    ("మొక్కజొన్న", "Maize"),
+    ("సోయాబీన్", "Soybean"),
+    ("ఉల్లిపాయ", "Onion"),
+    ("బెండకాయ", "Bhendi"),
+    # Single-word English and Telugu aliases
+    ("paddy", "Paddy"),
+    ("rice", "Paddy"),
+    ("వరి", "Paddy"),
+    ("cotton", "Cotton"),
+    ("పత్తి", "Cotton"),
+    ("maize", "Maize"),
+    ("corn", "Maize"),
+    ("chilli", "Chilli"),
+    ("chili", "Chilli"),
+    ("chillies", "Chilli"),
+    ("మిర్చి", "Chilli"),
+    ("మిరప", "Chilli"),
+    ("tomato", "Tomato"),
+    ("టమోటా", "Tomato"),
+    ("టమాటా", "Tomato"),
+    ("groundnut", "Groundnut"),
+    ("peanut", "Groundnut"),
+    ("peanuts", "Groundnut"),
+    ("soybean", "Soybean"),
+    ("soyabean", "Soybean"),
+    ("సోయా", "Soybean"),
+    ("sugarcane", "Sugarcane"),
+    ("చెరకు", "Sugarcane"),
+    ("turmeric", "Turmeric"),
+    ("పసుపు", "Turmeric"),
+    ("కందులు", "Red Gram"),
+    ("కంది", "Red Gram"),
+    ("wheat", "Wheat"),
+    ("గోధుమ", "Wheat"),
+    ("onion", "Onion"),
+    ("ఉల్లి", "Onion"),
+    ("banana", "Banana"),
+    ("అరటి", "Banana"),
+    ("mango", "Mango"),
+    ("మామిడి", "Mango"),
+    ("papaya", "Papaya"),
+    ("బొప్పాయి", "Papaya"),
+    ("brinjal", "Brinjal"),
+    ("eggplant", "Brinjal"),
+    ("వంకాయ", "Brinjal"),
+    ("bhendi", "Bhendi"),
+    ("okra", "Bhendi"),
+    ("బెండ", "Bhendi"),
+]
+
+
+def extract_crop_from_text(text: Optional[str]) -> Optional[str]:
+    """
+    Extracts and normalizes a crop name from user query or conversation text.
+    Supports English and Telugu crop names and aliases.
+    Checks longer aliases before shorter ones.
+    Returns normalized English title (e.g. 'Paddy', 'Cotton', 'Maize') or None.
+    """
+    if not text or not isinstance(text, str):
+        return None
+
+    text_lower = text.lower()
+
+    for alias, normalized_name in CROP_ALIASES:
+        # If alias contains non-ascii (Telugu), check substring directly
+        if any(ord(char) > 127 for char in alias):
+            if alias in text:
+                return normalized_name
+        else:
+            # English word boundary match
+            if re.search(r"\b" + re.escape(alias) + r"\b", text_lower):
+                return normalized_name
+
+    return None
+

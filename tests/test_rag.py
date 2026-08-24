@@ -477,6 +477,55 @@ def test_alternaria_unverified_chemical_safety_fallback():
     assert "NEVER invent or guess pesticide names, fertilizer brands, or chemical dosages" in BHOOMIMITRA_SYSTEM_PROMPT
 
 
+def test_extract_crop_from_text_english_and_telugu():
+    """Verify crop extraction for single-word, multi-word, English, and Telugu aliases."""
+    from src.rag.service import extract_crop_from_text
+
+    # English standard and aliases
+    assert extract_crop_from_text("How to control bollworm in cotton crop?") == "Cotton"
+    assert extract_crop_from_text("Best fertilizer for paddy field") == "Paddy"
+    assert extract_crop_from_text("Paddy stem borer treatment") == "Paddy"
+    assert extract_crop_from_text("Rice blast disease symptoms") == "Paddy"
+    assert extract_crop_from_text("My corn plants have yellow leaves") == "Maize"
+    assert extract_crop_from_text("Maize fall armyworm management") == "Maize"
+    assert extract_crop_from_text("Chilli leaf curl virus remedy") == "Chilli"
+    assert extract_crop_from_text("Tomato blight prevention") == "Tomato"
+    assert extract_crop_from_text("Peanut leaf spot disease") == "Groundnut"
+    assert extract_crop_from_text("Groundnut pod rot control") == "Groundnut"
+    assert extract_crop_from_text("Soybean rust management") == "Soybean"
+    assert extract_crop_from_text("Sugarcane red rot prevention") == "Sugarcane"
+    assert extract_crop_from_text("Turmeric rhizome rot treatment") == "Turmeric"
+    assert extract_crop_from_text("Pigeon pea pod borer") == "Red Gram"
+    assert extract_crop_from_text("Red gram wilt disease") == "Red Gram"
+    assert extract_crop_from_text("Black gram yellow mosaic virus") == "Black Gram"
+    assert extract_crop_from_text("Green gram powdery mildew") == "Green Gram"
+
+    # Telugu aliases
+    assert extract_crop_from_text("వరి పంటలో కాండం తొలుచు పురుగు నివారణ") == "Paddy"
+    assert extract_crop_from_text("పత్తిలో గులాబీ రంగు పురుగు మందులు") == "Cotton"
+    assert extract_crop_from_text("మొక్కజొన్నలో కత్తెర పురుగు నివారణ") == "Maize"
+    assert extract_crop_from_text("మిర్చి ఆకుముడత నివారణ ఏమిటి?") == "Chilli"
+    assert extract_crop_from_text("మిరప పంటలో తామర పురుగులు") == "Chilli"
+    assert extract_crop_from_text("టమోటా పంటకు ఎరువుల మోతాదు") == "Tomato"
+    assert extract_crop_from_text("టమాటా కాయ తొలుచు పురుగు") == "Tomato"
+    assert extract_crop_from_text("వేరుశెనగ పంటలో తిక్కా ఆకుమచ్చ") == "Groundnut"
+    assert extract_crop_from_text("వేరుశనగ పంట తెగుళ్లు") == "Groundnut"
+    assert extract_crop_from_text("సోయాబీన్ సాగు పద్ధతులు") == "Soybean"
+    assert extract_crop_from_text("చెరకు పంటలో ఎర్రకుళ్లు తెగులు") == "Sugarcane"
+    assert extract_crop_from_text("పసుపు దుంపకుళ్లు నివారణ") == "Turmeric"
+    assert extract_crop_from_text("కందులు పంటలో కాయతొలుచు పురుగు") == "Red Gram"
+    assert extract_crop_from_text("కంది పంట రక్షణ") == "Red Gram"
+    assert extract_crop_from_text("ఉల్లిపాయ పంటకు ఏ ఎరువు వేయాలి?") == "Onion"
+    assert extract_crop_from_text("బెండకాయలో పల్లాకు తెగులు") == "Bhendi"
+
+    # Negative / None cases
+    assert extract_crop_from_text("How is the weather today?") is None
+    assert extract_crop_from_text("What are the best farming practices?") is None
+    assert extract_crop_from_text("") is None
+    assert extract_crop_from_text(None) is None
+
+
+
 
 
 
