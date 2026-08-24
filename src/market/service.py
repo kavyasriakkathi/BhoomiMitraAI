@@ -258,10 +258,17 @@ class MarketService:
         labels = _TE_LABELS if language == "te" else _EN_LABELS
         commodity = query_response.commodity
 
+        commodity_display = commodity
+        if language == "te":
+            for kw, canon in COMMODITY_MAP.items():
+                if canon.lower() == commodity.lower() and any(ord(c) > 127 for c in kw):
+                    commodity_display = kw
+                    break
+
         if not query_response.data_available or not query_response.results:
             if language == "te":
                 return (
-                    f"క్షమించండి, ప్రస్తుతం {commodity} మండి ధర సమాచారం అందుబాటులో లేదు.\n"
+                    f"క్షమించండి, ప్రస్తుతం {commodity_display} మండి ధర సమాచారం అందుబాటులో లేదు.\n"
                     "దయచేసి మీ స్థానిక మండిని సంప్రదించండి లేదా "
                     "రైతు సేవ కేంద్రాన్ని (1800-425-1422) సంప్రదించండి."
                 )
@@ -282,7 +289,7 @@ class MarketService:
                 break
 
         source_str = labels["source_live"] if query_response.is_live else labels["source_local"]
-        lines = [labels["title"].format(commodity=commodity)]
+        lines = [labels["title"].format(commodity=commodity_display)]
 
         for r in deduplicated:
             date_str = r.price_date.strftime("%d %b %Y")
@@ -428,7 +435,22 @@ async def enrich_response_with_market_prices(
                 f"[MARKET ENRICH] Appending {len(query_response.results)} price records "
                 f"for '{matched_commodity}' to AI response."
             )
-            final_enriched = ai_response + "\n\n" + price_block
+            
+            # If the preceding AI response is a generic refusal, non-farming disclaimer,
+            # or tells the farmer to contact e-NAM/local market yard, remove it to avoid contradiction.
+            refusal_markers = [
+                "e-nam", "ఈ-నామ్", "ఈ - నామ్", "మార్కెట్ యార్డ్", "మార్కెట్ యార్డు",
+                "market yard", "కేవలం వ్యవసాయం", "విషయాలపై మాత్రమే", "i can only help with farming",
+                "only help with farming", "how can i help with your crops", "స్థానిక మార్కెట్",
+            ]
+            ai_lower = ai_response.lower() if ai_response else ""
+            is_refusal = any(marker in ai_lower for marker in refusal_markers)
+
+            if is_refusal or not ai_response or len(ai_response.strip()) == 0:
+                final_enriched = price_block
+            else:
+                final_enriched = ai_response.strip() + "\n\n" + price_block
+
             logger.info(f"[MARKET ENRICH] Final enriched response length={len(final_enriched)}")
             return final_enriched
         else:

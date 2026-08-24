@@ -559,3 +559,58 @@ async def test_market_enrichment_unrelated_query_no_trigger():
     assert "మండి" not in result
 
 
+@pytest.mark.asyncio
+async def test_market_enrichment_refusal_stripped():
+    """Verify that when AI generates a generic refusal/disclaimer (e-NAM/local market yard), it is stripped and only the price block is returned."""
+    from src.market.service import enrich_response_with_market_prices
+
+    db_mock = AsyncMock()
+    mock_count_res = MagicMock()
+    mock_count_res.scalar.return_value = 0
+
+    mock_price = _mock_price_model(
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Warangal Mandi",
+        district="Warangal",
+        state="Telangana",
+        modal_price=7450.0,
+        min_price=7100.0,
+        max_price=7650.0,
+    )
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_price]
+    mock_query_res = MagicMock()
+    mock_query_res.scalars.return_value = mock_scalars
+    mock_profile_res = MagicMock()
+    mock_profile_res.scalar_one_or_none.return_value = None
+
+    db_mock.execute.side_effect = [mock_profile_res, mock_count_res, mock_query_res, mock_query_res, mock_query_res]
+
+    farmer = MagicMock()
+    farmer.id = uuid4()
+    farmer.preferred_language = "te"
+
+    contradictory_ai_response = (
+        "నేను కేవలం వ్యవసాయం మరియు పంటల సాగుకు సంబంధించిన విషయాలపై మాత్రమే సహాయం చేయగలను. "
+        "పత్తి ధరల సమాచారం కోసం దయచేసి మీ దగ్గరిలోని మార్కెట్ యార్డ్ లేదా ఈ-నామ్ (e-NAM) పోర్టల్ను సంప్రదించండి."
+    )
+
+    result = await enrich_response_with_market_prices(
+        db_mock, "ఈరోజు పత్తి ధర ఎంత?", contradictory_ai_response, farmer
+    )
+
+    # Must contain the clean market price block
+    assert "📊 పత్తి మార్కెట్ ధరలు" in result
+    assert "Warangal Mandi" in result
+    assert "7,450" in result
+    assert "స్థానిక డేటాబేస్" in result
+
+    # Contradictory refusal statements must NOT be present
+    assert "e-NAM" not in result
+    assert "ఈ-నామ్" not in result
+    assert "కేవలం వ్యవసాయం" not in result
+    assert "విషయాలపై మాత్రమే" not in result
+
+
+
