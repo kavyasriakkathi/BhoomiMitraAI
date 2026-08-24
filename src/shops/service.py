@@ -162,7 +162,7 @@ class ShopService:
 
 
 # ---------------------------------------------------------------------------
-# Intent Detection Keywords
+# Intent Detection Keywords & Product / Location Mappings
 # ---------------------------------------------------------------------------
 
 _SHOP_INTENT_KEYWORDS_EN = {
@@ -178,8 +178,69 @@ _SHOP_INTENT_KEYWORDS_TE = {
     "దుకాణం", "దుకాణాలు", "ఎరువుల షాప్", "పురుగుమందుల షాప్",
 }
 
-# Product keyword normalization mapping
+# Known Telangana & Andhra Pradesh Districts/Cities for Query Extraction
+_KNOWN_DISTRICTS = {
+    # Telangana
+    "warangal": "Warangal",
+    "hanamkonda": "Warangal",
+    "వరంగల్": "Warangal",
+    "హనుమకొండ": "Warangal",
+    "karimnagar": "Karimnagar",
+    "కరీంనగర్": "Karimnagar",
+    "khammam": "Khammam",
+    "ఖమ్మం": "Khammam",
+    "guntur": "Guntur",
+    "గుంటూరు": "Guntur",
+    "nizamabad": "Nizamabad",
+    "నిజామాబాద్": "Nizamabad",
+    "nalgonda": "Nalgonda",
+    "నల్గొండ": "Nalgonda",
+    "mahabubnagar": "Mahabubnagar",
+    "మహబూబ్‌నగర్": "Mahabubnagar",
+    "medak": "Medak",
+    "మెదక్": "Medak",
+    "adilabad": "Adilabad",
+    "ఆదిలాబాద్": "Adilabad",
+    "rangareddy": "Rangareddy",
+    "రంగారెడ్డి": "Rangareddy",
+    "hyderabad": "Hyderabad",
+    "హైదరాబాద్": "Hyderabad",
+    # Andhra Pradesh
+    "krishna": "Krishna",
+    "కృష్ణా": "Krishna",
+    "vijayawada": "Krishna",
+    "విజయవాడ": "Krishna",
+    "kurnool": "Kurnool",
+    "కర్నూలు": "Kurnool",
+    "anantapur": "Anantapur",
+    "అనంతపురం": "Anantapur",
+    "kadapa": "Kadapa",
+    "కడప": "Kadapa",
+    "nellore": "Nellore",
+    "నెల్లూరు": "Nellore",
+    "prakasam": "Prakasam",
+    "ప్రకాశం": "Prakasam",
+    "ongole": "Prakasam",
+    "ఒంగోలు": "Prakasam",
+    "chittoor": "Chittoor",
+    "చిత్తూరు": "Chittoor",
+    "visakhapatnam": "Visakhapatnam",
+    "విశాఖపట్నం": "Visakhapatnam",
+    "vizag": "Visakhapatnam",
+    "godavari": "Godavari",
+    "గోదావరి": "Godavari",
+    "srikakulam": "Srikakulam",
+    "శ్రీకాకుళం": "Srikakulam",
+    "vizianagaram": "Vizianagaram",
+    "విజయనగరం": "Vizianagaram",
+}
+
+# Product keyword normalization mapping (Search indexing only — NOT endorsement)
 _PRODUCT_MAPPING = {
+    # Fertilizers
+    "nano urea": "urea",
+    "నానో యూరియా": "urea",
+    "నానోయూరియా": "urea",
     "urea": "urea",
     "యూరియా": "urea",
     "dap": "dap",
@@ -188,37 +249,75 @@ _PRODUCT_MAPPING = {
     "potash": "potash",
     "mop": "potash",
     "పోటాష్": "potash",
-    "neem oil": "neem oil",
-    "వేప నూనె": "neem oil",
-    "వేపనూనె": "neem oil",
-    "imidacloprid": "imidacloprid",
-    "ఇమిడాక్లోప్రిడ్": "imidacloprid",
-    "confidor": "imidacloprid",
-    "chlorpyrifos": "chlorpyrifos",
-    "క్లోరిపైరిఫాస్": "chlorpyrifos",
-    "pesticide": "pesticide",
-    "pesticides": "pesticide",
-    "పురుగుమందు": "pesticide",
-    "పురుగుల మందు": "pesticide",
     "fertilizer": "fertilizer",
     "fertilizers": "fertilizer",
     "ఎరువు": "fertilizer",
     "ఎరువులు": "fertilizer",
+
+    # Bio & Botanicals
+    "neem oil": "neem oil",
+    "వేప నూనె": "neem oil",
+    "వేపనూనె": "neem oil",
+
+    # Insecticides & Trade Names
+    "imidacloprid": "imidacloprid",
+    "ఇమిడాక్లోప్రిడ్": "imidacloprid",
+    "confidor": "imidacloprid",
+    "కాన్ఫిడార్": "imidacloprid",
+    "కాన్ఫిడోర్": "imidacloprid",
+    "chlorpyrifos": "chlorpyrifos",
+    "క్లోరిపైరిఫాస్": "chlorpyrifos",
+    "coragen": "coragen",
+    "కోరజెన్": "coragen",
+    "కోరాజెన్": "coragen",
+    "pesticide": "pesticide",
+    "pesticides": "pesticide",
+    "పురుగుమందు": "pesticide",
+    "పురుగుల మందు": "pesticide",
+    "పురుగు మందు": "pesticide",
+
+    # Fungicides & Trade Names
+    "mancozeb": "mancozeb",
+    "మాంకోజెబ్": "mancozeb",
+    "saaf": "mancozeb",
+    "సాఫ్": "mancozeb",
+    "nativo": "nativo",
+    "నతివో": "nativo",
+    "నేటివో": "nativo",
+    "fungicide": "fungicide",
+    "fungicides": "fungicide",
+    "శిలీంద్ర సంహారిణి": "fungicide",
+
+    # Herbicides & Weedicides
+    "weedicide": "herbicide",
+    "weedicides": "herbicide",
+    "herbicide": "herbicide",
+    "herbicides": "herbicide",
+    "కలుపు మందు": "herbicide",
+    "కలుపుమందు": "herbicide",
+    "కలుపు మందులు": "herbicide",
+    "కలుపు సంహారిణి": "herbicide",
+    "roundup": "herbicide",
+    "రౌండప్": "herbicide",
+    "glyphosate": "herbicide",
+    "గ్లైఫోసేట్": "herbicide",
+
+    # Seeds
     "seeds": "seeds",
     "seed": "seeds",
     "విత్తనాలు": "seeds",
     "విత్తనం": "seeds",
-    "fungicide": "fungicide",
-    "fungicides": "fungicide",
-    "శిలీంద్ర సంహారిణి": "fungicide",
-    "herbicide": "herbicide",
-    "herbicides": "herbicide",
-    "కలుపు సంహారిణి": "herbicide",
+
+    # Micronutrients
     "micronutrient": "micronutrient",
     "micronutrients": "micronutrient",
     "సూక్ష్మపోషకాలు": "micronutrient",
     "zinc": "zinc",
     "జింక్": "zinc",
+    "boron": "boron",
+    "బోరాన్": "boron",
+
+    # Common Brands
     "bayer": "bayer",
     "బేయర్": "bayer",
     "iffco": "iffco",
@@ -246,6 +345,7 @@ _EN_LABELS = {
     "delivery":          "🚚 Delivery",
     "dist_fmt":          "{dist} km away",
     "dist_generic":      "Nearby",
+    "all_out_of_stock":  "⚠️ Note: This product is currently out of stock across nearby registered shops. Please contact the dealers below for upcoming restock dates.",
     "footer_disclaimer": "ℹ️ Note: Prices and stock levels are subject to local dealer confirmation.",
     "more":              "Find all shops at: /shops",
 }
@@ -265,6 +365,7 @@ _TE_LABELS = {
     "delivery":          "🚚 డెలివరీ",
     "dist_fmt":          "{dist} కి.మీ దూరం",
     "dist_generic":      "సమీపంలో",
+    "all_out_of_stock":  "⚠️ గమనిక: ఈ ఉత్పత్తి ప్రస్తుతం సమీప నమోదిత దుకాణాలలో స్టాక్ అందుబాటులో లేదు. కొత్త స్టాక్ తేదీల కోసం దయచేసి క్రింది డీలర్లను సంప్రదించండి.",
     "footer_disclaimer": "ℹ️ గమనిక: ధరలు మరియు స్టాక్ వివరాలు స్థానిక డీలర్ నిర్ధారణకు లోబడి ఉంటాయి.",
     "more":              "మరిన్ని దుకాణాల కోసం: /shops",
 }
@@ -277,6 +378,15 @@ def _detect_shop_intent(query_lower: str, query_text: str) -> bool:
     if any(kw in query_text for kw in _SHOP_INTENT_KEYWORDS_TE):
         return True
     return False
+
+
+def _extract_district_from_query(query_text: str) -> Optional[str]:
+    """Extract known district or city from farmer query in English or Telugu."""
+    q = query_text.lower()
+    for kw, dist_name in _KNOWN_DISTRICTS.items():
+        if kw in q:
+            return dist_name
+    return None
 
 
 def _detect_product_from_query(query_text: str, ai_response: str = "") -> Optional[str]:
@@ -299,14 +409,21 @@ def _format_stock_string(quantity: int, min_level: int, available: bool, unit: s
     return f"{labels['stock_in']} ({quantity} {unit}s)"
 
 
-async def _resolve_farmer_location(db, farmer) -> Tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
+async def _resolve_farmer_location(
+    db, farmer, query_text: str = ""
+) -> Tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
     """
     Resolve farmer location using the 4-tier hierarchy:
-    1. FarmerMemory.gps_coordinates
-    2. FarmerProfile.district & state
-    3. FarmerMemory.district & state
-    4. None (all-active fallback)
+    Tier 1: Explicit district/city mentioned in query text (e.g. "Karimnagar", "వరంగల్")
+    Tier 2: FarmerMemory.gps_coordinates (if available)
+    Tier 3: FarmerProfile.district / FarmerMemory.district
+    Tier 4: None (all-active fallback)
     """
+    # Tier 1: Check query-level explicit district override
+    query_district = _extract_district_from_query(query_text) if query_text else None
+    if query_district:
+        return None, None, query_district, None
+
     if not farmer:
         return None, None, None, None
 
@@ -320,7 +437,7 @@ async def _resolve_farmer_location(db, farmer) -> Tuple[Optional[float], Optiona
         from src.memory.models import FarmerMemory
         from src.core.models import FarmerProfile
 
-        # 1. Check FarmerMemory for GPS coordinates
+        # Tier 2: Check FarmerMemory for GPS coordinates
         mem_res = await db.execute(
             select(FarmerMemory).where(FarmerMemory.farmer_id == farmer.id)
         )
@@ -336,7 +453,7 @@ async def _resolve_farmer_location(db, farmer) -> Tuple[Optional[float], Optiona
             except (ValueError, TypeError):
                 pass
 
-        # 2. Check FarmerProfile for district/state
+        # Tier 3: Check FarmerProfile for district/state
         prof_res = await db.execute(
             select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
         )
@@ -345,7 +462,7 @@ async def _resolve_farmer_location(db, farmer) -> Tuple[Optional[float], Optiona
             district = profile.district.strip()
             state = profile.state.strip() if profile.state else None
 
-        # 3. Check FarmerMemory for district if profile is blank
+        # Tier 3 (cont): Check FarmerMemory for district if profile is blank
         if not district and memory and memory.district:
             district = memory.district.strip()
             state = memory.state.strip() if memory.state else None
@@ -393,8 +510,13 @@ async def enrich_response_with_shops(
         logger.info("[ENRICH SHOPS] Bypassing shop enrichment - No product keyword matched.")
         return ai_response
 
-    # Step 3: Resolve farmer location and language
-    latitude, longitude, district, state = await _resolve_farmer_location(db, farmer)
+    # Step 3: Resolve farmer location and language (4-tier hierarchy)
+    loc_res = await _resolve_farmer_location(db, farmer, query_text=query_text)
+    if len(loc_res) == 5:
+        latitude, longitude, district, state, _ = loc_res
+    else:
+        latitude, longitude, district, state = loc_res
+
     language = getattr(farmer, "preferred_language", "en") or "en"
     labels = _TE_LABELS if language == "te" else _EN_LABELS
 
@@ -402,7 +524,7 @@ async def enrich_response_with_shops(
     try:
         shop_repo = ShopRepository(db)
         await shop_repo.seed_default_shops_if_empty()
-        matches = await shop_repo.search_shops_by_product(matched_product)
+        matches = await shop_repo.search_shops_by_product(matched_product, only_available=False)
     except Exception as db_err:
         logger.warning(f"[ENRICH SHOPS] DB query failed: {db_err}")
         return ai_response
@@ -423,23 +545,41 @@ async def enrich_response_with_shops(
         ):
             dist = haversine_distance(latitude, longitude, shop.latitude, shop.longitude)
 
-        # Sort priority:
-        # 1. Distant distance if GPS available (closest first)
-        # 2. Exact district match if no GPS
-        # 3. Other shops
         district_match = (
             district is not None
             and shop.district is not None
             and district.lower() in shop.district.lower()
         )
+
+        # Priority Ranking:
+        # Rank 1: Precise GPS distance match
+        # Rank 2: District match (Query override or Profile district)
+        # Rank 3: Other active shops
+        if dist is not None:
+            rank = 1
+        elif district_match:
+            rank = 2
+        else:
+            rank = 3
+
+        # Availability preference: In-stock items ranked before out-of-stock items
+        stock_rank = 0 if (item.available and item.quantity_in_stock > 0) else 1
+
         sort_key = (
-            0 if dist is not None else (1 if district_match else 2),
+            rank,
+            stock_rank,
             dist if dist is not None else 99999.0,
         )
         scored_matches.append((sort_key, shop, item, dist))
 
     scored_matches.sort(key=lambda x: x[0])
     top = scored_matches[:3]
+
+    # Check if ALL top matches are out of stock
+    all_out_of_stock = all(
+        (not item.available or item.quantity_in_stock <= 0)
+        for _, _, item, _ in top
+    )
 
     # Step 6: Format WhatsApp reply block
     shop_entries = []
@@ -464,12 +604,16 @@ async def enrich_response_with_shops(
         ]
         shop_entries.append("\n".join(lines))
 
+    header_parts = [labels["title"]]
+    if all_out_of_stock:
+        header_parts.append(labels["all_out_of_stock"])
+
     footer_parts = [labels["footer_disclaimer"]]
     if len(matches) > 3:
         footer_parts.append(labels["more"])
 
     full_block = "\n".join([
-        labels["title"],
+        *header_parts,
         *shop_entries,
         "",
         "\n".join(footer_parts),
@@ -480,4 +624,5 @@ async def enrich_response_with_shops(
         f"(district: {district}, coords: ({latitude}, {longitude}))."
     )
     return ai_response + "\n\n" + full_block
+
 

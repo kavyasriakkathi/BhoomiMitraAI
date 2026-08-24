@@ -392,3 +392,90 @@ async def test_enrich_shops_db_failure_returns_original():
     res = await enrich_response_with_shops(db, "Where can I buy urea?", original, farmer)
     assert res == original
 
+
+def test_extract_district_from_query():
+    """Extracts known districts from farmer queries in English and Telugu."""
+    from src.shops.service import _extract_district_from_query
+
+    assert _extract_district_from_query("Urea in Karimnagar") == "Karimnagar"
+    assert _extract_district_from_query("యూరియా కరీంనగర్ లో ఎక్కడ దొరుకుతుంది?") == "Karimnagar"
+    assert _extract_district_from_query("find fertilizer in warangal") == "Warangal"
+    assert _extract_district_from_query("గుంటూరు లో వేప నూనె ఎక్కడ ఉంది?") == "Guntur"
+    assert _extract_district_from_query("shops near vijayawada") == "Krishna"
+    assert _extract_district_from_query("no location mentioned here") is None
+
+
+def test_expanded_product_synonyms_telugu_and_english():
+    """Expanded product trade names and Telugu terms normalize correctly for search."""
+    assert _detect_product_from_query("నానో యూరియా ధర ఎంత?") == "urea"
+    assert _detect_product_from_query("need nano urea bottle") == "urea"
+    assert _detect_product_from_query("కలుపు మందు ఎక్కడ దొరుకుతుంది?") == "herbicide"
+    assert _detect_product_from_query("best weedicide for cotton") == "herbicide"
+    assert _detect_product_from_query("సాఫ్ శిలీంద్ర సంహారిణి కావాలి") == "mancozeb"
+    assert _detect_product_from_query("looking for saaf fungicide") == "mancozeb"
+    assert _detect_product_from_query("కోరజెన్ పురుగుల మందు ధర") == "coragen"
+    assert _detect_product_from_query("where to buy coragen") == "coragen"
+    assert _detect_product_from_query("రౌండప్ కలుపు మందు") == "herbicide"
+
+
+@pytest.mark.asyncio
+async def test_enrich_shops_query_district_override():
+    """Query location takes precedence over farmer profile location."""
+    farmer = MagicMock(id=uuid4(), preferred_language="en")
+    # Farmer profile is in Guntur, but farmer asks for Karimnagar in the query
+    db = _mock_db_with_farmer_location(profile_district="Guntur", profile_state="Andhra Pradesh")
+
+    guntur_shop = _make_mock_shop(name="Sri Lakshmi Agro Guntur", district="Guntur", lat=16.3067, lon=80.4365)
+    karimnagar_shop = _make_mock_shop(name="Balaji Fertilizers Karimnagar", district="Karimnagar", lat=18.4386, lon=79.1288)
+    item = _make_mock_item(name="Urea", price=295.0)
+
+    with patch.object(ShopRepository, "seed_default_shops_if_empty", new_callable=AsyncMock), \
+         patch.object(ShopRepository, "search_shops_by_product", new_callable=AsyncMock, return_value=[(guntur_shop, item), (karimnagar_shop, item)]):
+
+        res = await enrich_response_with_shops(db, "Where can I buy urea in Karimnagar?", "Farming advice.", farmer)
+
+    assert "Balaji Fertilizers Karimnagar" in res
+    # Karimnagar shop should be ranked before Guntur shop due to query override
+    assert res.find("Balaji Fertilizers Karimnagar") < res.find("Sri Lakshmi Agro Guntur")
+
+
+@pytest.mark.asyncio
+async def test_enrich_shops_all_out_of_stock_warning():
+    """When all matching shops have zero stock or unavailable, a clear out-of-stock note is attached."""
+    farmer = MagicMock(id=uuid4(), preferred_language="en")
+    db = _mock_db_with_farmer_location(profile_district="Warangal")
+
+    shop = _make_mock_shop(name="Kisan Seva Warangal", district="Warangal")
+    out_of_stock_item = _make_mock_item(name="Urea", price=295.0, stock=0, available=False)
+
+    with patch.object(ShopRepository, "seed_default_shops_if_empty", new_callable=AsyncMock), \
+         patch.object(ShopRepository, "search_shops_by_product", new_callable=AsyncMock, return_value=[(shop, out_of_stock_item)]):
+
+        res = await enrich_response_with_shops(db, "Where to buy urea in Warangal?", "Farming advice.", farmer)
+
+    assert "Kisan Seva Warangal" in res
+    assert "Out of Stock" in res
+    assert "currently out of stock across nearby registered shops" in res
+    assert "Prices and stock levels are subject to local dealer confirmation" in res
+
+
+@pytest.mark.asyncio
+async def test_enrich_shops_all_out_of_stock_telugu():
+    """Telugu out-of-stock formatting displays authentic Telugu caution message."""
+    farmer = MagicMock(id=uuid4(), preferred_language="te")
+    db = _mock_db_with_farmer_location(profile_district="Warangal")
+
+    shop = _make_mock_shop(name="కిసాన్ సేవా కేంద్రం", district="Warangal")
+    out_of_stock_item = _make_mock_item(name="యూరియా", price=295.0, stock=0, available=True)
+
+    with patch.object(ShopRepository, "seed_default_shops_if_empty", new_callable=AsyncMock), \
+         patch.object(ShopRepository, "search_shops_by_product", new_callable=AsyncMock, return_value=[(shop, out_of_stock_item)]):
+
+        res = await enrich_response_with_shops(db, "యూరియా ఎక్కడ దొరుకుతుంది?", "సలహా.", farmer)
+
+    assert "కిసాన్ సేవా కేంద్రం" in res
+    assert "స్టాక్ లేదు" in res
+    assert "ప్రస్తుతం సమీప నమోదిత దుకాణాలలో స్టాక్ అందుబాటులో లేదు" in res
+    assert "ధరలు మరియు స్టాక్ వివరాలు స్థానిక డీలర్ నిర్ధారణకు లోబడి ఉంటాయి" in res
+
+
