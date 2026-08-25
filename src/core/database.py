@@ -75,13 +75,13 @@ engine_kwargs = {
     "echo": settings.debug,
 }
 
+from sqlalchemy.pool import NullPool
+
 if "sqlite" in db_url:
     pass
 else:
     engine_kwargs.update({
-        "pool_pre_ping": True,
-        "pool_size": 10,
-        "max_overflow": 20,
+        "poolclass": NullPool,
     })
 
 # Create Async Engine

@@ -413,6 +413,7 @@ def _mock_price_model(**kwargs):
 async def test_market_enrichment_telugu_query_1():
     """Verify 'ఈరోజు పత్తి ధర ఎంత?' detects intent and enriches response with Cotton prices."""
     from src.market.service import enrich_response_with_market_prices
+    from src.market.agmarknet_client import AgmarknetClient
 
     db_mock = AsyncMock()
     mock_count_res = MagicMock()
@@ -442,9 +443,10 @@ async def test_market_enrichment_telugu_query_1():
     farmer.preferred_language = "te"
 
     base_ai_response = "పత్తి పంట మార్కెట్ వివరాలు క్రింద ఇవ్వబడ్డాయి."
-    result = await enrich_response_with_market_prices(
-        db_mock, "ఈరోజు పత్తి ధర ఎంత?", base_ai_response, farmer
-    )
+    with patch.object(AgmarknetClient, "fetch_prices", new_callable=AsyncMock, return_value=[]):
+        result = await enrich_response_with_market_prices(
+            db_mock, "ఈరోజు పత్తి ధర ఎంత?", base_ai_response, farmer
+        )
 
     assert "మార్కెట్ ధరలు" in result
     assert "Warangal Mandi" in result
@@ -456,6 +458,7 @@ async def test_market_enrichment_telugu_query_1():
 async def test_market_enrichment_telugu_query_2():
     """Verify 'పత్తి క్వింటాల్ ధర ఎంత?' detects intent and enriches response with Cotton prices."""
     from src.market.service import enrich_response_with_market_prices
+    from src.market.agmarknet_client import AgmarknetClient
 
     db_mock = AsyncMock()
     mock_count_res = MagicMock()
@@ -485,9 +488,10 @@ async def test_market_enrichment_telugu_query_2():
     farmer.preferred_language = "te"
 
     base_ai_response = "పత్తి పంట ధర సమాచారం."
-    result = await enrich_response_with_market_prices(
-        db_mock, "పత్తి క్వింటాల్ ధర ఎంత?", base_ai_response, farmer
-    )
+    with patch.object(AgmarknetClient, "fetch_prices", new_callable=AsyncMock, return_value=[]):
+        result = await enrich_response_with_market_prices(
+            db_mock, "పత్తి క్వింటాల్ ధర ఎంత?", base_ai_response, farmer
+        )
 
     assert "మార్కెట్ ధరలు" in result
     assert "Adilabad Mandi" in result
@@ -498,6 +502,7 @@ async def test_market_enrichment_telugu_query_2():
 async def test_market_enrichment_telugu_query_3():
     """Verify 'నా దగ్గర పత్తి మార్కెట్ ధర ఎంత?' detects intent and enriches response with Cotton prices."""
     from src.market.service import enrich_response_with_market_prices
+    from src.market.agmarknet_client import AgmarknetClient
 
     db_mock = AsyncMock()
     mock_count_res = MagicMock()
@@ -527,9 +532,10 @@ async def test_market_enrichment_telugu_query_3():
     farmer.preferred_language = "te"
 
     base_ai_response = "పత్తి మార్కెట్ సమాచారం."
-    result = await enrich_response_with_market_prices(
-        db_mock, "నా దగ్గర పత్తి మార్కెట్ ధర ఎంత?", base_ai_response, farmer
-    )
+    with patch.object(AgmarknetClient, "fetch_prices", new_callable=AsyncMock, return_value=[]):
+        result = await enrich_response_with_market_prices(
+            db_mock, "నా దగ్గర పత్తి మార్కెట్ ధర ఎంత?", base_ai_response, farmer
+        )
 
     assert "మార్కెట్ ధరలు" in result
     assert "Khammam Mandi" in result
@@ -563,6 +569,7 @@ async def test_market_enrichment_unrelated_query_no_trigger():
 async def test_market_enrichment_refusal_stripped():
     """Verify that when AI generates a generic refusal/disclaimer (e-NAM/local market yard), it is stripped and only the price block is returned."""
     from src.market.service import enrich_response_with_market_prices
+    from src.market.agmarknet_client import AgmarknetClient
 
     db_mock = AsyncMock()
     mock_count_res = MagicMock()
@@ -596,9 +603,10 @@ async def test_market_enrichment_refusal_stripped():
         "పత్తి ధరల సమాచారం కోసం దయచేసి మీ దగ్గరిలోని మార్కెట్ యార్డ్ లేదా ఈ-నామ్ (e-NAM) పోర్టల్ను సంప్రదించండి."
     )
 
-    result = await enrich_response_with_market_prices(
-        db_mock, "ఈరోజు పత్తి ధర ఎంత?", contradictory_ai_response, farmer
-    )
+    with patch.object(AgmarknetClient, "fetch_prices", new_callable=AsyncMock, return_value=[]):
+        result = await enrich_response_with_market_prices(
+            db_mock, "ఈరోజు పత్తి ధర ఎంత?", contradictory_ai_response, farmer
+        )
 
     # Must contain the clean market price block
     assert "📊 పత్తి మార్కెట్ ధరలు" in result
