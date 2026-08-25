@@ -515,3 +515,182 @@ async def test_local_development_expert_behavior_regression():
 
     assert "Test Expert" in res
     assert "+91 9999988888" in res
+
+
+# ---------------------------------------------------------------------------
+# Pilot Readiness Tests (Expert Alert Dispatch & Privacy Safeguards)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_verified_expert_receives_alert_for_new_ticket():
+    """Verified active expert receives exactly one WhatsApp notification for a new escalation ticket."""
+    farmer = MagicMock(id=uuid4(), phone_number="+91 9876543210", preferred_language="en")
+    db = AsyncMock()
+
+    real_expert = _make_mock_expert(name="Dr. M. Suresh Kumar", specialty="Pest Control", phone="+91 9440123456")
+
+    with patch("src.config.get_settings") as mock_settings, \
+         patch("src.escalation.notifications.send_text_message", new_callable=AsyncMock) as mock_send_wa, \
+         patch.object(EscalationRepository, "seed_default_experts_if_empty", new_callable=AsyncMock), \
+         patch.object(EscalationRepository, "get_farmer_consultation_history", new_callable=AsyncMock, return_value=[]), \
+         patch.object(EscalationRepository, "get_active_experts", new_callable=AsyncMock, return_value=[real_expert]), \
+         patch.object(EscalationRepository, "record_escalation_ticket", new_callable=AsyncMock, return_value=True):
+
+        mock_settings.return_value.app_env = "production"
+        mock_settings.return_value.expert_whatsapp_group_id = ""
+        mock_send_wa.return_value = "wamid.HBgLMTIzNDU2Nzg5MA=="
+
+        res = await enrich_response_with_escalation(
+            db, "I need to talk to an agriculture officer for cotton pest attack", "Advisory note.", farmer
+        )
+
+    assert "ESC-" in res
+    # Exactly one direct notification sent to the verified expert
+    assert mock_send_wa.call_count == 1
+    call_args = mock_send_wa.call_args
+    assert call_args.kwargs["to_phone"] == "919440123456"
+    assert "BhoomiMitra Expert Escalation Alert" in call_args.kwargs["message_text"]
+    assert "9876543210" in call_args.kwargs["message_text"]
+
+
+@pytest.mark.asyncio
+async def test_demo_expert_receives_zero_alerts():
+    """Demo / placeholder experts receive ZERO outbound WhatsApp alerts."""
+    farmer = MagicMock(id=uuid4(), phone_number="+91 9876543210", preferred_language="en")
+    db = AsyncMock()
+
+    demo_expert = _make_mock_expert(name="Dr. K. Srinivas Rao", phone="+91 9848012345")
+
+    with patch("src.config.get_settings") as mock_settings, \
+         patch("src.escalation.notifications.send_text_message", new_callable=AsyncMock) as mock_send_wa, \
+         patch.object(EscalationRepository, "seed_default_experts_if_empty", new_callable=AsyncMock), \
+         patch.object(EscalationRepository, "get_farmer_consultation_history", new_callable=AsyncMock, return_value=[]), \
+         patch.object(EscalationRepository, "get_active_experts", new_callable=AsyncMock, return_value=[demo_expert]), \
+         patch.object(EscalationRepository, "record_escalation_ticket", new_callable=AsyncMock, return_value=True):
+
+        mock_settings.return_value.app_env = "production"
+        mock_settings.return_value.expert_whatsapp_group_id = ""
+
+        res = await enrich_response_with_escalation(
+            db, "Connect me to an officer", "Advisory note.", farmer
+        )
+
+    # Zero outbound WhatsApp calls should be made to demo expert
+    assert mock_send_wa.call_count == 0
+    # Safe fallback presented to farmer
+    assert "+91 9848012345" not in res
+    assert "1800-180-1551" in res
+
+
+@pytest.mark.asyncio
+async def test_expert_alert_failure_is_non_blocking():
+    """If Meta WhatsApp API delivery fails, ticket creation and farmer response remain successful."""
+    farmer = MagicMock(id=uuid4(), phone_number="+91 9876543210", preferred_language="en")
+    db = AsyncMock()
+
+    real_expert = _make_mock_expert(name="Dr. M. Suresh Kumar", specialty="Pest Control", phone="+91 9440123456")
+
+    with patch("src.config.get_settings") as mock_settings, \
+         patch("src.escalation.notifications.send_text_message", side_effect=Exception("Meta API Connection Timeout")) as mock_send_wa, \
+         patch.object(EscalationRepository, "seed_default_experts_if_empty", new_callable=AsyncMock), \
+         patch.object(EscalationRepository, "get_farmer_consultation_history", new_callable=AsyncMock, return_value=[]), \
+         patch.object(EscalationRepository, "get_active_experts", new_callable=AsyncMock, return_value=[real_expert]), \
+         patch.object(EscalationRepository, "record_escalation_ticket", new_callable=AsyncMock, return_value=True) as mock_record:
+
+        mock_settings.return_value.app_env = "production"
+        mock_settings.return_value.expert_whatsapp_group_id = ""
+
+        res = await enrich_response_with_escalation(
+            db, "Connect me to an expert officer immediately", "Base advisory.", farmer
+        )
+
+    # Ticket was still persisted
+    assert mock_record.call_count == 1
+    # Response was still cleanly returned to farmer with contact info
+    assert "Base advisory." in res
+    assert "Dr. M. Suresh Kumar" in res
+    assert "1800-180-1551" in res
+
+
+@pytest.mark.asyncio
+async def test_duplicate_ticket_does_not_send_another_alert():
+    """Duplicate escalation queries on the same day do not re-send notifications."""
+    farmer = MagicMock(id=uuid4(), phone_number="+91 9876543210", preferred_language="en")
+    db = AsyncMock()
+
+    from datetime import datetime
+    today_str = datetime.utcnow().strftime("%Y%m%d")
+    existing_ticket = {
+        "ticket_id": f"ESC-{today_str}-5555",
+        "status": "Assigned",
+        "expert_name": "Dr. M. Suresh Kumar",
+        "expert_phone": "+91 9440123456",
+    }
+
+    with patch("src.config.get_settings") as mock_settings, \
+         patch("src.escalation.notifications.send_text_message", new_callable=AsyncMock) as mock_send_wa, \
+         patch.object(EscalationRepository, "seed_default_experts_if_empty", new_callable=AsyncMock), \
+         patch.object(EscalationRepository, "get_farmer_consultation_history", new_callable=AsyncMock, return_value=[existing_ticket]), \
+         patch.object(EscalationRepository, "record_escalation_ticket", new_callable=AsyncMock) as mock_record:
+
+        mock_settings.return_value.app_env = "production"
+
+        res = await enrich_response_with_escalation(
+            db, "I already requested an officer earlier", "Advisory.", farmer
+        )
+
+    # No duplicate ticket created in DB
+    assert mock_record.call_count == 0
+    # No duplicate WhatsApp alert dispatched
+    assert mock_send_wa.call_count == 0
+    # Existing ticket info returned to farmer
+    assert f"ESC-{today_str}-5555" in res
+
+
+@pytest.mark.asyncio
+async def test_group_notification_privacy_safeguard_no_farmer_pii():
+    """Group alerts strictly exclude farmer phone numbers, GPS coordinates, and raw conversation history."""
+    from src.escalation.notifications import build_expert_alert_message, notify_expert_escalation_ticket
+
+    # 1. Direct message test -> includes farmer phone for 1:1 triage
+    direct_msg = build_expert_alert_message(
+        ticket_id="ESC-20260825-9999",
+        topic="Cotton pink bollworm pest infestation",
+        region="Warangal, Telangana",
+        reason="hazard",
+        farmer_phone="+91 9876543210",
+        is_group=False,
+    )
+    assert "9876543210" in direct_msg
+    assert "Urgent Chemical Hazard" in direct_msg
+
+    # 2. Group message test -> strictly OMITS farmer phone and PII
+    group_msg = build_expert_alert_message(
+        ticket_id="ESC-20260825-9999",
+        topic="Cotton pink bollworm pest infestation",
+        region="Warangal, Telangana",
+        reason="hazard",
+        farmer_phone="+91 9876543210",
+        is_group=True,
+    )
+    assert "9876543210" not in group_msg
+    assert "Farmer Contact" not in group_msg
+    assert "ESC-20260825-9999" in group_msg
+    assert "Warangal, Telangana" in group_msg
+
+    # 3. Async group dispatch test with group_id configured
+    with patch("src.escalation.notifications.send_text_message", new_callable=AsyncMock) as mock_send:
+        mock_send.return_value = "wa_msg_group_123"
+        res = await notify_expert_escalation_ticket(
+            ticket_id="ESC-20260825-9999",
+            topic="Cotton pest",
+            region="Warangal",
+            reason="inspection",
+            expert_phone=None,
+            farmer_phone="+91 9876543210",
+            group_id="1203630248572910@g.us",
+        )
+        assert res == "wa_msg_group_123"
+        call_msg = mock_send.call_args.kwargs["message_text"]
+        assert "9876543210" not in call_msg
+        assert "Farmer Contact" not in call_msg

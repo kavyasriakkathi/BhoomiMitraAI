@@ -400,6 +400,22 @@ async def enrich_response_with_escalation(
         settings = get_settings()
         is_verified = is_verified_expert(assigned_expert, app_env=settings.app_env)
 
+        # Step 6.5: Non-blocking Outbound Notification to Verified Expert (New Ticket Only)
+        if assigned_expert and is_verified:
+            try:
+                from src.escalation.notifications import notify_expert_escalation_ticket
+                farmer_phone = getattr(farmer, "phone_number", None) if farmer else None
+                await notify_expert_escalation_ticket(
+                    ticket_id=new_ticket_id,
+                    topic=ticket_data["topic"],
+                    region=region_str,
+                    reason=reason,
+                    expert_phone=assigned_expert.phone_number,
+                    farmer_phone=farmer_phone,
+                )
+            except Exception as notif_err:
+                logger.warning(f"[ENRICH ESCALATION] Non-blocking expert alert notification error: {notif_err}")
+
         header = labels["header"].format(ticket_id=new_ticket_id)
         status_text = labels["status_assigned"] if (assigned_expert and is_verified) else labels["status_pending"]
 
