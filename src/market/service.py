@@ -314,6 +314,77 @@ class MarketService:
 
 
 # ------------------------------------------------------------------
+# Deduplication helper: cleans redundant/speculative price sentences
+# ------------------------------------------------------------------
+
+def _clean_market_duplicate_text(ai_response: str) -> str:
+    """
+    Safely clean duplicate/speculative market-price statements and refusals from AI response
+    before appending the authoritative structured Market Prices block.
+
+    Preserves:
+    - Agronomic and crop management advice
+    - General context / greetings that do not quote speculative prices
+
+    Removes:
+    - Refusal statements telling farmers to consult e-NAM / local market yards
+    - Sentences quoting speculative market price numbers/ranges (e.g. containing ₹, Rs, per quintal, etc.)
+    """
+    import re
+    if not ai_response or not ai_response.strip():
+        return ""
+
+    refusal_markers = [
+        "e-nam", "ఈ-నామ్", "ఈ - నామ్", "మార్కెట్ యార్డ్", "మార్కెట్ యార్డు",
+        "market yard", "కేవలం వ్యవసాయం", "విషయాలపై మాత్రమే", "i can only help with farming",
+        "only help with farming", "how can i help with your crops", "స్థానిక మార్కెట్",
+    ]
+
+    lines = [line.strip() for line in ai_response.split("\n") if line.strip()]
+    cleaned_lines = []
+
+    for line in lines:
+        line_lower = line.lower()
+        if any(marker in line_lower for marker in refusal_markers):
+            continue
+
+        sentences = re.split(r'(?<=[.!?।])\s+', line)
+        kept_sentences = []
+        for s in sentences:
+            s_strip = s.strip()
+            if not s_strip:
+                continue
+            s_lower = s_strip.lower()
+
+            if any(marker in s_lower for marker in refusal_markers):
+                continue
+
+            # Check for speculative price quotes / numbers / units
+            has_currency = bool(re.search(r'(₹|rs\.?|inr|రూ\.?|రూపాయలు)', s_lower))
+            has_unit = bool(re.search(r'(quintal|క్వింటా|క్వింటాల్|క్వింటాలు|per\s+kg|కిలోకి|kg)', s_lower))
+            has_price_word = bool(re.search(r'(ధర|రేటు|మార్కెట్|మండి|price|rate|mandi)', s_lower))
+            has_estimation = bool(re.search(r'(సుమారు|దాదాపు|around|ranges|between|సుమారుగా)', s_lower))
+
+            is_price_quote = (
+                (has_currency and has_price_word)
+                or (has_unit and has_price_word and bool(re.search(r'\d', s_strip)))
+                or (has_estimation and has_price_word)
+                or bool(re.search(r'^(the\s+)?(cotton|tomato|paddy|onion|chilli|crop)\s+market\s+price\s+is', s_lower))
+                or bool(re.search(r'మార్కెట్\s*ధర\s*క్వింటాలు', s_lower))
+            )
+
+            if is_price_quote:
+                continue
+
+            kept_sentences.append(s_strip)
+
+        if kept_sentences:
+            cleaned_lines.append(" ".join(kept_sentences))
+
+    return "\n".join(cleaned_lines).strip()
+
+
+# ------------------------------------------------------------------
 # Pipeline integration function — mirrors enrich_response_with_shops()
 # Called from ai/service.py inside a try/except block.
 # ------------------------------------------------------------------
@@ -352,10 +423,18 @@ async def enrich_response_with_market_prices(
 
     # Step 2: Identify commodity
     matched_commodity = None
-    for kw, canonical in COMMODITY_MAP.items():
-        if kw.lower() in query_lower:
-            matched_commodity = canonical
-            break
+    import re
+    sorted_keywords = sorted(COMMODITY_MAP.items(), key=lambda x: len(x[0]), reverse=True)
+    for kw, canonical in sorted_keywords:
+        kw_lower = kw.lower()
+        if all(ord(c) < 128 for c in kw_lower):
+            if re.search(r'\b' + re.escape(kw_lower) + r'\b', query_lower):
+                matched_commodity = canonical
+                break
+        else:
+            if kw_lower in query_lower:
+                matched_commodity = canonical
+                break
 
     # Fallback to extract_crop_from_text if not matched directly in COMMODITY_MAP
     if not matched_commodity:
@@ -436,20 +515,13 @@ async def enrich_response_with_market_prices(
                 f"for '{matched_commodity}' to AI response."
             )
             
-            # If the preceding AI response is a generic refusal, non-farming disclaimer,
-            # or tells the farmer to contact e-NAM/local market yard, remove it to avoid contradiction.
-            refusal_markers = [
-                "e-nam", "ఈ-నామ్", "ఈ - నామ్", "మార్కెట్ యార్డ్", "మార్కెట్ యార్డు",
-                "market yard", "కేవలం వ్యవసాయం", "విషయాలపై మాత్రమే", "i can only help with farming",
-                "only help with farming", "how can i help with your crops", "స్థానిక మార్కెట్",
-            ]
-            ai_lower = ai_response.lower() if ai_response else ""
-            is_refusal = any(marker in ai_lower for marker in refusal_markers)
+            # Clean duplicate market-price sentences, speculative price quotes, and refusals from preceding AI response
+            cleaned_ai = _clean_market_duplicate_text(ai_response)
 
-            if is_refusal or not ai_response or len(ai_response.strip()) == 0:
+            if not cleaned_ai:
                 final_enriched = price_block
             else:
-                final_enriched = ai_response.strip() + "\n\n" + price_block
+                final_enriched = cleaned_ai + "\n\n" + price_block
 
             logger.info(f"[MARKET ENRICH] Final enriched response length={len(final_enriched)}")
             return final_enriched

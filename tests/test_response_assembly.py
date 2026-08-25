@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 from uuid import uuid4
+from datetime import datetime
 from src.core.models import Farmer, Conversation
 from src.ai.service import process_text_message, AIService
 from src.ai.schemas import AIGenerateRequest, AIGenerateResponse
@@ -480,8 +481,289 @@ async def test_rag_db_success_path():
     assert any("Custom Database Advisory" in r.document_title for r in results)
 
 
+@pytest.mark.asyncio
+async def test_telugu_market_query_deduplication():
+    """Verify 'పత్తి మార్కెట్ ధర ఎంత?' returns structured market block without duplicate Gemini price quotes."""
+    from src.core.models import MarketPrice
+    from src.market.agmarknet_client import AgmarknetClient
+
+    db_mock = AsyncMock()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+    conversation = Conversation(id=uuid4(), farmer_id=farmer.id, user_message="పత్తి మార్కెట్ ధర ఎంత?")
+
+    # Gemini outputs speculative price text
+    mock_ai_resp = AIGenerateResponse(
+        response_text="ప్రస్తుతం పత్తి మార్కెట్ ధర క్వింటాలుకు దాదాపు ₹7,000 నుండి ₹7,500 వరకు ఉంది.",
+        intent="market_price",
+        confidence=0.9,
+        provider_used="gemini",
+    )
+
+    mock_price = MarketPrice(
+        id=uuid4(),
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Warangal Mandi",
+        district="Warangal",
+        state="Telangana",
+        modal_price=7450.0,
+        min_price=7100.0,
+        max_price=7650.0,
+        price_date=datetime(2026, 8, 19),
+        unit="Quintal",
+        source="local_db",
+        created_at=datetime.utcnow(),
+    )
+
+    mock_count_res = MagicMock()
+    mock_count_res.scalar.return_value = 1
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_price]
+    mock_query_res = MagicMock()
+    mock_query_res.scalars.return_value = mock_scalars
+    mock_profile_res = MagicMock()
+    mock_profile_res.scalar_one_or_none.return_value = None
+
+    db_mock.execute.side_effect = [mock_profile_res, mock_count_res, mock_query_res, mock_query_res, mock_query_res]
+
+    with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_ai_resp), \
+         patch.object(AgmarknetClient, "fetch_prices", new_callable=AsyncMock, return_value=[]):
+
+        result = await process_text_message(db_mock, farmer, conversation)
+
+        # 1. Contains authoritative structured block
+        assert "📊 పత్తి మార్కెట్ ధరలు" in result
+        assert "Warangal Mandi" in result
+        assert "7,450" in result
+
+        # 2. Duplicate speculative price numbers from Gemini are stripped
+        assert "₹7,000 నుండి ₹7,500" not in result
+        assert "దాదాపు ₹7,000" not in result
 
 
+@pytest.mark.asyncio
+async def test_english_market_query_deduplication():
+    """Verify 'What is the cotton market price?' returns structured market block without duplicate Gemini price text."""
+    from src.core.models import MarketPrice
+    from src.market.agmarknet_client import AgmarknetClient
+
+    db_mock = AsyncMock()
+    farmer = Farmer(id=uuid4(), preferred_language="en")
+    conversation = Conversation(id=uuid4(), farmer_id=farmer.id, user_message="What is the cotton market price?")
+
+    # Gemini outputs speculative English price text
+    mock_ai_resp = AIGenerateResponse(
+        response_text="The current cotton market price is around ₹7,000 to ₹7,500 per quintal in Telangana mandis.",
+        intent="market_price",
+        confidence=0.9,
+        provider_used="gemini",
+    )
+
+    mock_price = MarketPrice(
+        id=uuid4(),
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Warangal Mandi",
+        district="Warangal",
+        state="Telangana",
+        modal_price=7450.0,
+        min_price=7100.0,
+        max_price=7650.0,
+        price_date=datetime(2026, 8, 19),
+        unit="Quintal",
+        source="local_db",
+        created_at=datetime.utcnow(),
+    )
+
+    mock_count_res = MagicMock()
+    mock_count_res.scalar.return_value = 1
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_price]
+    mock_query_res = MagicMock()
+    mock_query_res.scalars.return_value = mock_scalars
+    mock_profile_res = MagicMock()
+    mock_profile_res.scalar_one_or_none.return_value = None
+
+    db_mock.execute.side_effect = [mock_profile_res, mock_count_res, mock_query_res, mock_query_res, mock_query_res]
+
+    with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_ai_resp), \
+         patch.object(AgmarknetClient, "fetch_prices", new_callable=AsyncMock, return_value=[]):
+
+        result = await process_text_message(db_mock, farmer, conversation)
+
+        # 1. Contains authoritative structured block
+        assert "📊 Cotton Mandi Prices" in result
+        assert "Warangal Mandi" in result
+        assert "7,450" in result
+
+        # 2. Duplicate speculative price numbers from Gemini are stripped
+        assert "around ₹7,000 to ₹7,500" not in result
+        assert "is around ₹7,000" not in result
 
 
+@pytest.mark.asyncio
+async def test_dual_crop_advice_and_market_query_preserves_advice():
+    """Verify that a dual query preserves agronomic advice while stripping duplicate speculative price quotes."""
+    from src.core.models import MarketPrice
+    from src.market.agmarknet_client import AgmarknetClient
 
+    db_mock = AsyncMock()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+    conversation = Conversation(
+        id=uuid4(),
+        farmer_id=farmer.id,
+        user_message="నా పత్తి పంటకు ఆకుమచ్చ తెగులు ఉంది, మందు ఏమిటి? మరియు పత్తి మార్కెట్ ధర ఎంత?"
+    )
+
+    mock_ai_resp = AIGenerateResponse(
+        response_text="పత్తిలో ఆకుమచ్చ తెగులు నివారణకు లీటరు నీటికి 2.5 గ్రాముల మాంకోజెబ్ కలిపి పిచికారీ చేయండి. ప్రస్తుతం పత్తి ధర క్వింటాలుకు ₹7,200 ఉంది.",
+        intent="disease_and_market",
+        confidence=0.9,
+        provider_used="gemini",
+    )
+
+    mock_price = MarketPrice(
+        id=uuid4(),
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Warangal Mandi",
+        district="Warangal",
+        state="Telangana",
+        modal_price=7450.0,
+        min_price=7100.0,
+        max_price=7650.0,
+        price_date=datetime(2026, 8, 19),
+        unit="Quintal",
+        source="local_db",
+        created_at=datetime.utcnow(),
+    )
+
+    mock_count_res = MagicMock()
+    mock_count_res.scalar.return_value = 1
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_price]
+    mock_query_res = MagicMock()
+    mock_query_res.scalars.return_value = mock_scalars
+    mock_profile_res = MagicMock()
+    mock_profile_res.scalar_one_or_none.return_value = None
+
+    db_mock.execute.side_effect = [mock_profile_res, mock_count_res, mock_query_res, mock_query_res, mock_query_res]
+
+    with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_ai_resp), \
+         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp, *args, **kwargs: resp), \
+         patch.object(AgmarknetClient, "fetch_prices", new_callable=AsyncMock, return_value=[]):
+
+        result = await process_text_message(db_mock, farmer, conversation)
+
+        # Useful agronomic advice is preserved
+        assert "మాంకోజెబ్" in result
+        assert "ఆకుమచ్చ తెగులు నివారణకు" in result
+
+        # Authoritative market block is appended
+        assert "📊 పత్తి మార్కెట్ ధరలు" in result
+        assert "Warangal Mandi" in result
+        assert "7,450" in result
+
+        # Speculative price quote is stripped
+        assert "₹7,200" not in result
+
+
+@pytest.mark.asyncio
+async def test_normal_non_market_agricultural_query_unchanged():
+    """Verify that a normal non-market agricultural query returns unmodified AI response without price blocks."""
+    db_mock = AsyncMock()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+    conversation = Conversation(id=uuid4(), farmer_id=farmer.id, user_message="వరి పంటలో కలుపు నివారణ ఎలా చేయాలి?")
+
+    mock_ai_resp = AIGenerateResponse(
+        response_text="వరి పంటలో కలుపు నివారణకు ముందస్తుగా బ్యూటాక్లోర్ పిచికారీ చేయండి.",
+        intent="crop_advisory",
+        confidence=0.9,
+        provider_used="gemini",
+    )
+
+    with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_ai_resp):
+        result = await process_text_message(db_mock, farmer, conversation)
+        assert result == "వరి పంటలో కలుపు నివారణకు ముందస్తుగా బ్యూటాక్లోర్ పిచికారీ చేయండి."
+        assert "📊" not in result
+        assert "మార్కెట్ ధరలు" not in result
+
+
+@pytest.mark.asyncio
+async def test_multi_intent_query_response_compression():
+    """Verify that when multiple enrichments trigger, response is budgeted and does not exceed limit."""
+    db_mock = AsyncMock()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+    conversation = Conversation(
+        id=uuid4(),
+        farmer_id=farmer.id,
+        user_message="పత్తి మార్కెట్ ధర ఎంత మరియు వర్షం పడుతుందా?"
+    )
+
+    mock_ai_resp = AIGenerateResponse(
+        response_text="పత్తి సమాచారం.",
+        intent="multi_query",
+        confidence=0.9,
+        provider_used="gemini",
+    )
+
+    price_block = "📊 పత్తి మార్కెట్ ధరలు\nమండి: Warangal Mandi, Telangana\nమోడల్ ధర: ₹7,450/క్వింటాల్కు\nకనిష్ట: ₹7,100 | గరిష్ట: ₹7,650\nతేదీ: 19 Aug 2026\n\n📡 స్థానిక డేటాబేస్"
+    weather_block = "🌤️ వాతావరణ సూచన: Warangal\nప్రస్తుత ఉష్ణోగ్రత: 28°C\nవాతావరణం: Partly Cloudy\nతేమ: 65%\nగాలి వేగం: 10.0 km/h\n\n5-రోజుల సూచన:\n• 2026-08-26: Partly Cloudy (29°C)\n• 2026-08-27: Light Rain (27°C)"
+
+    with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_ai_resp), \
+         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp, *args, **kwargs: resp), \
+         patch("src.market.service.enrich_response_with_market_prices", return_value="పత్తి సమాచారం.\n\n" + price_block), \
+         patch("src.weather.service.enrich_response_with_weather", return_value="పత్తి సమాచారం.\n\n" + price_block + "\n\n" + weather_block):
+
+        result = await process_text_message(db_mock, farmer, conversation)
+        assert len(result) <= 1600
+        assert "📊 పత్తి మార్కెట్ ధరలు" in result
+        assert "🌤️ వాతావరణ సూచన" in result
+
+
+@pytest.mark.asyncio
+async def test_gemini_fallback_with_market_query():
+    """Verify that when Gemini is unavailable, fallback is handled gracefully and market prices are appended."""
+    from fastapi import HTTPException
+    from src.core.models import MarketPrice
+    from src.market.agmarknet_client import AgmarknetClient
+
+    db_mock = AsyncMock()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+    conversation = Conversation(id=uuid4(), farmer_id=farmer.id, user_message="పత్తి మార్కెట్ ధర ఎంత?")
+
+    mock_price = MarketPrice(
+        id=uuid4(),
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Warangal Mandi",
+        district="Warangal",
+        state="Telangana",
+        modal_price=7450.0,
+        min_price=7100.0,
+        max_price=7650.0,
+        price_date=datetime(2026, 8, 19),
+        unit="Quintal",
+        source="local_db",
+        created_at=datetime.utcnow(),
+    )
+
+    mock_count_res = MagicMock()
+    mock_count_res.scalar.return_value = 1
+    mock_scalars = MagicMock()
+    mock_scalars.all.return_value = [mock_price]
+    mock_query_res = MagicMock()
+    mock_query_res.scalars.return_value = mock_scalars
+    mock_profile_res = MagicMock()
+    mock_profile_res.scalar_one_or_none.return_value = None
+
+    db_mock.execute.side_effect = [mock_profile_res, mock_count_res, mock_query_res, mock_query_res, mock_query_res]
+
+    # AIService raises HTTPException 503
+    with patch("src.ai.service.AIService.generate_ai_response", side_effect=HTTPException(status_code=503)), \
+         patch.object(AgmarknetClient, "fetch_prices", new_callable=AsyncMock, return_value=[]):
+
+        result = await process_text_message(db_mock, farmer, conversation)
+        assert "📊 పత్తి మార్కెట్ ధరలు" in result
+        assert "Warangal Mandi" in result
+        assert "7,450" in result

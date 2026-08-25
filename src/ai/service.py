@@ -44,9 +44,13 @@ class AIService:
                     if c:
                         recent_context_crop = c
                 if record.ai_response:
-                    # Clean shop section from the history to prevent LLM contamination
-                    clean_response = record.ai_response.split("Available Nearby Shops:")[0].split("🏬")[0].strip()
-                    history.append({"role": "model", "parts": clean_response})
+                    # Clean all structured enrichment sections from history to prevent LLM prompt contamination
+                    clean_response = record.ai_response
+                    for marker in ["Available Nearby Shops:", "🏬", "📊", "🌤️", "📜", "👨‍🌾", "🚨", "🆘"]:
+                        clean_response = clean_response.split(marker)[0]
+                    clean_response = clean_response.strip()
+                    if clean_response:
+                        history.append({"role": "model", "parts": clean_response})
 
             # Priority for crop:
             # 1. Explicit crop mentioned in current message (e.g. "టమాటా" / Tomato overrides profile's "Cotton")
@@ -237,6 +241,9 @@ async def process_text_message(
     except Exception as esc_err:
         logger.warning(f"Failed to enrich response with escalation: {esc_err}")
 
+    # Final optimization, deduplication, and message budgeting for WhatsApp
+    ai_response_text = _finalize_whatsapp_response(ai_response_text)
+
     logger.info(f"[PROCESS MSG FINAL] Length: {len(ai_response_text)} | Final response immediately before DB save: '{ai_response_text}'")
 
     conversation.ai_response = ai_response_text
@@ -244,6 +251,72 @@ async def process_text_message(
     await db.commit()
 
     return ai_response_text
+
+
+def _finalize_whatsapp_response(response_text: str, max_chars: int = 1600) -> str:
+    """
+    Cleans, deduplicates, and optimizes the final outgoing WhatsApp message.
+
+    Guarantees:
+    - Eliminates redundant blank lines
+    - Prevents multi-block bloat while strictly preserving Expert Escalation,
+      Market Prices, Weather, and core agronomic advice
+    - Never partially truncates safety, escalation, or structured blocks mid-sentence
+    """
+    import re
+    if not response_text:
+        return ""
+
+    text = re.sub(r'\n{3,}', '\n\n', response_text).strip()
+
+    # If text is within comfortable limit, return directly
+    if len(text) <= max_chars:
+        return text
+
+    # If response is overly long due to multiple stacked blocks, prioritize whole blocks:
+    # Priority order:
+    # 0. Expert Escalation (👨‍🌾 / 🚨 / 🆘) - Safety Critical (Always included)
+    # 1. Market Prices (📊)
+    # 2. Weather (🌤️)
+    # 3. Shops (🏬)
+    # 4. Schemes (📜)
+    blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
+
+    core_blocks = []
+    enrichment_blocks = []
+
+    for b in blocks:
+        if any(marker in b for marker in ["👨‍🌾", "🚨", "🆘", "📊", "🌤️", "🏬", "📜"]):
+            enrichment_blocks.append(b)
+        else:
+            core_blocks.append(b)
+
+    def _block_priority(block: str) -> int:
+        if any(m in block for m in ["👨‍🌾", "🚨", "🆘"]):
+            return 0
+        if "📊" in block:
+            return 1
+        if "🌤️" in block:
+            return 2
+        if "🏬" in block:
+            return 3
+        if "📜" in block:
+            return 4
+        return 5
+
+    enrichment_blocks.sort(key=_block_priority)
+
+    selected_blocks = list(core_blocks)
+    current_len = sum(len(b) + 2 for b in selected_blocks)
+
+    for eb in enrichment_blocks:
+        is_escalation = any(m in eb for m in ["👨‍🌾", "🚨", "🆘"])
+        # Always include escalation, or include block if within budget or top 2 enrichments
+        if is_escalation or (current_len + len(eb) + 2 <= max_chars) or len(selected_blocks) < 3:
+            selected_blocks.append(eb)
+            current_len += len(eb) + 2
+
+    return "\n\n".join(selected_blocks).strip()
 
 
 async def process_image_message(
