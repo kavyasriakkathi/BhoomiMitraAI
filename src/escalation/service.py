@@ -152,7 +152,37 @@ def _find_recent_pending_ticket(history: List[Dict[str, Any]]) -> Optional[Dict[
             ticket_id = t.get("ticket_id", "")
             if today_prefix in ticket_id:
                 return t
-    return None
+_DEMO_EXPERT_PHONES = {
+    "+91 9848012345", "+91 9876543211", "+91 9701234568", "+91 9988776656",
+    "+91-98490-11223", "+91 9849011223", "9848012345", "9876543211", "9701234568", "9988776656"
+}
+_DEMO_EXPERT_NAMES = {
+    "Dr. K. Srinivas Rao", "Dr. Ananya Sharma", "Sri V. Mallikarjun", "Dr. P. Venkateswarlu"
+}
+
+
+def is_verified_expert(expert: Optional[Any], app_env: str = "development") -> bool:
+    """
+    Determines if an expert is a verified active contact safe to display to farmers.
+    In production mode, demo seed expert phone numbers are suppressed to prevent
+    exposing dummy contact data to real farmers.
+    """
+    if not expert or not getattr(expert, "phone_number", None):
+        return False
+
+    import re
+    phone_clean = re.sub(r'[\s\-+]', '', expert.phone_number)
+    name_clean = (getattr(expert, "name", "") or "").strip()
+
+    if name_clean in _DEMO_EXPERT_NAMES and app_env == "production":
+        return False
+
+    for dp in _DEMO_EXPERT_PHONES:
+        dp_clean = re.sub(r'[\s\-+]', '', dp)
+        if dp_clean and dp_clean in phone_clean and app_env == "production":
+            return False
+
+    return True
 
 
 class EscalationService:
@@ -365,9 +395,13 @@ async def enrich_response_with_escalation(
         if farmer_id:
             await repo.record_escalation_ticket(farmer_id, ticket_data)
 
-        # Step 6: Format Outbound Confirmation Block
+        # Step 6: Format Outbound Confirmation Block with Demo Isolation Guard
+        from src.config import get_settings
+        settings = get_settings()
+        is_verified = is_verified_expert(assigned_expert, app_env=settings.app_env)
+
         header = labels["header"].format(ticket_id=new_ticket_id)
-        status_text = labels["status_assigned"] if assigned_expert else labels["status_pending"]
+        status_text = labels["status_assigned"] if (assigned_expert and is_verified) else labels["status_pending"]
 
         lines = []
         if reason == "hazard":
@@ -383,7 +417,7 @@ async def enrich_response_with_escalation(
             f"{labels['status']}: {status_text}",
         ])
 
-        if assigned_expert:
+        if assigned_expert and is_verified:
             lines.append(f"{labels['specialist']}: {assigned_expert.name} ({assigned_expert.specialty})")
             if region_str:
                 lines.append(f"{labels['region']}: {region_str}")

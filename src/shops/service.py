@@ -345,6 +345,7 @@ _EN_LABELS = {
     "delivery":          "🚚 Delivery",
     "dist_fmt":          "{dist} km away",
     "dist_generic":      "Nearby",
+    "no_local_dealers":  "🏬 Nearby Agricultural Shops & Availability:\nℹ️ No licensed dealer is currently registered in your mandal/district for this product. Please check back soon as more local dealers are onboarded.",
     "all_out_of_stock":  "⚠️ Note: This product is currently out of stock across nearby registered shops. Please contact the dealers below for upcoming restock dates.",
     "footer_disclaimer": "ℹ️ Note: Prices and stock levels are subject to local dealer confirmation.",
     "more":              "Find all shops at: /shops",
@@ -365,6 +366,7 @@ _TE_LABELS = {
     "delivery":          "🚚 డెలివరీ",
     "dist_fmt":          "{dist} కి.మీ దూరం",
     "dist_generic":      "సమీపంలో",
+    "no_local_dealers":  "🏬 సమీప వ్యవసాయ దుకాణాలు & లభ్యత:\nℹ️ మీ మండలం/జిల్లాలో ఈ ఉత్పత్తికి సంబంధించి ప్రస్తుతం నమోదిత లైసెన్స్ డీలర్లు అందుబాటులో లేరు.",
     "all_out_of_stock":  "⚠️ గమనిక: ఈ ఉత్పత్తి ప్రస్తుతం సమీప నమోదిత దుకాణాలలో స్టాక్ అందుబాటులో లేదు. కొత్త స్టాక్ తేదీల కోసం దయచేసి క్రింది డీలర్లను సంప్రదించండి.",
     "footer_disclaimer": "ℹ️ గమనిక: ధరలు మరియు స్టాక్ వివరాలు స్థానిక డీలర్ నిర్ధారణకు లోబడి ఉంటాయి.",
     "more":              "మరిన్ని దుకాణాల కోసం: /shops",
@@ -534,7 +536,10 @@ async def enrich_response_with_shops(
         return ai_response
 
     # Step 5: Rank & Filter matches by location
+    max_radius_km = 50.0
+    has_farmer_location = (latitude is not None and longitude is not None) or (district is not None)
     scored_matches = []
+
     for shop, item in matches:
         dist: Optional[float] = None
         if (
@@ -551,14 +556,22 @@ async def enrich_response_with_shops(
             and district.lower() in shop.district.lower()
         )
 
-        # Priority Ranking:
-        # Rank 1: Precise GPS distance match
-        # Rank 2: District match (Query override or Profile district)
-        # Rank 3: Other active shops
-        if dist is not None:
-            rank = 1
-        elif district_match:
-            rank = 2
+        # Production Guard: If farmer location is known (GPS or District):
+        # A shop is ONLY valid if it is within safe radius (<= 50km) OR matches the farmer's district.
+        # Distant shops outside the district/radius must NEVER be returned as fallback.
+        if has_farmer_location:
+            is_valid_local = False
+            if dist is not None and dist <= max_radius_km:
+                is_valid_local = True
+                rank = 1
+            elif district_match:
+                is_valid_local = True
+                rank = 2
+            else:
+                is_valid_local = False
+
+            if not is_valid_local:
+                continue
         else:
             rank = 3
 
@@ -571,6 +584,13 @@ async def enrich_response_with_shops(
             dist if dist is not None else 99999.0,
         )
         scored_matches.append((sort_key, shop, item, dist))
+
+    if not scored_matches:
+        logger.info(
+            f"[ENRICH SHOPS] No local verified shops found within safe radius/district for product '{matched_product}' "
+            f"(district: {district}, coords: ({latitude}, {longitude}))."
+        )
+        return ai_response + "\n\n" + labels["no_local_dealers"]
 
     scored_matches.sort(key=lambda x: x[0])
     top = scored_matches[:3]

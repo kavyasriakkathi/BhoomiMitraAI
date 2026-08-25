@@ -412,3 +412,106 @@ def test_get_farmer_tickets_endpoint(mock_escalation_service):
     assert data["total_tickets"] == 1
     assert data["tickets"][0]["ticket_id"] == "ESC-20260820-1111"
 
+
+# ---------------------------------------------------------------------------
+# Pilot Readiness Regression Tests (Task B: Dummy Expert Contact Safety)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_production_demo_expert_only_no_demo_phone_shown():
+    """Regression Test 1: In production, demo expert dummy numbers are NEVER leaked to farmers."""
+    farmer = MagicMock(id=uuid4(), preferred_language="en")
+    db = AsyncMock()
+
+    demo_expert = _make_mock_expert(name="Dr. K. Srinivas Rao", phone="+91 9848012345")
+
+    with patch("src.config.get_settings") as mock_settings, \
+         patch.object(EscalationRepository, "seed_default_experts_if_empty", new_callable=AsyncMock), \
+         patch.object(EscalationRepository, "get_farmer_consultation_history", new_callable=AsyncMock, return_value=[]), \
+         patch.object(EscalationRepository, "get_active_experts", new_callable=AsyncMock, return_value=[demo_expert]), \
+         patch.object(EscalationRepository, "record_escalation_ticket", new_callable=AsyncMock, return_value=True):
+
+        mock_settings.return_value.app_env = "production"
+
+        res = await enrich_response_with_escalation(
+            db, "I need to talk to an agricultural officer immediately", "Base advice.", farmer
+        )
+
+    # Demo expert contact and name must NEVER appear in farmer response in production
+    assert "+91 9848012345" not in res
+    assert "Dr. K. Srinivas Rao" not in res
+    # Ticket is still logged, and official national Kisan Call Centre is provided
+    assert "ESC-" in res
+    assert "1800-180-1551" in res
+    assert "No local officer is currently on duty" in res
+
+
+@pytest.mark.asyncio
+async def test_production_verified_active_expert_shown():
+    """Regression Test 2: In production, a real verified pilot expert contact is properly displayed."""
+    farmer = MagicMock(id=uuid4(), preferred_language="en")
+    db = AsyncMock()
+
+    # Real pilot expert with authentic non-demo phone number
+    real_expert = _make_mock_expert(name="Dr. M. Suresh Kumar", specialty="Pest Control", phone="+91 9440123456")
+
+    with patch("src.config.get_settings") as mock_settings, \
+         patch.object(EscalationRepository, "seed_default_experts_if_empty", new_callable=AsyncMock), \
+         patch.object(EscalationRepository, "get_farmer_consultation_history", new_callable=AsyncMock, return_value=[]), \
+         patch.object(EscalationRepository, "get_active_experts", new_callable=AsyncMock, return_value=[real_expert]), \
+         patch.object(EscalationRepository, "record_escalation_ticket", new_callable=AsyncMock, return_value=True):
+
+        mock_settings.return_value.app_env = "production"
+
+        res = await enrich_response_with_escalation(
+            db, "Connect me to an officer", "Base advice.", farmer
+        )
+
+    assert "Dr. M. Suresh Kumar" in res
+    assert "+91 9440123456" in res
+    assert "Assigned to District Agriculture Officer" in res
+    assert "1800-180-1551" in res
+
+
+@pytest.mark.asyncio
+async def test_no_active_expert_kisan_call_centre_fallback_regression():
+    """Regression Test 3: When no expert is available at all, Kisan Call Centre is safely provided."""
+    farmer = MagicMock(id=uuid4(), preferred_language="te")
+    db = AsyncMock()
+
+    with patch.object(EscalationRepository, "seed_default_experts_if_empty", new_callable=AsyncMock), \
+         patch.object(EscalationRepository, "get_farmer_consultation_history", new_callable=AsyncMock, return_value=[]), \
+         patch.object(EscalationRepository, "get_active_experts", new_callable=AsyncMock, return_value=[]), \
+         patch.object(EscalationRepository, "record_escalation_ticket", new_callable=AsyncMock, return_value=True):
+
+        res = await enrich_response_with_escalation(
+            db, "వ్యవసాయ అధికారితో మాట్లాడాలి", "సలహా.", farmer
+        )
+
+    assert "ప్రస్తుతం స్థానిక అధికారి అందుబాటులో లేరు" in res
+    assert "1800-180-1551" in res
+    assert "ESC-" in res
+
+
+@pytest.mark.asyncio
+async def test_local_development_expert_behavior_regression():
+    """Regression Test 4: In development/test mode, mock active experts render properly for testing."""
+    farmer = MagicMock(id=uuid4(), preferred_language="en")
+    db = AsyncMock()
+
+    mock_expert = _make_mock_expert(name="Test Expert", phone="+91 9999988888")
+
+    with patch("src.config.get_settings") as mock_settings, \
+         patch.object(EscalationRepository, "seed_default_experts_if_empty", new_callable=AsyncMock), \
+         patch.object(EscalationRepository, "get_farmer_consultation_history", new_callable=AsyncMock, return_value=[]), \
+         patch.object(EscalationRepository, "get_active_experts", new_callable=AsyncMock, return_value=[mock_expert]), \
+         patch.object(EscalationRepository, "record_escalation_ticket", new_callable=AsyncMock, return_value=True):
+
+        mock_settings.return_value.app_env = "development"
+
+        res = await enrich_response_with_escalation(
+            db, "I need an expert", "Base response.", farmer
+        )
+
+    assert "Test Expert" in res
+    assert "+91 9999988888" in res

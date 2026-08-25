@@ -299,24 +299,24 @@ async def test_enrich_shops_gps_location_sorting():
     db = _mock_db_with_farmer_location(memory_gps={"latitude": 17.9689, "longitude": 79.5941})
 
     close_shop = _make_mock_shop(name="Warangal Agri Centre", lat=17.9700, lon=79.5950, district="Warangal")
-    far_shop = _make_mock_shop(name="Guntur Agro Traders", lat=16.3067, lon=80.4365, district="Guntur")
+    farther_local_shop = _make_mock_shop(name="Kazipet Agro Traders", lat=17.9850, lon=79.5300, district="Warangal")
     item = _make_mock_item()
 
     with patch.object(ShopRepository, "seed_default_shops_if_empty", new_callable=AsyncMock), \
-         patch.object(ShopRepository, "search_shops_by_product", new_callable=AsyncMock, return_value=[(far_shop, item), (close_shop, item)]):
+         patch.object(ShopRepository, "search_shops_by_product", new_callable=AsyncMock, return_value=[(farther_local_shop, item), (close_shop, item)]):
 
         res = await enrich_response_with_shops(db, "Where can I buy urea?", "Here is your answer.", farmer)
 
     assert "Warangal Agri Centre" in res
-    assert "Guntur Agro Traders" in res
-    # Closest shop should appear before the far shop
-    assert res.find("Warangal Agri Centre") < res.find("Guntur Agro Traders")
+    assert "Kazipet Agro Traders" in res
+    # Closest shop should appear before the farther local shop
+    assert res.find("Warangal Agri Centre") < res.find("Kazipet Agro Traders")
     assert "km away" in res
 
 
 @pytest.mark.asyncio
 async def test_enrich_shops_farmer_profile_district_fallback():
-    """Shops enrichment prioritizes matching district from FarmerProfile when GPS is absent."""
+    """Shops enrichment prioritizes matching district from FarmerProfile and excludes distant districts."""
     farmer = MagicMock(id=uuid4(), preferred_language="en")
     db = _mock_db_with_farmer_location(profile_district="Guntur", profile_state="Andhra Pradesh")
 
@@ -330,7 +330,8 @@ async def test_enrich_shops_farmer_profile_district_fallback():
         res = await enrich_response_with_shops(db, "Where can I buy urea?", "Advice.", farmer)
 
     assert "Sri Lakshmi Agro Guntur" in res
-    assert res.find("Sri Lakshmi Agro Guntur") < res.find("Rythu Mithra Khammam")
+    # Distant Khammam shop is safely excluded from Guntur farmer
+    assert "Rythu Mithra Khammam" not in res
 
 
 @pytest.mark.asyncio
@@ -435,8 +436,8 @@ async def test_enrich_shops_query_district_override():
         res = await enrich_response_with_shops(db, "Where can I buy urea in Karimnagar?", "Farming advice.", farmer)
 
     assert "Balaji Fertilizers Karimnagar" in res
-    # Karimnagar shop should be ranked before Guntur shop due to query override
-    assert res.find("Balaji Fertilizers Karimnagar") < res.find("Sri Lakshmi Agro Guntur")
+    # Karimnagar shop is returned, and Guntur shop is excluded due to query override
+    assert "Sri Lakshmi Agro Guntur" not in res
 
 
 @pytest.mark.asyncio
@@ -479,3 +480,98 @@ async def test_enrich_shops_all_out_of_stock_telugu():
     assert "ధరలు మరియు స్టాక్ వివరాలు స్థానిక డీలర్ నిర్ధారణకు లోబడి ఉంటాయి" in res
 
 
+# ---------------------------------------------------------------------------
+# Pilot Readiness Regression Tests (Task A: Out-of-District Fallback Guard)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_local_verified_shop_found_within_radius():
+    """Regression Test 1: Local verified shop within safe radius is formatted with distance."""
+    farmer = MagicMock(id=uuid4(), preferred_language="en")
+    db = _mock_db_with_farmer_location(memory_gps={"latitude": 17.9689, "longitude": 79.5941})
+
+    local_shop = _make_mock_shop(name="Warangal Rythu Seva", lat=17.9750, lon=79.6000, district="Warangal")
+    item = _make_mock_item(name="DAP", price=1350.0)
+
+    with patch.object(ShopRepository, "seed_default_shops_if_empty", new_callable=AsyncMock), \
+         patch.object(ShopRepository, "search_shops_by_product", new_callable=AsyncMock, return_value=[(local_shop, item)]):
+
+        res = await enrich_response_with_shops(db, "Where to buy DAP?", "Advice.", farmer)
+
+    assert "Warangal Rythu Seva" in res
+    assert "km away" in res
+    assert "DAP" in res
+
+
+@pytest.mark.asyncio
+async def test_no_local_shop_safe_no_dealer_response_english():
+    """Regression Test 2: When no dealer exists in farmer district, return safe no-dealer message in English."""
+    farmer = MagicMock(id=uuid4(), preferred_language="en")
+    db = _mock_db_with_farmer_location(profile_district="Adilabad")
+
+    guntur_shop = _make_mock_shop(name="Guntur Agro Center", district="Guntur", lat=16.3067, lon=80.4365)
+    item = _make_mock_item(name="Urea")
+
+    with patch.object(ShopRepository, "seed_default_shops_if_empty", new_callable=AsyncMock), \
+         patch.object(ShopRepository, "search_shops_by_product", new_callable=AsyncMock, return_value=[(guntur_shop, item)]):
+
+        res = await enrich_response_with_shops(db, "Where to buy urea in Adilabad?", "Advice.", farmer)
+
+    assert "No licensed dealer is currently registered in your mandal/district" in res
+    assert "Guntur Agro Center" not in res
+
+
+@pytest.mark.asyncio
+async def test_no_local_shop_safe_no_dealer_response_telugu():
+    """Regression Test 2 (Telugu): Safe no-dealer message rendered cleanly in Telugu."""
+    farmer = MagicMock(id=uuid4(), preferred_language="te")
+    db = _mock_db_with_farmer_location(profile_district="Nizamabad")
+
+    guntur_shop = _make_mock_shop(name="Guntur Agro Center", district="Guntur", lat=16.3067, lon=80.4365)
+    item = _make_mock_item(name="యూరియా")
+
+    with patch.object(ShopRepository, "seed_default_shops_if_empty", new_callable=AsyncMock), \
+         patch.object(ShopRepository, "search_shops_by_product", new_callable=AsyncMock, return_value=[(guntur_shop, item)]):
+
+        res = await enrich_response_with_shops(db, "యూరియా ఎక్కడ దొరుకుతుంది?", "సలహా.", farmer)
+
+    assert "మీ మండలం/జిల్లాలో ఈ ఉత్పత్తికి సంబంధించి ప్రస్తుతం నమోదిత లైసెన్స్ డీలర్లు అందుబాటులో లేరు" in res
+    assert "Guntur Agro Center" not in res
+
+
+@pytest.mark.asyncio
+async def test_distant_seeded_shop_not_shown_as_fallback():
+    """Regression Test 3: Distant seeded shop (>50km away in another district) is NEVER shown as fallback."""
+    farmer = MagicMock(id=uuid4(), preferred_language="en")
+    # Farmer in Warangal (GPS: 17.9689, 79.5941)
+    db = _mock_db_with_farmer_location(memory_gps={"latitude": 17.9689, "longitude": 79.5941}, profile_district="Warangal")
+
+    distant_shop = _make_mock_shop(name="Distant Vijayawada Agro", district="Krishna", lat=16.5062, lon=80.6480)
+    item = _make_mock_item(name="Mancozeb")
+
+    with patch.object(ShopRepository, "seed_default_shops_if_empty", new_callable=AsyncMock), \
+         patch.object(ShopRepository, "search_shops_by_product", new_callable=AsyncMock, return_value=[(distant_shop, item)]):
+
+        res = await enrich_response_with_shops(db, "Where can I get mancozeb?", "Crop protection advice.", farmer)
+
+    assert "Distant Vijayawada Agro" not in res
+    assert "No licensed dealer is currently registered in your mandal/district" in res
+
+
+@pytest.mark.asyncio
+async def test_explicit_district_query_overrides_stored_location_regression():
+    """Regression Test 4: Explicit district query overrides stored profile and matches the requested district."""
+    farmer = MagicMock(id=uuid4(), preferred_language="en")
+    # Farmer stored in Warangal
+    db = _mock_db_with_farmer_location(profile_district="Warangal")
+
+    khammam_shop = _make_mock_shop(name="Khammam Rythu Seva", district="Khammam", lat=17.2473, lon=80.1514)
+    item = _make_mock_item(name="Urea")
+
+    with patch.object(ShopRepository, "seed_default_shops_if_empty", new_callable=AsyncMock), \
+         patch.object(ShopRepository, "search_shops_by_product", new_callable=AsyncMock, return_value=[(khammam_shop, item)]):
+
+        # Farmer explicitly asks for Khammam
+        res = await enrich_response_with_shops(db, "Find shops in Khammam selling urea", "Advice.", farmer)
+
+    assert "Khammam Rythu Seva" in res
