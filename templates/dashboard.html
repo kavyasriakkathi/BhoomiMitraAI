@@ -35,6 +35,9 @@
         <button class="role-btn" id="btn-role-rag" onclick="switchDashboardRole('rag')">
           <span id="ui-role-rag">📚 Admin RAG</span>
         </button>
+        <button class="role-btn" id="btn-role-analytics" onclick="switchDashboardRole('analytics')">
+          <span id="ui-role-analytics">📊 Pilot Analytics</span>
+        </button>
       </div>
 
       <!-- Auth Controls (Login / User Profile / Logout) -->
@@ -737,6 +740,76 @@
 
     </div>
 
+    <!-- ==================================================================== -->
+    <!-- 5. PILOT ANALYTICS DASHBOARD VIEW (Admin Only)                       -->
+    <!-- ==================================================================== -->
+    <div id="view-analytics" class="dashboard-view" style="display: none;">
+      <div class="view-header">
+        <div>
+          <h2 class="view-title">📊 Startup Pilot Telemetry & Analytics</h2>
+          <p class="view-subtitle">Real-time operational metrics, DAU/WAU, modality adoption, and WhatsApp delivery health.</p>
+        </div>
+        <div class="view-actions">
+          <button class="btn btn-secondary btn-sm" onclick="loadPilotAnalytics()">🔄 Refresh Metrics</button>
+        </div>
+      </div>
+
+      <!-- Top KPI Stats Grid -->
+      <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 1.5rem;">
+        <div class="stat-card">
+          <div class="stat-icon">👨‍🌾</div>
+          <div class="stat-value" id="stat-analytics-farmers">0</div>
+          <div class="stat-label">Total Registered Farmers</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">⚡</div>
+          <div class="stat-value" id="stat-analytics-dau">0</div>
+          <div class="stat-label">DAU (Past 24h) / WAU: <span id="stat-analytics-wau">0</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">💬</div>
+          <div class="stat-value" id="stat-analytics-messages-today">0</div>
+          <div class="stat-label">Messages Today (All-Time: <span id="stat-analytics-total-msgs">0</span>)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🌐</div>
+          <div class="stat-value" id="stat-analytics-te-ratio">0%</div>
+          <div class="stat-label">Telugu Usage (<span id="stat-analytics-te-count">0</span> TE / <span id="stat-analytics-en-count">0</span> EN)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🎙️</div>
+          <div class="stat-value" id="stat-analytics-audio-ratio">0%</div>
+          <div class="stat-label">Voice Note Usage (<span id="stat-analytics-audio-cnt">0</span> Audio / <span id="stat-analytics-text-cnt">0</span> Text)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">👨‍⚕️</div>
+          <div class="stat-value" id="stat-analytics-escalation-total">0</div>
+          <div class="stat-label">Escalations (<span id="stat-analytics-escalation-pending" style="color: var(--accent-gold);">0</span> Pending / <span id="stat-analytics-escalation-resolved" style="color: var(--accent-green);">0</span> Resolved)</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📡</div>
+          <div class="stat-value" id="stat-analytics-delivery-rate">100%</div>
+          <div class="stat-label">WhatsApp Delivery (<span id="stat-analytics-delivery-sent">0</span> Sent / <span id="stat-analytics-delivery-failed" style="color: var(--danger-color);">0</span> Failed)</div>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="grid-2" style="gap: 1.5rem; margin-bottom: 1.5rem;">
+        <div class="card">
+          <div class="card-title">📈 7-Day Active Farmers & Message Volume</div>
+          <div style="position: relative; height: 280px;">
+            <canvas id="chart-pilot-activity"></canvas>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title">🍩 Modality & Language Breakdown</div>
+          <div style="position: relative; height: 280px;">
+            <canvas id="chart-pilot-modality"></canvas>
+          </div>
+        </div>
+      </div>
+
+    </div>
 
   </main>
 

@@ -319,6 +319,12 @@ function switchDashboardRole(role) {
       showAuthAlert("Platform Administrator privileges are required to access the Knowledge Center.", true);
       return;
     }
+  } else if (role === 'analytics') {
+    if (!currentUser || currentUser.role !== 'admin') {
+      openAuthModal('login');
+      showAuthAlert("Platform Administrator privileges are required to access Pilot Analytics.", true);
+      return;
+    }
   }
 
   currentRole = role;
@@ -363,6 +369,15 @@ function switchDashboardRole(role) {
       ragView.style.display = 'block';
     }
     loadRagDocuments();
+  } else if (role === 'analytics') {
+    const analyticsBtn = document.getElementById('btn-role-analytics');
+    if (analyticsBtn) analyticsBtn.classList.add('active');
+    const analyticsView = document.getElementById('view-analytics');
+    if (analyticsView) {
+      analyticsView.classList.add('active');
+      analyticsView.style.display = 'block';
+    }
+    loadPilotAnalytics();
   }
 }
 
@@ -1701,3 +1716,137 @@ async function updateDashboardTicketStatus(ticketId, newStatus) {
 }
 
 
+// =====================================================================
+// PILOT ANALYTICS DASHBOARD
+// =====================================================================
+
+let pilotActivityChart = null;
+let pilotModalityChart = null;
+
+async function loadPilotAnalytics() {
+  try {
+    const summaryRes = await fetch('/analytics/summary', { credentials: 'include' });
+    const activityRes = await fetch('/analytics/activity?days=7', { credentials: 'include' });
+
+    if (!summaryRes.ok) {
+      console.warn("Could not load analytics summary", summaryRes.status);
+      return;
+    }
+
+    const summary = await summaryRes.json();
+
+    // Update KPI Card DOM elements
+    const setVal = (id, val) => {
+      const el = document.getElementById(id);
+      if (el) el.innerText = val;
+    };
+
+    setVal('stat-analytics-farmers', summary.total_farmers || 0);
+    setVal('stat-analytics-dau', summary.dau || 0);
+    setVal('stat-analytics-wau', summary.wau || 0);
+    setVal('stat-analytics-messages-today', summary.messages_today || 0);
+    setVal('stat-analytics-total-msgs', summary.total_messages || 0);
+
+    const teCount = (summary.languages && summary.languages.telugu) || 0;
+    const enCount = (summary.languages && summary.languages.english) || 0;
+    const totalLang = teCount + enCount + ((summary.languages && summary.languages.other) || 0);
+    const teRatio = totalLang > 0 ? Math.round((teCount / totalLang) * 100) : 0;
+    setVal('stat-analytics-te-ratio', `${teRatio}%`);
+    setVal('stat-analytics-te-count', teCount);
+    setVal('stat-analytics-en-count', enCount);
+
+    const audioCnt = (summary.modality && summary.modality.audio) || 0;
+    const textCnt = (summary.modality && summary.modality.text) || 0;
+    const imgCnt = (summary.modality && summary.modality.image) || 0;
+    const totalMod = audioCnt + textCnt + imgCnt;
+    const audioRatio = totalMod > 0 ? Math.round((audioCnt / totalMod) * 100) : 0;
+    setVal('stat-analytics-audio-ratio', `${audioRatio}%`);
+    setVal('stat-analytics-audio-cnt', audioCnt);
+    setVal('stat-analytics-text-cnt', textCnt);
+
+    const escTotal = (summary.escalation && summary.escalation.total) || 0;
+    const escPending = (summary.escalation && summary.escalation.pending) || 0;
+    const escResolved = (summary.escalation && summary.escalation.resolved) || 0;
+    setVal('stat-analytics-escalation-total', escTotal);
+    setVal('stat-analytics-escalation-pending', escPending);
+    setVal('stat-analytics-escalation-resolved', escResolved);
+
+    const delSuccessRate = (summary.delivery && summary.delivery.success_rate_pct) ?? 100;
+    const delSent = (summary.delivery && summary.delivery.sent) || 0;
+    const delFailed = (summary.delivery && summary.delivery.failed) || 0;
+    setVal('stat-analytics-delivery-rate', `${delSuccessRate}%`);
+    setVal('stat-analytics-delivery-sent', delSent);
+    setVal('stat-analytics-delivery-failed', delFailed);
+
+    // Render Charts
+    if (activityRes.ok && typeof Chart !== 'undefined') {
+      const activityData = await activityRes.json();
+      renderPilotCharts(activityData.activity || [], summary);
+    }
+  } catch (err) {
+    console.error("Failed to load pilot analytics:", err);
+  }
+}
+
+function renderPilotCharts(activityList, summary) {
+  const dates = activityList.map(a => a.date ? a.date.slice(5) : '');
+  const activeFarmers = activityList.map(a => a.active_farmers || 0);
+  const msgCounts = activityList.map(a => a.message_count || 0);
+
+  const actCanvas = document.getElementById('chart-pilot-activity');
+  if (actCanvas) {
+    if (pilotActivityChart) pilotActivityChart.destroy();
+    pilotActivityChart = new Chart(actCanvas, {
+      type: 'bar',
+      data: {
+        labels: dates,
+        datasets: [
+          {
+            label: 'Total Messages',
+            data: msgCounts,
+            backgroundColor: 'rgba(52, 211, 153, 0.7)',
+            borderColor: '#10B981',
+            borderWidth: 1,
+          },
+          {
+            label: 'Active Farmers',
+            data: activeFarmers,
+            backgroundColor: 'rgba(59, 130, 246, 0.7)',
+            borderColor: '#3B82F6',
+            borderWidth: 1,
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          y: { beginAtZero: true, ticks: { precision: 0 } }
+        }
+      }
+    });
+  }
+
+  const modCanvas = document.getElementById('chart-pilot-modality');
+  if (modCanvas) {
+    if (pilotModalityChart) pilotModalityChart.destroy();
+    const textCnt = (summary.modality && summary.modality.text) || 0;
+    const audioCnt = (summary.modality && summary.modality.audio) || 0;
+    const imgCnt = (summary.modality && summary.modality.image) || 0;
+
+    pilotModalityChart = new Chart(modCanvas, {
+      type: 'doughnut',
+      data: {
+        labels: ['Text Messages', 'Voice Audio (Telugu STT)', 'Camera Leaf Scans'],
+        datasets: [{
+          data: [textCnt, audioCnt, imgCnt],
+          backgroundColor: ['#3B82F6', '#10B981', '#F59E0B'],
+        }]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+      }
+    });
+  }
+}
