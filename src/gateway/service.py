@@ -9,6 +9,7 @@ and orchestrating the full pipeline (STT -> AI -> Outbound).
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from src.core.models import Farmer, FarmerProfile, Conversation
 from src.core.database import AsyncSessionLocal
 from src.gateway.schemas import ParsedIncomingMessage
@@ -26,6 +27,7 @@ async def get_or_create_farmer(
     Find an existing farmer by phone number, or create a new one.
     This is the implicit registration step — the first WhatsApp message
     from a farmer automatically creates their account.
+    Handles concurrent inserts gracefully via IntegrityError rollback.
     """
     result = await db.execute(
         select(Farmer).where(Farmer.phone_number == phone_number)
@@ -39,18 +41,29 @@ async def get_or_create_farmer(
     # New farmer — create Farmer + empty Profile
     farmer = Farmer(phone_number=phone_number)
     db.add(farmer)
-    await db.flush()  # Populate farmer.id before creating profile
+    try:
+        await db.commit()
+        await db.refresh(farmer)
 
-    profile = FarmerProfile(
-        farmer_id=farmer.id,
-        full_name=sender_name,
-    )
-    db.add(profile)
-    await db.commit()
-    await db.refresh(farmer)
+        profile = FarmerProfile(
+            farmer_id=farmer.id,
+            full_name=sender_name,
+        )
+        db.add(profile)
+        await db.commit()
 
-    logger.info(f"New farmer registered: {farmer.id} ({phone_number})")
-    return farmer
+        logger.info(f"New farmer registered: {farmer.id} ({phone_number})")
+        return farmer
+    except IntegrityError:
+        await db.rollback()
+        # Concurrent insert occurred, re-query the newly created farmer
+        res = await db.execute(
+            select(Farmer).where(Farmer.phone_number == phone_number)
+        )
+        existing_farmer = res.scalar_one_or_none()
+        if existing_farmer:
+            return existing_farmer
+        raise
 
 
 async def is_duplicate_message(db: AsyncSession, message_id: str) -> bool:
@@ -68,27 +81,39 @@ async def store_incoming_message(
     db: AsyncSession,
     farmer: Farmer,
     message: ParsedIncomingMessage,
-) -> Conversation:
+) -> Optional[Conversation]:
     """
     Persist an incoming farmer message to the conversations table.
     AI response fields are left NULL — they will be populated later
     when the AI processing pipeline runs.
+
+    If an IntegrityError occurs due to duplicate message_id unique constraint,
+    safely rolls back the transaction and returns None.
     """
+    farmer_id = getattr(farmer, "id", None)
     conversation = Conversation(
-        farmer_id=farmer.id,
+        farmer_id=farmer_id,
         message_id=message.message_id,
         user_message=message.text_content,
         user_message_type=message.message_type,
     )
     db.add(conversation)
-    await db.commit()
-    await db.refresh(conversation)
+    try:
+        await db.commit()
+        await db.refresh(conversation)
 
-    logger.info(
-        f"Stored message {message.message_id} from farmer {farmer.id} "
-        f"(type={message.message_type})"
-    )
-    return conversation
+        logger.info(
+            f"Stored message {message.message_id} from farmer {farmer_id} "
+            f"(type={message.message_type})"
+        )
+        return conversation
+    except IntegrityError as ie:
+        await db.rollback()
+        logger.warning(
+            f"IntegrityError: Duplicate message_id '{message.message_id}' "
+            f"already stored in database for farmer {farmer_id}. Rollback executed. Detail: {ie}"
+        )
+        return None
 
 
 async def process_message_pipeline(
@@ -153,9 +178,16 @@ async def process_message_pipeline(
             conversation = None
             try:
                 conversation = await store_incoming_message(db, farmer, parsed)
+                if conversation is None:
+                    logger.warning(
+                        f"STAGE 4: Duplicate message ID {parsed.message_id} detected during insert. "
+                        f"Skipping pipeline early."
+                    )
+                    return
                 logger.info(f"STAGE 4: Conversation stored successfully. Conversation ID = {conversation.id}")
             except Exception as db_conv_err:
                 logger.exception(f"[PIPELINE STAGE FAILED: Stage 4 - Conversation Storage] Farmer ID: {farmer.id}, Error: {db_conv_err}")
+                return
 
             # ── STAGE 5: AI Processing (Gemini) ───────────────────────
             logger.info("STAGE 5: Generating AI response")
