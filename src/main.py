@@ -4,7 +4,7 @@ KrishiMitra AI — Application Entry Point
 FastAPI application factory with health check and module registration.
 """
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response, status
 from src.config import get_settings
 from src.core.logging import logger
 from src.core.exceptions import (
@@ -90,14 +90,49 @@ def create_app() -> FastAPI:
 
     # ---- Health Check ----
     @app.get("/health", tags=["System"])
-    async def health_check():
-        logger.info("Health check endpoint called")
+    async def health_check(response: Response):
+        """
+        Active dependency health check endpoint for production monitoring and Render auto-healing.
+        Actively verifies PostgreSQL (SELECT 1) and Redis (PING).
+        """
+        db_status = "ok"
+        redis_status = "ok"
+
+        # 1. Active PostgreSQL verification
+        try:
+            from src.core.database import AsyncSessionLocal
+            from sqlalchemy import text
+            async with AsyncSessionLocal() as session:
+                await session.execute(text("SELECT 1"))
+        except Exception as db_err:
+            logger.warning(f"[HEALTH CHECK] PostgreSQL check failed: {db_err}")
+            db_status = "error"
+
+        # 2. Active Redis verification
+        try:
+            import redis.asyncio as aioredis
+            r = aioredis.from_url(settings.redis_url, socket_connect_timeout=1.5, socket_timeout=1.5)
+            await r.ping()
+            await r.aclose()
+        except Exception as redis_err:
+            logger.debug(f"[HEALTH CHECK] Redis check failed: {redis_err}")
+            redis_status = "error"
+
+        # 3. Compute overall status and HTTP code
+        if db_status == "error":
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            overall_status = "unhealthy"
+        elif redis_status == "error":
+            response.status_code = status.HTTP_200_OK
+            overall_status = "degraded"
+        else:
+            response.status_code = status.HTTP_200_OK
+            overall_status = "healthy"
+
         return {
-            "success": True,
-            "data": {
-                "status": "healthy",
-                "service": "bhoomimitra-ai"
-            }
+            "status": overall_status,
+            "database": db_status,
+            "redis": redis_status,
         }
 
     # ---- Static Files & Web Dashboard Router ----

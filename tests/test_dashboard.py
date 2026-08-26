@@ -28,9 +28,9 @@ async def test_health_check_endpoint():
         response = await client.get("/health")
         assert response.status_code == 200
         data = response.json()
-        assert data["success"] is True
-        assert data["data"]["status"] == "healthy"
-        assert data["data"]["service"] == "bhoomimitra-ai"
+        assert data["status"] in ["healthy", "degraded"]
+        assert data["database"] == "ok"
+        assert "redis" in data
 
 @pytest.mark.asyncio
 async def test_data_deletion_get_and_head_methods():

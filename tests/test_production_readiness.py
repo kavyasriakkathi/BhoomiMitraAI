@@ -30,16 +30,60 @@ def admin_token():
 
 
 @pytest.mark.asyncio
-async def test_health_check_endpoint():
-    """Verify health check endpoint returns 200 with service status."""
+async def test_health_check_healthy_when_all_dependencies_ok():
+    """Verify health check returns HTTP 200 with 'healthy', database: 'ok', redis: 'ok'."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        with patch("redis.asyncio.from_url") as mock_redis:
+            mock_instance = AsyncMock()
+            mock_instance.ping.return_value = True
+            mock_redis.return_value = mock_instance
+
+            resp = await client.get("/health")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "healthy"
+            assert data["database"] == "ok"
+            assert data["redis"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_health_check_db_unavailable_returns_503():
+    """When PostgreSQL is unavailable, /health returns HTTP 503 with status: 'unhealthy'."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        with patch("src.core.database.AsyncSessionLocal", side_effect=Exception("Database Connection Timeout")):
+            resp = await client.get("/health")
+            assert resp.status_code == 503
+            data = resp.json()
+            assert data["status"] == "unhealthy"
+            assert data["database"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_health_check_redis_unavailable_returns_200_degraded():
+    """When Redis is unavailable but DB is healthy, /health returns HTTP 200 with status: 'degraded'."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        with patch("redis.asyncio.from_url", side_effect=Exception("Redis Connection Refused")):
+            resp = await client.get("/health")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["status"] == "degraded"
+            assert data["database"] == "ok"
+            assert data["redis"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_health_check_no_secrets_leaked():
+    """Ensure response does not leak credentials, URLs, or connection strings."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/health")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert data["data"]["status"] == "healthy"
-        assert data["data"]["service"] == "bhoomimitra-ai"
+        resp_text = resp.text.lower()
+        forbidden_terms = ["password", "secret", "token", "postgres://", "redis://", "key", "bearer"]
+        for term in forbidden_terms:
+            assert term not in resp_text
 
 
 @pytest.mark.asyncio
