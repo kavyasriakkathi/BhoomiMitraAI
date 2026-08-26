@@ -122,6 +122,18 @@ def create_app() -> FastAPI:
         if db_status == "error":
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
             overall_status = "unhealthy"
+            try:
+                from src.core.alerting import dispatch_founder_alert, AlertCategory, AlertSeverity
+                import asyncio
+                asyncio.create_task(dispatch_founder_alert(
+                    category=AlertCategory.DATABASE_DOWN,
+                    severity=AlertSeverity.CRITICAL,
+                    component="postgresql",
+                    summary="PostgreSQL health check failed (SELECT 1 query error / connection refused).",
+                    recommended_action="Inspect PostgreSQL instance on Render/Neon and verify DATABASE_URL credentials.",
+                ))
+            except Exception as alert_err:
+                logger.debug(f"Founder alert dispatch skipped: {alert_err}")
         elif redis_status == "error":
             response.status_code = status.HTTP_200_OK
             overall_status = "degraded"

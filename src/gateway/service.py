@@ -249,6 +249,32 @@ async def process_message_pipeline(
                     db.add(conversation)
                     await db.commit()
                     logger.info(f"STAGE 7: Delivery status set to '{conversation.delivery_status}'")
+
+                    if not outbound_id:
+                        try:
+                            from sqlalchemy import select
+                            from src.core.models import Conversation
+                            recent_statuses = (await db.execute(
+                                select(Conversation.delivery_status)
+                                .order_by(Conversation.created_at.desc())
+                                .limit(20)
+                            )).scalars().all()
+                            if recent_statuses:
+                                total_cnt = len(recent_statuses)
+                                failed_cnt = sum(1 for s in recent_statuses if s == "failed")
+                                if total_cnt >= 5 and (failed_cnt / total_cnt) > 0.10:
+                                    from src.core.alerting import dispatch_founder_alert, AlertCategory, AlertSeverity
+                                    import asyncio
+                                    asyncio.create_task(dispatch_founder_alert(
+                                        category=AlertCategory.HIGH_DELIVERY_FAILURE,
+                                        severity=AlertSeverity.WARNING,
+                                        component="whatsapp_gateway",
+                                        summary=f"WhatsApp outbound failure rate is {int((failed_cnt/total_cnt)*100)}% ({failed_cnt}/{total_cnt} recent messages failed).",
+                                        recommended_action="Inspect Meta Business Manager account quality status and verify active billing.",
+                                        details={"failed_count": failed_cnt, "total_recent": total_cnt}
+                                    ))
+                        except Exception as alert_check_err:
+                            logger.debug(f"Delivery rate alert check skipped: {alert_check_err}")
                 except Exception as db_status_err:
                     logger.exception(f"[PIPELINE STAGE FAILED: Stage 7 - DB Status Update] Conversation ID: {conversation.id}, Error: {db_status_err}")
 

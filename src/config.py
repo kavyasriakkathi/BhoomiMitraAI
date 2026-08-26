@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     razorpay_key_secret: str = Field(default="rzp_test_bhoomimitra_mock_secret")
     razorpay_webhook_secret: str = Field(default="rzp_webhook_secret_mock_2026")
 
+    # Founder Critical Alerting
+    founder_alert_webhook_url: str = Field(default="")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

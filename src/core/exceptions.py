@@ -25,6 +25,20 @@ async def bhoomimitra_exception_handler(request: Request, exc: BhoomiMitraExcept
 async def global_exception_handler(request: Request, exc: Exception):
     """Handle unexpected server errors."""
     logger.exception(f"Unhandled Server Error on path {request.url.path}: {exc}")
+    try:
+        from src.core.alerting import dispatch_founder_alert, AlertCategory, AlertSeverity
+        import asyncio
+        asyncio.create_task(dispatch_founder_alert(
+            category=AlertCategory.UNHANDLED_EXCEPTION,
+            severity=AlertSeverity.CRITICAL,
+            component="fastapi_core",
+            summary=f"Unhandled 500 error on {request.method} {request.url.path}: {type(exc).__name__}",
+            recommended_action="Inspect Render error traceback logs and address unhandled edge case.",
+            details={"path": request.url.path, "exception_type": type(exc).__name__}
+        ))
+    except Exception as alert_err:
+        logger.debug(f"Founder alert dispatch skipped: {alert_err}")
+
     return JSONResponse(
         status_code=500,
         content={

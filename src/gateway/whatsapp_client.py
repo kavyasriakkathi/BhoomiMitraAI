@@ -103,6 +103,19 @@ async def send_text_message(
                     f"The Meta WHATSAPP_API_TOKEN is invalid or expired.\n"
                     f"Meta Response: {response.text}"
                 )
+                try:
+                    from src.core.alerting import dispatch_founder_alert, AlertCategory, AlertSeverity
+                    import asyncio
+                    asyncio.create_task(dispatch_founder_alert(
+                        category=AlertCategory.AUTH_FAILURE,
+                        severity=AlertSeverity.CRITICAL,
+                        component="whatsapp_gateway",
+                        summary="Meta WHATSAPP_API_TOKEN rejected with HTTP 401 Unauthorized.",
+                        recommended_action="Update WHATSAPP_API_TOKEN in Render environment variables immediately.",
+                        details={"status_code": 401}
+                    ))
+                except Exception as alert_err:
+                    logger.debug(f"Founder alert dispatch skipped: {alert_err}")
                 return None
 
             if response.status_code == 403:
