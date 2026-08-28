@@ -31,7 +31,7 @@ def mock_weather_service():
 
 
 def _mock_weather_response(location_name="Warangal", is_live=False, has_rain=False) -> WeatherForecastResponse:
-    tomorrow_str = (NOW + timedelta(days=1)).strftime("%Y-%m-%d 12:00:00")
+    tomorrow_str = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d 12:00:00")
     forecast_item = {
         "dt_txt": tomorrow_str,
         "temp": 28.5,

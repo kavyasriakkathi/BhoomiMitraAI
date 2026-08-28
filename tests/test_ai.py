@@ -85,16 +85,48 @@ def test_generate_ai_response_provider_unavailable(mock_ai_service):
 def test_gemini_model_configuration():
     from src.config import Settings
     s = Settings()
-    assert s.gemini_model == "gemini-3.5-flash-lite"
+    assert s.gemini_model == "gemini-3.5-flash"
 
 
 def test_gemini_fallback_models_order():
     from src.ai.gemini_client import FALLBACK_MODELS
     assert FALLBACK_MODELS == [
-        "gemini-3.5-flash-lite",
         "gemini-3.5-flash",
+        "gemini-3.5-flash-lite",
         "gemini-flash-latest",
     ]
+
+
+@pytest.mark.asyncio
+async def test_gemini_generate_response_primary_model_is_gemini_35_flash(monkeypatch):
+    from unittest.mock import MagicMock
+    import src.ai.gemini_client as gemini_module
+
+    monkeypatch.setattr(gemini_module, "_initialized", True)
+
+    attempts = []
+
+    def mock_generative_model(model_name, **kwargs):
+        attempts.append(model_name)
+        mock_instance = MagicMock()
+        mock_chat = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = "Gemini 3.5 Flash natural language response"
+        mock_chat.send_message.return_value = mock_resp
+        mock_instance.start_chat.return_value = mock_chat
+        return mock_instance
+
+    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+
+    response = await gemini_module.generate_response(
+        system_prompt="Test prompt",
+        conversation_history=[],
+        user_message="పత్తి పంటలో పురుగులు వస్తున్నాయి ఏం చేయాలి?",
+        timeout_seconds=5,
+    )
+
+    assert response == "Gemini 3.5 Flash natural language response"
+    assert attempts[0] == "gemini-3.5-flash"
 
 
 @pytest.mark.asyncio
@@ -103,15 +135,15 @@ async def test_gemini_generate_response_fallback_on_error(monkeypatch):
     import src.ai.gemini_client as gemini_module
 
     monkeypatch.setattr(gemini_module, "_initialized", True)
-    
+
     attempts = []
 
     def mock_generative_model(model_name, **kwargs):
         attempts.append(model_name)
         mock_instance = MagicMock()
         mock_chat = MagicMock()
-        if model_name == "gemini-3.5-flash-lite":
-            # First attempt fails
+        if model_name == "gemini-3.5-flash":
+            # Primary attempt fails
             mock_chat.send_message.side_effect = Exception("Service Unavailable 503")
         else:
             # Fallback attempt succeeds
@@ -131,6 +163,5 @@ async def test_gemini_generate_response_fallback_on_error(monkeypatch):
     )
 
     assert response == "Fallback model response"
+    assert attempts[0] == "gemini-3.5-flash"
     assert "gemini-3.5-flash-lite" in attempts
-    assert "gemini-3.5-flash" in attempts
-

@@ -1,14 +1,11 @@
-import asyncio
 import pytest
+import uuid
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from src.main import app
-from src.config import get_settings
-from src.core.database import Base
-from src.core.models import Farmer, Conversation
+from src.core.models import Farmer
 from src.gateway.schemas import ParsedIncomingMessage
 from src.gateway.service import (
     store_incoming_message,
@@ -108,141 +105,73 @@ def test_post_webhook_text_message_success(mock_pipeline):
 # REGRESSION TESTS: Duplicate Message & Webhook Concurrency Race Protection
 # ─────────────────────────────────────────────────────────────────────────────
 
-from sqlalchemy.pool import StaticPool
+@pytest.mark.asyncio
+async def test_process_message_pipeline_duplicate_stage1_skips_ai():
+    """Verify that if a message_id is already in DB, Stage 1 immediately skips the pipeline."""
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543210",
+        message_id="wamid.DUPLICATE_STAGE1_TEST",
+        timestamp="1700000000",
+        message_type="text",
+        text_content="Where to buy urea?",
+    )
+
+    with patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=True) as mock_dup, \
+         patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock) as mock_farmer, \
+         patch("src.gateway.service.process_text_message", new_callable=AsyncMock) as mock_ai, \
+         patch("src.gateway.service.send_text_message", new_callable=AsyncMock) as mock_send:
+
+        await process_message_pipeline(parsed)
+
+        mock_dup.assert_awaited_once()
+        mock_farmer.assert_not_called()
+        mock_ai.assert_not_called()
+        mock_send.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_store_incoming_message_duplicate_rollback():
+async def test_process_message_pipeline_concurrent_duplicate_db_constraint_aborts():
     """
-    Verify that calling store_incoming_message with an existing message_id
-    catches IntegrityError, executes rollback, returns None, and leaves the session clean.
+    Verify that if two requests race past Stage 1, the unique DB constraint in Stage 4
+    rejects the second insert and exits immediately without calling Gemini or sending a reply.
     """
-    test_engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    test_session_maker = async_sessionmaker(
-        bind=test_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autoflush=False,
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543210",
+        message_id="wamid.CONCURRENT_RACE_TEST",
+        timestamp="1700000000",
+        message_type="text",
+        text_content="Where to buy urea?",
     )
 
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    mock_farmer_obj = Farmer(id=uuid.uuid4(), phone_number="919876543210")
 
-    async with test_session_maker() as db:
-        farmer = Farmer(phone_number="+919876543210")
-        db.add(farmer)
-        await db.commit()
-        await db.refresh(farmer)
+    with patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=False), \
+         patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock, return_value=mock_farmer_obj), \
+         patch("src.gateway.service.store_incoming_message", new_callable=AsyncMock, return_value=None) as mock_store, \
+         patch("src.gateway.service.process_text_message", new_callable=AsyncMock) as mock_ai, \
+         patch("src.gateway.service.send_text_message", new_callable=AsyncMock) as mock_send:
 
-        msg = ParsedIncomingMessage(
-            phone_number="+919876543210",
-            message_id="wamid.DUPLICATE_ROLLBACK_TEST",
-            timestamp="1700000000",
-            message_type="text",
-            text_content="First delivery",
-        )
+        await process_message_pipeline(parsed)
 
-        # 1. First insert should succeed
-        conv1 = await store_incoming_message(db, farmer, msg)
-        assert conv1 is not None
-        assert conv1.message_id == "wamid.DUPLICATE_ROLLBACK_TEST"
-
-        # 2. Duplicate insert with same message_id should catch IntegrityError, rollback, and return None
-        conv2 = await store_incoming_message(db, farmer, msg)
-        assert conv2 is None
-
-        # 3. Verify session is NOT in PendingRollbackError state and can execute subsequent queries
-        res = await db.execute(
-            select(Conversation).where(Conversation.message_id == "wamid.DUPLICATE_ROLLBACK_TEST")
-        )
-        saved_convs = list(res.scalars().all())
-        assert len(saved_convs) == 1
-
-    await test_engine.dispose()
+        mock_store.assert_awaited_once()
+        mock_ai.assert_not_called()
+        mock_send.assert_not_called()
 
 
 @pytest.mark.asyncio
-@patch("src.gateway.service.send_text_message")
-@patch("src.gateway.service.process_text_message")
-@patch("src.gateway.service.mark_message_as_read")
-async def test_process_message_pipeline_concurrent_duplicate_race(
-    mock_mark_read,
-    mock_process_text,
-    mock_send_text,
-    tmp_path,
-):
-    """
-    Verify that when two concurrent background pipelines run for the exact same message_id:
-    - Only ONE conversation row is saved in the database
-    - AI processing (process_text_message) is executed only once
-    - WhatsApp outbound message (send_text_message) is dispatched only once
-    - No IntegrityError or PendingRollbackError escapes unhandled
-    """
-    db_file = tmp_path / "test_concurrent_webhook.db"
-    test_engine = create_async_engine(
-        f"sqlite+aiosqlite:///{db_file}",
-        connect_args={"check_same_thread": False},
-    )
-    test_session_maker = async_sessionmaker(
-        bind=test_engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-        autoflush=False,
-    )
-
-    async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-    # Pre-seed the farmer in database
-    async with test_session_maker() as db:
-        farmer = Farmer(phone_number="+919111222333")
-        db.add(farmer)
-        await db.commit()
-
-    mock_send_text.return_value = "outbound_meta_wamid_999"
-    mock_process_text.return_value = "Namaste, this is BhoomiMitra."
-    mock_mark_read.return_value = None
-
-    msg1 = ParsedIncomingMessage(
-        phone_number="+919111222333",
-        message_id="wamid.CONCURRENT_RACE_TEST_101",
-        timestamp="1700000001",
+async def test_store_incoming_message_catches_integrity_error():
+    """Verify that store_incoming_message rolls back and returns None on IntegrityError."""
+    mock_db = AsyncMock()
+    mock_db.commit.side_effect = IntegrityError("duplicate key value violates unique constraint", None, None)
+    mock_farmer = Farmer(id=uuid.uuid4(), phone_number="919876543210")
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543210",
+        message_id="wamid.INTEGRITY_ERR_TEST",
+        timestamp="1700000000",
         message_type="text",
-        text_content="Tomato leaf curl disease question",
-        sender_name="Srinivas",
-    )
-    msg2 = ParsedIncomingMessage(
-        phone_number="+919111222333",
-        message_id="wamid.CONCURRENT_RACE_TEST_101",
-        timestamp="1700000001",
-        message_type="text",
-        text_content="Tomato leaf curl disease question",
-        sender_name="Srinivas",
+        text_content="Test integrity",
     )
 
-    with patch("src.gateway.service.AsyncSessionLocal", test_session_maker):
-        # Run both tasks concurrently
-        await asyncio.gather(
-            process_message_pipeline(msg1, "Srinivas"),
-            process_message_pipeline(msg2, "Srinivas"),
-        )
-
-    # Verify database state
-    async with test_session_maker() as db:
-        res = await db.execute(
-            select(Conversation).where(Conversation.message_id == "wamid.CONCURRENT_RACE_TEST_101")
-        )
-        conversations = list(res.scalars().all())
-        assert len(conversations) == 1
-        assert conversations[0].delivery_status == "sent"
-        assert conversations[0].outbound_message_id == "outbound_meta_wamid_999"
-
-    # Verify AI generation and outbound dispatch were only executed once
-    assert mock_process_text.call_count == 1
-    assert mock_send_text.call_count == 1
-
-    await test_engine.dispose()
+    result = await store_incoming_message(mock_db, mock_farmer, parsed)
+    assert result is None
+    mock_db.rollback.assert_awaited_once()

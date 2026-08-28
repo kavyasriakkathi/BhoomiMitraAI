@@ -12,6 +12,7 @@ IMPORTANT:
 """
 import json
 import hashlib
+import time
 from typing import List, Optional
 from datetime import datetime
 
@@ -28,10 +29,17 @@ class AgmarknetClient:
     Never raises exceptions — callers must handle the empty-list case.
     """
 
-    def __init__(self, api_key: str, api_url: str, cache_ttl_seconds: int = 21600):
+    def __init__(
+        self,
+        api_key: str,
+        api_url: str,
+        cache_ttl_seconds: int = 21600,
+        timeout_seconds: float = 5.0,
+    ):
         self.api_key = api_key.strip() if api_key else ""
         self.api_url = api_url
         self.cache_ttl = cache_ttl_seconds
+        self.timeout_seconds = timeout_seconds
 
     # ------------------------------------------------------------------
     # Public interface
@@ -106,17 +114,23 @@ class AgmarknetClient:
         if district:
             params["filters[district]"] = district
 
+        start_time = time.time()
+        connect_timeout = min(3.0, self.timeout_seconds)
+        timeout_config = httpx.Timeout(self.timeout_seconds, connect=connect_timeout)
+
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=timeout_config) as client:
                 logger.info(
                     f"[AGMARKNET] Calling live API: commodity='{commodity}' "
-                    f"state='{state}' district='{district}'"
+                    f"state='{state}' district='{district}' (timeout={self.timeout_seconds}s)"
                 )
                 response = await client.get(self.api_url, params=params)
 
+            elapsed = time.time() - start_time
+
             if response.status_code != 200:
                 logger.warning(
-                    f"[AGMARKNET] API returned HTTP {response.status_code} "
+                    f"[AGMARKNET] API returned HTTP {response.status_code} in {elapsed:.2f}s "
                     f"for commodity='{commodity}'. Using local DB fallback."
                 )
                 return None
@@ -124,20 +138,22 @@ class AgmarknetClient:
             data = response.json()
             records = data.get("records", [])
             logger.info(
-                f"[AGMARKNET] API returned {len(records)} records "
-                f"for commodity='{commodity}'"
+                f"[AGMARKNET] Live API returned {len(records)} records "
+                f"for commodity='{commodity}' in {elapsed:.2f}s"
             )
             return self._normalise_records(records)
 
         except httpx.TimeoutException:
+            elapsed = time.time() - start_time
             logger.warning(
-                f"[AGMARKNET] API timeout for commodity='{commodity}'. "
-                "Using local DB fallback."
+                f"[AGMARKNET] API timeout after {elapsed:.2f}s (limit={self.timeout_seconds}s) "
+                f"for commodity='{commodity}'. Using local DB fallback."
             )
             return None
         except httpx.RequestError as exc:
+            elapsed = time.time() - start_time
             logger.warning(
-                f"[AGMARKNET] Network error for commodity='{commodity}': {exc}. "
+                f"[AGMARKNET] Network error after {elapsed:.2f}s for commodity='{commodity}': {exc}. "
                 "Using local DB fallback."
             )
             return None

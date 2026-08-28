@@ -17,8 +17,8 @@ _initialized = False
 
 # Resilient fallback chain of supported models
 FALLBACK_MODELS = [
-    "gemini-3.5-flash-lite",
     "gemini-3.5-flash",
+    "gemini-3.5-flash-lite",
     "gemini-flash-latest",
 ]
 
@@ -40,7 +40,7 @@ async def generate_response(
     system_prompt: str,
     conversation_history: List[Dict[str, str]],
     user_message: str,
-    timeout_seconds: int = 10,
+    timeout_seconds: Optional[float] = None,
     model_override: Optional[str] = None,
 ) -> Optional[str]:
     """
@@ -52,7 +52,7 @@ async def generate_response(
         conversation_history: List of {"role": "user"|"model", "parts": "..."} dicts
                               representing the recent conversation context.
         user_message: The farmer's current message.
-        timeout_seconds: Max time to wait for the API response (default: 10s).
+        timeout_seconds: Max time to wait for API response (default: from settings or 5.0s).
         model_override: Optional model name to use instead of default.
 
     Returns:
@@ -60,7 +60,9 @@ async def generate_response(
     """
     _ensure_initialized()
     settings = get_settings()
-    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.5-flash-lite"
+    if timeout_seconds is None:
+        timeout_seconds = float(getattr(settings, "gemini_api_timeout_seconds", 5.0))
+    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.5-flash"
 
     # Build candidates list starting with primary model
     candidate_models = [primary_model]
@@ -74,13 +76,15 @@ async def generate_response(
 
     total_start_time = time.time()
     last_error = None
+    timeout_count = 0
 
     for attempt_idx, model_name in enumerate(candidate_models):
         req_start_time = time.time()
+        current_timeout = timeout_seconds if attempt_idx == 0 else min(timeout_seconds, 3.0)
         logger.info(
             f"[GEMINI API REQUEST START] (Attempt {attempt_idx + 1}/{len(candidate_models)})\n"
             f"  Model            : {model_name}\n"
-            f"  Timeout          : {timeout_seconds}s\n"
+            f"  Timeout          : {current_timeout}s\n"
             f"  Context History  : {len(history)} messages\n"
             f"  User Message     : '{user_message[:120]}' (len={len(user_message)})\n"
             f"  System Prompt Len: {len(system_prompt)} chars"
@@ -101,7 +105,7 @@ async def generate_response(
 
             response = await asyncio.wait_for(
                 asyncio.to_thread(chat.send_message, user_message),
-                timeout=timeout_seconds,
+                timeout=current_timeout,
             )
 
             elapsed = time.time() - req_start_time
@@ -126,11 +130,15 @@ async def generate_response(
 
         except asyncio.TimeoutError as e:
             elapsed = time.time() - req_start_time
+            timeout_count += 1
             logger.warning(
                 f"[GEMINI TIMEOUT] Model {model_name} timed out after {elapsed:.2f}s "
-                f"(limit={timeout_seconds}s). Trying next model if available..."
+                f"(limit={current_timeout}s). Trying next model if available..."
             )
             last_error = e
+            if timeout_count >= 2:
+                logger.warning(f"[GEMINI TIMEOUT CEILING] {timeout_count} models timed out. Aborting model fallback to yield fast response.")
+                break
 
         except Exception as e:
             elapsed = time.time() - req_start_time
@@ -146,7 +154,7 @@ async def generate_response(
         f"Last error: {last_error}"
     )
     if isinstance(last_error, asyncio.TimeoutError):
-        raise TimeoutError(f"Gemini API timed out after {timeout_seconds}s across all attempts") from last_error
+        raise TimeoutError(f"Gemini API timed out after {total_elapsed:.1f}s across attempts") from last_error
     raise RuntimeError(f"Gemini SDK Error: {str(last_error)}") from last_error
 
 
@@ -164,7 +172,7 @@ async def generate_multimodal_response(
     """
     _ensure_initialized()
     settings = get_settings()
-    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.5-flash-lite"
+    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.5-flash"
 
     candidate_models = [primary_model]
     for fallback in FALLBACK_MODELS:

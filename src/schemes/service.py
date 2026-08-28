@@ -164,12 +164,14 @@ _SCHEME_KEYWORDS_EN = {
     "scheme", "schemes", "subsidy", "subsidies", "yojana", "kisan",
     "fasal bima", "insurance", "credit", "kcc", "solar pump", "government",
     "apply", "eligible", "eligibility", "benefits", "pm kisan",
-    "rythu bandhu", "kusum", "pmfby",
+    "rythu bandhu", "rythu bharosa", "kusum", "pmfby", "financial assistance",
+    "govt grant", "krishi yojana",
 }
 _SCHEME_KEYWORDS_TE = {
     "పథకం", "పథకాలు", "సబ్సిడీ", "సబ్సిడీలు", "పంట బీమా", "యోజన",
-    "కిసాన్", "ప్రభుత్వ", "రైతు బంధు", "అర్హత", "ప్రయోజనాలు",
-    "క్రెడిట్ కార్డ్", "సౌర పంప్", "ఆర్థిక సహాయం", "గ్రాంట్",
+    "కిసాన్", "ప్రభుత్వ", "రైతు బంధు", "రైతు భరోసా", "అర్హత", "ప్రయోజనాలు",
+    "క్రెడిట్ కార్డ్", "సౌర పంప్", "ఆర్థిక సహాయం", "గ్రాంట్", "రుణం",
+    "పీఎం కిసాన్", "రైతు సంక్షేమం",
 }
 
 # Known crop nouns for future crop-specific prioritisation (not used for exclusion).
@@ -204,6 +206,7 @@ _TE_LABELS = {
     ),
     "more":        "మరిన్ని పథకాల కోసం: /schemes",
     "crop_note":   "(మీరు పేర్కొన్న పంట: {crop})",
+    "unavailable": "ప్రస్తుతం ప్రభుత్వ పథకాల సమాచారం అందుబాటులో లేదు. దయచేసి సమీప రైతు వేదిక లేదా https://myscheme.gov.in పోర్టల్‌ని చూడండి.",
 }
 _EN_LABELS = {
     "title":       "🏛️ Government Schemes Available For You ({count} schemes)",
@@ -219,6 +222,7 @@ _EN_LABELS = {
     ),
     "more":        "See all schemes at: /schemes",
     "crop_note":   "(Crop you mentioned: {crop})",
+    "unavailable": "Government schemes information is currently unavailable. Please check https://myscheme.gov.in or your local agriculture office.",
 }
 
 
@@ -267,7 +271,26 @@ def _format_scheme_block(scheme, labels: dict, language: str) -> str:
     deadline_str = ""
     if scheme.application_deadline:
         try:
-            deadline_str = scheme.application_deadline.strftime("%d %b %Y")
+            from datetime import datetime, timezone
+            deadline_dt = scheme.application_deadline
+            is_past = False
+            try:
+                now = datetime.now(timezone.utc)
+                if hasattr(deadline_dt, "tzinfo") and deadline_dt.tzinfo is not None:
+                    is_past = deadline_dt < now
+                else:
+                    is_past = deadline_dt < datetime.utcnow()
+            except Exception:
+                is_past = False
+
+            date_fmt = deadline_dt.strftime("%d %b %Y")
+            if is_past:
+                if language == "te":
+                    deadline_str = f"{date_fmt} (గడువు ముగిసింది - తదుపరి సైకిల్ త్వరలో)"
+                else:
+                    deadline_str = f"{date_fmt} (Deadline Closed - Next cycle opening soon)"
+            else:
+                deadline_str = date_fmt
         except Exception:
             deadline_str = str(scheme.application_deadline)
 

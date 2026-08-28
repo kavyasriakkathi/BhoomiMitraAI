@@ -621,4 +621,168 @@ async def test_market_enrichment_refusal_stripped():
     assert "విషయాలపై మాత్రమే" not in result
 
 
+# ---------------------------------------------------------------------------
+# 17. Agmarknet Live API & Local DB Fallback Unit & Integration Tests
+# ---------------------------------------------------------------------------
 
+@pytest.mark.asyncio
+async def test_agmarknet_client_successful_live_response():
+    """Verify AgmarknetClient correctly parses live API response JSON into normalized records."""
+    import httpx
+    from src.market.agmarknet_client import AgmarknetClient
+
+    client_obj = AgmarknetClient(
+        api_key="valid-test-key",
+        api_url="https://api.data.gov.in/resource/test",
+        cache_ttl_seconds=3600,
+        timeout_seconds=5.0,
+    )
+
+    mock_payload = {
+        "records": [
+            {
+                "commodity": "Cotton",
+                "market": "Warangal Mandi",
+                "district": "Warangal",
+                "state": "Telangana",
+                "min_price": "7100",
+                "max_price": "7650",
+                "modal_price": "7450",
+                "arrival_date": "19/08/2026",
+            }
+        ]
+    }
+
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = mock_payload
+
+    with patch.object(client_obj, "_get_from_cache", new=AsyncMock(return_value=None)), \
+         patch.object(client_obj, "_set_in_cache", new=AsyncMock()), \
+         patch("httpx.AsyncClient.get", return_value=mock_response):
+
+        records = await client_obj.fetch_prices("Cotton", state="Telangana", district="Warangal")
+
+    assert len(records) == 1
+    assert records[0]["commodity"] == "Cotton"
+    assert records[0]["market"] == "Warangal Mandi"
+    assert records[0]["modal_price"] == 7450.0
+    assert records[0]["arrival_date"] == datetime(2026, 8, 19)
+
+
+@pytest.mark.asyncio
+async def test_agmarknet_client_timeout_handling():
+    """Verify AgmarknetClient gracefully catches httpx.TimeoutException and returns [] without raising."""
+    import httpx
+    from src.market.agmarknet_client import AgmarknetClient
+
+    client_obj = AgmarknetClient(
+        api_key="valid-test-key",
+        api_url="https://api.data.gov.in/resource/test",
+        cache_ttl_seconds=3600,
+        timeout_seconds=5.0,
+    )
+
+    with patch.object(client_obj, "_get_from_cache", new=AsyncMock(return_value=None)), \
+         patch.object(client_obj, "_set_in_cache", new=AsyncMock()), \
+         patch("httpx.AsyncClient.get", side_effect=httpx.TimeoutException("Read timed out")):
+
+        records = await client_obj.fetch_prices("Cotton", state="Telangana")
+
+    assert records == []
+
+
+@pytest.mark.asyncio
+async def test_agmarknet_client_network_error_handling():
+    """Verify AgmarknetClient gracefully handles network connection errors and returns []."""
+    import httpx
+    from src.market.agmarknet_client import AgmarknetClient
+
+    client_obj = AgmarknetClient(
+        api_key="valid-test-key",
+        api_url="https://api.data.gov.in/resource/test",
+        cache_ttl_seconds=3600,
+        timeout_seconds=5.0,
+    )
+
+    with patch.object(client_obj, "_get_from_cache", new=AsyncMock(return_value=None)), \
+         patch.object(client_obj, "_set_in_cache", new=AsyncMock()), \
+         patch("httpx.AsyncClient.get", side_effect=httpx.ConnectError("Connection refused")):
+
+        records = await client_obj.fetch_prices("Cotton", state="Telangana")
+
+    assert records == []
+
+
+@pytest.mark.asyncio
+async def test_market_service_live_api_success_path():
+    """Verify MarketService upserts live records and marks response as is_live=True."""
+    from src.market.service import MarketService
+    from src.market.agmarknet_client import AgmarknetClient
+
+    mock_repo = AsyncMock()
+    mock_db_price = _mock_price_model(
+        commodity="Cotton",
+        market_name="Warangal Mandi",
+        modal_price=7450.0,
+        source="agmarknet_api",
+    )
+    mock_repo.get_prices_by_commodity.return_value = [mock_db_price]
+    mock_repo.upsert_prices.return_value = 1
+
+    client_obj = AgmarknetClient(api_key="key", api_url="https://api.data.gov.in/test")
+    raw_api_records = [
+        {
+            "commodity": "Cotton",
+            "market": "Warangal Mandi",
+            "district": "Warangal",
+            "state": "Telangana",
+            "min_price": 7100.0,
+            "max_price": 7650.0,
+            "modal_price": 7450.0,
+            "arrival_date": datetime(2026, 8, 19),
+        }
+    ]
+
+    with patch.object(client_obj, "fetch_prices", new=AsyncMock(return_value=raw_api_records)):
+        svc = MarketService(repository=mock_repo, client=client_obj)
+        response = await svc.get_prices_for_query("Cotton", district="Warangal", state="Telangana")
+
+    assert response.data_available is True
+    assert response.is_live is True
+    assert "Live data from Agmarknet" in response.source_note
+    assert len(response.results) == 1
+    assert response.results[0].modal_price == 7450.0
+    mock_repo.upsert_prices.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_market_service_api_timeout_local_db_fallback():
+    """Verify MarketService falls back seamlessly to local DB when live API times out."""
+    from src.market.service import MarketService
+    from src.market.agmarknet_client import AgmarknetClient
+
+    mock_repo = AsyncMock()
+    mock_db_price = _mock_price_model(
+        commodity="Cotton",
+        market_name="Warangal Mandi",
+        modal_price=7400.0,
+        source="local_seed",
+    )
+    mock_repo.get_prices_by_commodity.return_value = [mock_db_price]
+
+    client_obj = AgmarknetClient(api_key="key", api_url="https://api.data.gov.in/test")
+
+    # fetch_prices returns [] on timeout
+    with patch.object(client_obj, "fetch_prices", new=AsyncMock(return_value=[])):
+        svc = MarketService(repository=mock_repo, client=client_obj)
+        response = await svc.get_prices_for_query("Cotton", district="Warangal", state="Telangana")
+
+    assert response.data_available is True
+    assert response.is_live is False
+    assert "Local database" in response.source_note
+    assert len(response.results) == 1
+    assert response.results[0].modal_price == 7400.0
+    mock_repo.get_prices_by_commodity.assert_called_once_with(
+        commodity="Cotton", district="Warangal", state="Telangana"
+    )

@@ -20,5 +20,6 @@ async def get_market_service(db: AsyncSession = Depends(get_db)) -> MarketServic
         api_key=settings.data_gov_api_key,
         api_url=settings.agmarknet_api_url,
         cache_ttl_seconds=settings.market_price_cache_ttl_seconds,
+        timeout_seconds=settings.agmarknet_api_timeout_seconds,
     )
     return MarketService(repository=repository, client=client)

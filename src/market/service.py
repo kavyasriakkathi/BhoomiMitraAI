@@ -10,6 +10,7 @@ SAFETY RULES:
 - If no data is available, the farmer is told clearly.
 - All exceptions are caught; the WhatsApp pipeline is never interrupted.
 """
+import re
 from typing import Optional, List
 from datetime import datetime, timezone
 
@@ -81,6 +82,70 @@ PRICE_INTENT_KEYWORDS_TE = {
     "మార్కెట్ ధరలు", "మండి ధర", "మండి ధరలు", "ఎంత ధర", "అమ్మకం ధర",
     "క్వింటాల్", "క్వింటాలు", "ఖరీదు", "మార్కెట్", "మార్కెట్లో", "ధర ఎంత",
 }
+
+# Non-price intent keywords to detect whether a query is purely about market prices or multi-intent
+OTHER_INTENT_KEYWORDS = [
+    # Disease / pest / spray / dosage
+    "spray", "disease", "pest", "fungus", "leaf", "rot", "spots", "dosage", "chemical", "pesticide",
+    "మందు", "పిచికారీ", "తెగులు", "పురుగు", "ఆకు", "మచ్చలు", "మోతాదు", "నివారణ",
+    # Fertilizer / nutrient / sowing
+    "fertilizer", "fertilizers", "urea", "dap", "sowing", "seed", "variety", "stage",
+    "ఎరువు", "ఎరువులు", "యూరియా", "విత్తనం", "విత్తనాలు", "సాగు",
+    # Weather
+    "weather", "forecast", "rain", "temperature", "వాతావరణం", "వర్షం", "ఎండ",
+    # Scheme
+    "scheme", "subsidy", "yojana", "pm kisan", "rythu", "పథకం", "సబ్సిడీ",
+    # Shops / purchase
+    "where to buy", "store", "కొనాలి", "దుకాణం", "షాప్",
+    # Escalation / contact
+    "officer", "call", "agent", "expert", "మాట్లాడాలి", "అధికారి",
+]
+
+
+def _is_pure_price_query(query_text: str) -> bool:
+    """Return True if the query is asking about market prices without asking other agronomic questions."""
+    query_lower = query_text.lower()
+    return not any(kw in query_lower for kw in OTHER_INTENT_KEYWORDS)
+
+
+def _clean_ai_response_for_market_enrichment(ai_response: str) -> str:
+    """
+    Remove speculative price statements, refusal markers, or redundant mandi intros from AI text
+    so that only genuine agronomic advisory (if any) is preserved alongside the structured price block.
+    """
+    if not ai_response:
+        return ""
+
+    refusal_markers = [
+        "e-nam", "ఈ-నామ్", "ఈ - నామ్", "మార్కెట్ యార్డ్", "మార్కెట్ యార్డు",
+        "market yard", "కేవలం వ్యవసాయం", "విషయాలపై మాత్రమే", "i can only help with farming",
+        "only help with farming", "how can i help with your crops", "స్థానిక మార్కెట్",
+        "క్షమించండి, ప్రస్తుతం కనెక్ట్ అవడంలో", "i'm sorry, i'm having trouble connecting",
+    ]
+    ai_lower = ai_response.lower()
+    if any(marker in ai_lower for marker in refusal_markers):
+        return ""
+
+    # Sentence markers that indicate speculative or duplicate price discussion
+    price_sentence_markers = [
+        "ధర", "ధరలు", "మండి", "క్వింటాల్", "క్వింటాలు", "రేటు", "రేట్లు",
+        "price", "prices", "mandi", "rate", "rates", "quintal", "₹", "rs."
+    ]
+
+    cleaned_paragraphs = []
+    for para in ai_response.split("\n"):
+        para = para.strip()
+        if not para:
+            continue
+        sentences = [s.strip() for s in para.replace("।", ".").split(".") if s.strip()]
+        non_price_sentences = [
+            s for s in sentences
+            if not any(pm in s.lower() for pm in price_sentence_markers)
+        ]
+        if non_price_sentences:
+            cleaned_paragraphs.append(". ".join(non_price_sentences) + ".")
+
+    return "\n\n".join(cleaned_paragraphs).strip()
 
 # Telugu labels for formatted reply
 _TE_LABELS = {
@@ -427,12 +492,12 @@ async def enrich_response_with_market_prices(
     sorted_keywords = sorted(COMMODITY_MAP.items(), key=lambda x: len(x[0]), reverse=True)
     for kw, canonical in sorted_keywords:
         kw_lower = kw.lower()
-        if all(ord(c) < 128 for c in kw_lower):
-            if re.search(r'\b' + re.escape(kw_lower) + r'\b', query_lower):
+        if kw_lower.isascii() and kw_lower.isalnum():
+            if re.search(rf"\b{re.escape(kw_lower)}\b", query_lower):
                 matched_commodity = canonical
                 break
         else:
-            if kw_lower in query_lower:
+            if kw in query_text or kw_lower in query_lower:
                 matched_commodity = canonical
                 break
 
@@ -494,6 +559,7 @@ async def enrich_response_with_market_prices(
             api_key=settings.data_gov_api_key,
             api_url=settings.agmarknet_api_url,
             cache_ttl_seconds=settings.market_price_cache_ttl_seconds,
+            timeout_seconds=settings.agmarknet_api_timeout_seconds,
         )
         svc = MarketService(repository=repo, client=client)
         query_response = await svc.get_prices_for_query(
@@ -515,13 +581,16 @@ async def enrich_response_with_market_prices(
                 f"for '{matched_commodity}' to AI response."
             )
             
-            # Clean duplicate market-price sentences, speculative price quotes, and refusals from preceding AI response
-            cleaned_ai = _clean_market_duplicate_text(ai_response)
-
-            if not cleaned_ai:
+            if _is_pure_price_query(query_text):
+                # For pure market price inquiries, the structured block is the complete, authoritative answer.
                 final_enriched = price_block
             else:
-                final_enriched = cleaned_ai + "\n\n" + price_block
+                # For multi-intent queries, preserve agronomic advice while stripping redundant price guesses.
+                clean_ai = _clean_ai_response_for_market_enrichment(ai_response)
+                if clean_ai:
+                    final_enriched = clean_ai + "\n\n" + price_block
+                else:
+                    final_enriched = price_block
 
             logger.info(f"[MARKET ENRICH] Final enriched response length={len(final_enriched)}")
             return final_enriched

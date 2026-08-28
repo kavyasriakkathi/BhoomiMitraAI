@@ -301,3 +301,90 @@ def test_seed_defaults_if_empty_has_self_parameter():
         "The bug has not been fixed."
     )
 
+
+# ---------------------------------------------------------------------------
+# 13. Expired deadline formatting in Telugu and English
+# ---------------------------------------------------------------------------
+
+def test_scheme_expired_deadline_formatting_telugu_and_english():
+    """Expired scheme deadlines show closed status with next cycle notice."""
+    from src.schemes.service import _format_scheme_block, _TE_LABELS, _EN_LABELS
+    from unittest.mock import MagicMock
+    from datetime import datetime, timedelta
+
+    past_date = datetime.utcnow() - timedelta(days=30)
+    mock_scheme = MagicMock()
+    mock_scheme.scheme_name = "PMFBY Kharif 2024"
+    mock_scheme.benefits_summary = "Crop loss insurance coverage."
+    mock_scheme.eligibility_criteria = "Notified crop farmers."
+    mock_scheme.required_documents = "Aadhaar, Sowing Certificate."
+    mock_scheme.application_deadline = past_date
+    mock_scheme.official_portal_url = "https://pmfby.gov.in"
+
+    block_te = _format_scheme_block(mock_scheme, _TE_LABELS, "te")
+    assert "గడువు ముగిసింది" in block_te
+    assert "PMFBY Kharif 2024" in block_te
+
+    block_en = _format_scheme_block(mock_scheme, _EN_LABELS, "en")
+    assert "Deadline Closed" in block_en
+    assert "pmfby.gov.in" in block_en
+
+
+# ---------------------------------------------------------------------------
+# 14. Future deadline formatting
+# ---------------------------------------------------------------------------
+
+def test_scheme_future_deadline_formatting():
+    """Future scheme deadlines show clean formatted date without expired warning."""
+    from src.schemes.service import _format_scheme_block, _TE_LABELS
+    from unittest.mock import MagicMock
+    from datetime import datetime, timedelta
+
+    future_date = datetime.utcnow() + timedelta(days=90)
+    mock_scheme = MagicMock()
+    mock_scheme.scheme_name = "PM-KUSUM"
+    mock_scheme.benefits_summary = "Solar pump subsidy up to 90%."
+    mock_scheme.eligibility_criteria = "Borewell owners."
+    mock_scheme.required_documents = "Aadhaar, Land Records, NOC."
+    mock_scheme.application_deadline = future_date
+    mock_scheme.official_portal_url = "https://pmkusum.mnre.gov.in"
+
+    block = _format_scheme_block(mock_scheme, _TE_LABELS, "te")
+    assert "PM-KUSUM" in block
+    assert "గడువు ముగిసింది" not in block
+    assert "pmkusum.mnre.gov.in" in block
+
+
+# ---------------------------------------------------------------------------
+# 15. Extended scheme intent keywords
+# ---------------------------------------------------------------------------
+
+def test_extended_scheme_intent_keywords():
+    """Verify newly added Telugu and English agricultural scheme keywords."""
+    from src.schemes.service import _detect_scheme_intent, _SCHEME_KEYWORDS_TE
+
+    # Telugu keywords
+    assert any(kw in "రైతు భరోసా నిధులు ఎప్పుడు వస్తాయి?" for kw in _SCHEME_KEYWORDS_TE)
+    assert any(kw in "పీఎం కిసాన్ ఈకేవైసీ ఎలా చేయాలి?" for kw in _SCHEME_KEYWORDS_TE)
+    assert any(kw in "వ్యవసాయ రుణం సబ్సిడీ పథకాలు" for kw in _SCHEME_KEYWORDS_TE)
+
+    # English keywords
+    assert _detect_scheme_intent("is there any financial assistance for drip irrigation?")
+    assert _detect_scheme_intent("tell me about rythu bharosa")
+    assert _detect_scheme_intent("what krishi yojana benefits can i get?")
+
+
+# ---------------------------------------------------------------------------
+# 16. Scheme structured fields verification
+# ---------------------------------------------------------------------------
+
+def test_scheme_structured_fields_verification():
+    """Verify that all default seeded schemes have non-empty required fields and valid URLs."""
+    from src.schemes.repository import DEFAULT_INDIAN_SCHEMES
+
+    for s in DEFAULT_INDIAN_SCHEMES:
+        assert s["scheme_name"] and len(s["scheme_name"]) > 3
+        assert s["benefits_summary"] and len(s["benefits_summary"]) > 5
+        assert s["eligibility_criteria"] and len(s["eligibility_criteria"]) > 5
+        assert s["required_documents"] and len(s["required_documents"]) > 5
+        assert s["official_portal_url"].startswith("http")

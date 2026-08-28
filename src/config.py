@@ -37,7 +37,8 @@ class Settings(BaseSettings):
     # AI
     openai_api_key: str = Field(default="")
     google_gemini_api_key: str = Field(default="")
-    gemini_model: str = Field(default="gemini-3.5-flash-lite")
+    gemini_model: str = Field(default="gemini-3.5-flash")
+    gemini_api_timeout_seconds: float = Field(default=5.0)
     ai_confidence_threshold: float = Field(default=0.75)
 
     # Google Cloud
@@ -58,6 +59,7 @@ class Settings(BaseSettings):
     agmarknet_api_url: str = Field(
         default="https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
     )
+    agmarknet_api_timeout_seconds: float = Field(default=5.0)
     market_price_cache_ttl_seconds: int = Field(default=21600)  # 6 hours
 
     # Weather (OpenWeatherMap)

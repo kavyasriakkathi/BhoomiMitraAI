@@ -16,6 +16,7 @@ from src.ai.prompts import (
     build_farmer_context,
     get_fallback_response,
 )
+from src.config import get_settings
 from src.ai.gemini_client import generate_response
 
 class AIService:
@@ -46,7 +47,7 @@ class AIService:
                 if record.ai_response:
                     # Clean all structured enrichment sections from history to prevent LLM prompt contamination
                     clean_response = record.ai_response
-                    for marker in ["Available Nearby Shops:", "🏬", "📊", "🌤️", "📜", "👨‍🌾", "🚨", "🆘"]:
+                    for marker in ["Available Nearby Shops:", "🏬", "📊", "🌤️", "🌡️", "🏛️", "🎫", "📜", "👨‍🌾", "🚨", "🆘"]:
                         clean_response = clean_response.split(marker)[0]
                     clean_response = clean_response.strip()
                     if clean_response:
@@ -117,7 +118,7 @@ class AIService:
                 system_prompt=full_system_prompt,
                 conversation_history=history,
                 user_message=request.message,
-                timeout_seconds=10,
+                timeout_seconds=getattr(get_settings(), "gemini_api_timeout_seconds", 5.0),
             )
 
             if ai_text is None or not ai_text.strip():
@@ -187,9 +188,9 @@ async def process_text_message(
         response = await service.generate_ai_response(request)
         ai_response_text = response.response_text
         logger.info(f"[PROCESS MSG RAW GEMINI] Length: {len(ai_response_text) if ai_response_text else 0} | Response: '{ai_response_text}'")
-    except HTTPException:
-        logger.warning(f"AI unavailable for farmer {farmer.id}. Using fallback.")
-        ai_response_text = get_fallback_response(farmer.preferred_language)
+    except Exception as exc:
+        logger.warning(f"AI unavailable for farmer {farmer.id}: {exc}. Deferring fallback until after specialized enrichment.")
+        ai_response_text = ""
 
     # Enrich with nearby shop inventory recommendations if products match
     try:
@@ -241,8 +242,24 @@ async def process_text_message(
     except Exception as esc_err:
         logger.warning(f"Failed to enrich response with escalation: {esc_err}")
 
-    # Final optimization, deduplication, and message budgeting for WhatsApp
-    ai_response_text = _finalize_whatsapp_response(ai_response_text)
+    # Format and optimize multi-intent response if multiple sections were enriched
+    try:
+        from src.ai.formatting import format_multi_intent_response
+        language = getattr(farmer, "preferred_language", "en") or "en"
+        if any(ord(c) > 127 for c in (conversation.user_message or "")):
+            language = "te"
+        ai_response_text = format_multi_intent_response(
+            assembled_text=ai_response_text,
+            user_message=conversation.user_message or "",
+            language=language,
+        )
+    except Exception as fmt_err:
+        logger.warning(f"Multi-intent formatting warning: {fmt_err}")
+
+    ai_response_text = ai_response_text.strip() if ai_response_text else ""
+    if not ai_response_text:
+        pref_lang = getattr(farmer, "preferred_language", "en") or "en"
+        ai_response_text = get_fallback_response(pref_lang)
 
     logger.info(f"[PROCESS MSG FINAL] Length: {len(ai_response_text)} | Final response immediately before DB save: '{ai_response_text}'")
 
@@ -370,9 +387,19 @@ async def process_image_message(
         if record.user_message:
             history.append({"role": "user", "parts": record.user_message})
         if record.ai_response:
-            # Clean shop section from the history to prevent LLM contamination
-            clean_response = record.ai_response.split("Available Nearby Shops:")[0].split("🏬")[0].strip()
-            history.append({"role": "model", "parts": clean_response})
+            # Clean structured enrichment sections from history to prevent LLM contamination
+            clean_response = (
+                record.ai_response
+                .split("Available Nearby Shops:")[0]
+                .split("🏬")[0]
+                .split("📊")[0]
+                .split("🌡️")[0]
+                .split("🏛️")[0]
+                .split("🎫")[0]
+                .strip()
+            )
+            if clean_response:
+                history.append({"role": "model", "parts": clean_response})
             
     # 3. Call Gemini Multimodal
     from src.ai.gemini_client import generate_multimodal_response

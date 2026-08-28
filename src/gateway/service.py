@@ -48,9 +48,11 @@ async def get_or_create_farmer(
         profile = FarmerProfile(
             farmer_id=farmer.id,
             full_name=sender_name,
+            preferred_language="te",  # Default to Telugu
         )
         db.add(profile)
         await db.commit()
+        await db.refresh(farmer)
 
         logger.info(f"New farmer registered: {farmer.id} ({phone_number})")
         return farmer
@@ -178,35 +180,32 @@ async def process_message_pipeline(
             conversation = None
             try:
                 conversation = await store_incoming_message(db, farmer, parsed)
-                if conversation is None:
-                    logger.warning(
-                        f"STAGE 4: Duplicate message ID {parsed.message_id} detected during insert. "
-                        f"Skipping pipeline early."
-                    )
-                    return
-                logger.info(f"STAGE 4: Conversation stored successfully. Conversation ID = {conversation.id}")
             except Exception as db_conv_err:
                 logger.exception(f"[PIPELINE STAGE FAILED: Stage 4 - Conversation Storage] Farmer ID: {farmer.id}, Error: {db_conv_err}")
                 return
+
+            if conversation is None:
+                logger.warning(f"STAGE 4: Duplicate message ID {parsed.message_id} detected during storage. Exiting pipeline immediately.")
+                return
+
+            logger.info(f"STAGE 4: Conversation stored successfully. Conversation ID = {conversation.id}")
 
             # ── STAGE 5: AI Processing (Gemini) ───────────────────────
             logger.info("STAGE 5: Generating AI response")
             ai_response = None
             try:
-                conv_ref = conversation or Conversation(farmer_id=farmer.id, user_message=parsed.text_content, user_message_type=parsed.message_type)
-                
                 if parsed.message_type == "image" and parsed.media_id:
                     media_result = await download_media_bytes(parsed.media_id)
                     if media_result:
                         image_bytes, mime_type = media_result
                         ai_response = await process_image_message(
-                            db, farmer, conv_ref, image_bytes, mime_type
+                            db, farmer, conversation, image_bytes, mime_type
                         )
                     else:
                         logger.error(f"[PIPELINE STAGE FAILED: Stage 5 - Image Download] Media ID {parsed.media_id} failed download")
                 elif parsed.text_content:
                     ai_response = await process_text_message(
-                        db, farmer, conv_ref
+                        db, farmer, conversation
                     )
 
                 if ai_response:
