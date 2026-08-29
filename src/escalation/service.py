@@ -371,9 +371,9 @@ async def enrich_response_with_escalation(
             from src.core.models import FarmerProfile
             if farmer_id:
                 prof_res = await db.execute(select(FarmerProfile).where(FarmerProfile.farmer_id == farmer_id))
-                prof = prof_res.scalar_one_or_none()
-                if prof and prof.district:
-                    region_str = f"{prof.district}" + (f", {prof.state}" if prof.state else "")
+                prof = prof_res.scalar_one_or_none() if hasattr(prof_res, "scalar_one_or_none") else None
+                if prof and hasattr(prof, "district") and isinstance(prof.district, str):
+                    region_str = f"{prof.district}" + (f", {prof.state}" if isinstance(getattr(prof, "state", None), str) else "")
         except Exception as reg_err:
             logger.warning(f"[ENRICH ESCALATION] Could not resolve region: {reg_err}")
 

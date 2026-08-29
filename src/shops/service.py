@@ -557,8 +557,8 @@ async def enrich_response_with_shops(
         )
 
         # Production Guard: If farmer location is known (GPS or District):
-        # A shop is ONLY valid if it is within safe radius (<= 50km) OR matches the farmer's district.
-        # Distant shops outside the district/radius must NEVER be returned as fallback.
+        # A shop is ONLY valid if it is within safe radius (<= 50km), matches the farmer's district,
+        # or is an unlocalized/general merchant (no GPS and no district specified).
         if has_farmer_location:
             is_valid_local = False
             if dist is not None and dist <= max_radius_km:
@@ -567,6 +567,9 @@ async def enrich_response_with_shops(
             elif district_match:
                 is_valid_local = True
                 rank = 2
+            elif shop.latitude is None and shop.district is None:
+                is_valid_local = True
+                rank = 3
             else:
                 is_valid_local = False
 

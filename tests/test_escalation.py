@@ -456,6 +456,7 @@ async def test_production_verified_active_expert_shown():
     real_expert = _make_mock_expert(name="Dr. M. Suresh Kumar", specialty="Pest Control", phone="+91 9440123456")
 
     with patch("src.config.get_settings") as mock_settings, \
+         patch("src.escalation.notifications.notify_expert_escalation_ticket", new_callable=AsyncMock), \
          patch.object(EscalationRepository, "seed_default_experts_if_empty", new_callable=AsyncMock), \
          patch.object(EscalationRepository, "get_farmer_consultation_history", new_callable=AsyncMock, return_value=[]), \
          patch.object(EscalationRepository, "get_active_experts", new_callable=AsyncMock, return_value=[real_expert]), \
@@ -529,15 +530,18 @@ async def test_verified_expert_receives_alert_for_new_ticket():
 
     real_expert = _make_mock_expert(name="Dr. M. Suresh Kumar", specialty="Pest Control", phone="+91 9440123456")
 
-    with patch("src.config.get_settings") as mock_settings, \
+    mock_settings_obj = MagicMock()
+    mock_settings_obj.app_env = "production"
+    mock_settings_obj.expert_whatsapp_group_id = ""
+
+    with patch("src.config.get_settings", return_value=mock_settings_obj), \
+         patch("src.escalation.notifications.get_settings", return_value=mock_settings_obj), \
          patch("src.escalation.notifications.send_text_message", new_callable=AsyncMock) as mock_send_wa, \
          patch.object(EscalationRepository, "seed_default_experts_if_empty", new_callable=AsyncMock), \
          patch.object(EscalationRepository, "get_farmer_consultation_history", new_callable=AsyncMock, return_value=[]), \
          patch.object(EscalationRepository, "get_active_experts", new_callable=AsyncMock, return_value=[real_expert]), \
          patch.object(EscalationRepository, "record_escalation_ticket", new_callable=AsyncMock, return_value=True):
 
-        mock_settings.return_value.app_env = "production"
-        mock_settings.return_value.expert_whatsapp_group_id = ""
         mock_send_wa.return_value = "wamid.HBgLMTIzNDU2Nzg5MA=="
 
         res = await enrich_response_with_escalation(
