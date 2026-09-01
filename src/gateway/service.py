@@ -20,6 +20,26 @@ from src.language.dependencies import get_language_service
 from src.ai.service import process_text_message, process_image_message
 
 
+# In-memory in-flight lock registry to prevent concurrent execution races across background tasks
+_IN_FLIGHT_MESSAGE_IDS: set[str] = set()
+
+
+def acquire_in_flight_lock(message_id: str) -> bool:
+    """Atomically acquires in-flight lock for a message ID. Returns False if already in-flight."""
+    if not message_id:
+        return True
+    if message_id in _IN_FLIGHT_MESSAGE_IDS:
+        return False
+    _IN_FLIGHT_MESSAGE_IDS.add(message_id)
+    return True
+
+
+def release_in_flight_lock(message_id: str) -> None:
+    """Releases in-flight lock for a message ID."""
+    if message_id:
+        _IN_FLIGHT_MESSAGE_IDS.discard(message_id)
+
+
 async def get_or_create_farmer(
     db: AsyncSession, phone_number: str, sender_name: Optional[str] = None
 ) -> Farmer:
@@ -135,6 +155,14 @@ async def process_message_pipeline(
     if parsed.text_content:
         logger.info(f"  Message Text: {parsed.text_content[:150]}")
     logger.info("=" * 80)
+
+    # Concurrency Lock Check: Prevent in-flight execution races for the same message ID
+    if not acquire_in_flight_lock(parsed.message_id):
+        logger.warning(
+            f"STAGE 0: Message ID '{parsed.message_id}' is already actively IN-FLIGHT in another background task. "
+            "Aborting duplicate pipeline run immediately."
+        )
+        return
 
     try:
         async with AsyncSessionLocal() as db:
@@ -291,3 +319,5 @@ async def process_message_pipeline(
 
     except Exception as pipeline_err:
         logger.exception(f"[CRITICAL PIPELINE FAILURE] Unhandled error in background pipeline for message {parsed.message_id}: {pipeline_err}")
+    finally:
+        release_in_flight_lock(parsed.message_id)

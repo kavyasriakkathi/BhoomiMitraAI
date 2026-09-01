@@ -175,3 +175,88 @@ async def test_store_incoming_message_catches_integrity_error():
     result = await store_incoming_message(mock_db, mock_farmer, parsed)
     assert result is None
     mock_db.rollback.assert_awaited_once()
+
+
+@patch("src.gateway.router.process_message_pipeline")
+def test_post_webhook_duplicate_messages_in_payload_queued_once(mock_pipeline):
+    """Verify that if the same message_id appears multiple times in a webhook payload, it is only queued once."""
+    mock_pipeline.return_value = None
+
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "1993680168018884",
+                "changes": [
+                    {
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "metadata": {
+                                "display_phone_number": "15551234567",
+                                "phone_number_id": "1211671805365875"
+                            },
+                            "contacts": [
+                                {
+                                    "profile": {"name": "Test Farmer"},
+                                    "wa_id": "919876543210"
+                                }
+                            ],
+                            "messages": [
+                                {
+                                    "from": "919876543210",
+                                    "id": "wamid.DUPLICATE_BATCH_ID_999",
+                                    "timestamp": "1700000000",
+                                    "text": {"body": "First instance"},
+                                    "type": "text"
+                                },
+                                {
+                                    "from": "919876543210",
+                                    "id": "wamid.DUPLICATE_BATCH_ID_999",
+                                    "timestamp": "1700000000",
+                                    "text": {"body": "Second duplicate instance"},
+                                    "type": "text"
+                                }
+                            ]
+                        },
+                        "field": "messages"
+                    }
+                ]
+            }
+        ]
+    }
+
+    response = client.post("/webhook/whatsapp", json=payload)
+    assert response.status_code == 200
+    res_data = response.json()
+    assert res_data["status"] == "ok"
+    assert res_data["messages_queued"] == 1
+
+
+@pytest.mark.asyncio
+async def test_process_message_pipeline_in_flight_lock_aborts_concurrent_run():
+    """Verify that if a message ID is already in-flight, a second concurrent task aborts at Stage 0."""
+    from src.gateway.service import _IN_FLIGHT_MESSAGE_IDS
+
+    msg_id = "wamid.CONCURRENT_IN_FLIGHT_TEST"
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543210",
+        message_id=msg_id,
+        timestamp="1700000000",
+        message_type="text",
+        text_content="Multi intent query",
+    )
+
+    _IN_FLIGHT_MESSAGE_IDS.add(msg_id)
+    try:
+        with patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock) as mock_dup, \
+             patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock) as mock_farmer, \
+             patch("src.gateway.service.send_text_message", new_callable=AsyncMock) as mock_send:
+
+            await process_message_pipeline(parsed)
+
+            mock_dup.assert_not_called()
+            mock_farmer.assert_not_called()
+            mock_send.assert_not_called()
+    finally:
+        _IN_FLIGHT_MESSAGE_IDS.discard(msg_id)
+

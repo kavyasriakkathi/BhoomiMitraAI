@@ -786,3 +786,54 @@ async def test_market_service_api_timeout_local_db_fallback():
     mock_repo.get_prices_by_commodity.assert_called_once_with(
         commodity="Cotton", district="Warangal", state="Telangana"
     )
+
+
+@pytest.mark.asyncio
+async def test_enrich_response_extracts_district_from_query_and_preserves_db_date():
+    """Verify that query mentioning 'వరంగల్లో' extracts Warangal district and outputs exact DB record date."""
+    from src.market.service import enrich_response_with_market_prices
+    from src.core.models import Farmer
+
+    mock_db = AsyncMock()
+    # Mock profile query returning no profile
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = None
+    mock_db.execute.return_value = mock_res
+
+    farmer = Farmer(id=uuid4(), phone_number="+919876543210", preferred_language="te")
+    query_text = "వరంగల్లో ఈరోజు పత్తి ధర ఎంత?"
+    ai_response = "పత్తి పంట ధర సమాచారం:"
+
+    past_date = datetime(2026, 8, 23)
+    mock_db_price = _mock_price_model(
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Warangal Mandi",
+        modal_price=7450.0,
+        min_price=7100.0,
+        max_price=7650.0,
+        price_date=past_date,
+        source="manual_seed",
+    )
+
+    with patch("src.market.repository.MarketPriceRepository.seed_default_prices_if_empty", new=AsyncMock()), \
+         patch("src.market.agmarknet_client.AgmarknetClient.fetch_prices", new=AsyncMock(return_value=[])), \
+         patch("src.market.repository.MarketPriceRepository.get_prices_by_commodity", new=AsyncMock(return_value=[mock_db_price])) as mock_get_prices:
+        
+        result = await enrich_response_with_market_prices(
+            db=mock_db,
+            query_text=query_text,
+            ai_response=ai_response,
+            farmer=farmer,
+        )
+
+        assert "Warangal Mandi" in result
+        assert "7,450" in result
+        assert "23 Aug 2026" in result
+        assert "స్థానిక డేటాబేస్" in result
+        mock_get_prices.assert_called_once_with(
+            commodity="Cotton",
+            district="Warangal",
+            state=None,
+        )
+

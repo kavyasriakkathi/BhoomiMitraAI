@@ -518,6 +518,15 @@ async def enrich_response_with_market_prices(
     if any(ord(c) > 127 for c in query_text):
         language = "te"
 
+    # Extract district from query text if explicitly mentioned (e.g. "వరంగల్లో", "Warangal")
+    try:
+        from src.weather.service import _extract_district_from_query
+        q_dist = _extract_district_from_query(query_text)
+        if q_dist:
+            district = q_dist
+    except Exception as dist_err:
+        logger.debug(f"[MARKET ENRICH] Query district extraction skipped: {dist_err}")
+
     try:
         from sqlalchemy import select
         from src.core.models import FarmerProfile
@@ -527,7 +536,7 @@ async def enrich_response_with_market_prices(
             )
             profile = profile_result.scalar_one_or_none()
             if profile:
-                if isinstance(getattr(profile, "district", None), str):
+                if not district and isinstance(getattr(profile, "district", None), str):
                     district = profile.district
                 if isinstance(getattr(profile, "state", None), str):
                     state = profile.state

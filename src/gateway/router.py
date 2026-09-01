@@ -136,6 +136,7 @@ async def receive_message(
 
     # Step 4: Extract messages and queue background tasks
     messages_queued = 0
+    queued_message_ids: set[str] = set()
 
     if not payload.entry:
         logger.info("Webhook payload contained no 'entry' items.")
@@ -181,6 +182,14 @@ async def receive_message(
                 if parsed is None:
                     logger.info(f"Unsupported message type: '{msg.type}'. Skipping message ID {msg.id}.")
                     continue
+
+                if parsed.message_id in queued_message_ids:
+                    logger.warning(
+                        f"Duplicate message ID '{parsed.message_id}' detected within same webhook payload batch. Skipping."
+                    )
+                    continue
+
+                queued_message_ids.add(parsed.message_id)
 
                 logger.info(f"INCOMING MESSAGE PARSED SUCCESSFULLY:")
                 logger.info(f"  Message ID  : {parsed.message_id}")
