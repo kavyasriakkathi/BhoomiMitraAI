@@ -130,3 +130,41 @@ async def test_app_js_cookie_handling_security():
         assert "handleAuthLogin" in js_code
 
 
+@pytest.mark.asyncio
+async def test_dashboard_mobile_responsive_elements():
+    """Verify dashboard contains mobile viewport configuration, bottom nav, and drawer."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        res = await client.get("/dashboard")
+        assert res.status_code == 200
+        html = res.text
+        # Responsive viewport meta
+        assert 'name="viewport"' in html
+        assert "width=device-width" in html
+        assert "viewport-fit=cover" in html
+        # Mobile bottom nav bar
+        assert "mobile-bottom-nav" in html
+        assert "mob-nav-home" in html
+        assert "mob-nav-ai" in html
+        assert "mob-nav-farm" in html
+        assert "mob-nav-alerts" in html
+        assert "mob-nav-profile" in html
+        # Mobile drawer modal
+        assert "modal-mobile-menu" in html
+        assert "mob-role-list" in html
+
+
+@pytest.mark.asyncio
+async def test_styles_css_responsive_breakpoints():
+    """Verify styles.css includes mobile-first breakpoints and safe area support."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        res = await client.get("/static/styles.css")
+        assert res.status_code == 200
+        css = res.text
+        # Breakpoints & Media queries
+        assert "@media (max-width: 767.98px)" in css
+        assert "@media (max-width: 360px)" in css
+        assert "@media (min-width: 768px)" in css
+        # Safe area insets & touch metrics
+        assert "safe-area-inset-bottom" in css
+        assert "touch-target-min" in css
+        assert "overflow-x: hidden" in css
