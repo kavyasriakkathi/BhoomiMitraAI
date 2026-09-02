@@ -50,6 +50,8 @@ class AgmarknetClient:
         commodity: str,
         state: Optional[str] = None,
         district: Optional[str] = None,
+        is_today_requested: bool = False,
+        **kwargs,
     ) -> List[dict]:
         """
         Fetch mandi prices for a commodity from data.gov.in.

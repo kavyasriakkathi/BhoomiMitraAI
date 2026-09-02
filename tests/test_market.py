@@ -671,6 +671,29 @@ async def test_agmarknet_client_successful_live_response():
 
 
 @pytest.mark.asyncio
+async def test_agmarknet_client_fetch_prices_accepts_is_today_requested():
+    """Verify AgmarknetClient.fetch_prices accepts is_today_requested parameter without TypeError."""
+    from src.market.agmarknet_client import AgmarknetClient
+
+    client_obj = AgmarknetClient(
+        api_key="valid-test-key",
+        api_url="https://api.data.gov.in/resource/test",
+        cache_ttl_seconds=3600,
+        timeout_seconds=5.0,
+    )
+
+    with patch.object(client_obj, "_get_from_cache", new=AsyncMock(return_value=[])), \
+         patch.object(client_obj, "_set_in_cache", new=AsyncMock()):
+        records = await client_obj.fetch_prices(
+            commodity="Cotton",
+            state="Telangana",
+            district="Warangal",
+            is_today_requested=True,
+        )
+        assert records == []
+
+
+@pytest.mark.asyncio
 async def test_agmarknet_client_timeout_handling():
     """Verify AgmarknetClient gracefully catches httpx.TimeoutException and returns [] without raising."""
     import httpx
