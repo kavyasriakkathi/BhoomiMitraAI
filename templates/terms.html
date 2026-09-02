@@ -157,10 +157,18 @@
         footer a { color: var(--text-secondary); }
 
         @media (max-width: 640px) {
-            body { padding: 20px 14px; }
-            .card { padding: 24px 20px; }
-            h1 { font-size: 22px; }
+            body { padding: 16px 12px; }
+            .card { padding: 20px 16px; border-radius: 12px; }
+            h1 { font-size: 20px; line-height: 1.3; }
             .brand-name { font-size: 22px; }
+            .contact-box { padding: 16px; }
+        }
+        @media (max-width: 360px) {
+            body { padding: 12px 8px; }
+            .card { padding: 16px 12px; }
+            h1 { font-size: 18px; }
+            .brand-name { font-size: 20px; }
+            .logo-icon { width: 40px; height: 40px; font-size: 20px; }
         }
     </style>
 </head>
