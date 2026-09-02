@@ -448,7 +448,7 @@ async def test_market_enrichment_telugu_query_1():
             db_mock, "ఈరోజు పత్తి ధర ఎంత?", base_ai_response, farmer
         )
 
-    assert "మార్కెట్ ధరలు" in result
+    assert "పత్తి మార్కెట్ ధర" in result
     assert "Warangal Mandi" in result
     assert "7,450" in result
     assert "మోడల్ ధర" in result
@@ -609,7 +609,7 @@ async def test_market_enrichment_refusal_stripped():
         )
 
     # Must contain the clean market price block
-    assert "📊 పత్తి మార్కెట్ ధరలు" in result
+    assert "పత్తి మార్కెట్ ధర" in result
     assert "Warangal Mandi" in result
     assert "7,450" in result
     assert "స్థానిక డేటాబేస్" in result
@@ -827,6 +827,8 @@ async def test_enrich_response_extracts_district_from_query_and_preserves_db_dat
             farmer=farmer,
         )
 
+        assert "⚠️ ఈరోజు వరంగల్ పత్తి మార్కెట్ ధర డేటా అందుబాటులో లేదు." in result
+        assert "📅 చివరిగా లభించిన ధర: 23 Aug 2026" in result
         assert "Warangal Mandi" in result
         assert "7,450" in result
         assert "23 Aug 2026" in result
@@ -837,3 +839,138 @@ async def test_enrich_response_extracts_district_from_query_and_preserves_db_dat
             state=None,
         )
 
+
+@pytest.mark.asyncio
+async def test_today_market_query_telugu_with_today_data_available():
+    """Verify that when today's data is available, it returns standard title without warning."""
+    from src.market.service import enrich_response_with_market_prices
+    from src.core.models import Farmer
+
+    mock_db = AsyncMock()
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = None
+    mock_db.execute.return_value = mock_res
+
+    farmer = Farmer(id=uuid4(), phone_number="+919876543210", preferred_language="te")
+    query_text = "వరంగల్లో ఈరోజు పత్తి ధర ఎంత?"
+    ai_response = "పత్తి సమాచారం"
+
+    today_dt = datetime.utcnow()
+    mock_db_price = _mock_price_model(
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Warangal Mandi",
+        modal_price=7800.0,
+        min_price=7500.0,
+        max_price=8000.0,
+        price_date=today_dt,
+        source="agmarknet_api",
+    )
+
+    with patch("src.market.repository.MarketPriceRepository.seed_default_prices_if_empty", new=AsyncMock()), \
+         patch("src.market.agmarknet_client.AgmarknetClient.fetch_prices", new=AsyncMock(return_value=[])), \
+         patch("src.market.repository.MarketPriceRepository.get_prices_by_commodity", new=AsyncMock(return_value=[mock_db_price])):
+
+        result = await enrich_response_with_market_prices(
+            db=mock_db,
+            query_text=query_text,
+            ai_response=ai_response,
+            farmer=farmer,
+        )
+
+        assert "📊 పత్తి మార్కెట్ ధరలు" in result
+        assert "అందుబాటులో లేదు" not in result
+        assert "Warangal Mandi" in result
+        assert "7,800" in result
+        assert today_dt.strftime("%d %b %Y") in result
+
+
+@pytest.mark.asyncio
+async def test_today_market_query_english_old_record_shows_warning_and_preserves_date():
+    """Verify that an English query asking for today's price when only old data exists shows warning and exact date."""
+    from src.market.service import enrich_response_with_market_prices
+    from src.core.models import Farmer
+
+    mock_db = AsyncMock()
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = None
+    mock_db.execute.return_value = mock_res
+
+    farmer = Farmer(id=uuid4(), phone_number="+919876543210", preferred_language="en")
+    query_text = "What is the cotton price in Warangal today?"
+    ai_response = "Cotton price info:"
+
+    past_date = datetime(2026, 8, 23)
+    mock_db_price = _mock_price_model(
+        commodity="Cotton",
+        market_name="Warangal Mandi",
+        district="Warangal",
+        state="Telangana",
+        modal_price=7450.0,
+        min_price=7100.0,
+        max_price=7650.0,
+        price_date=past_date,
+        source="local_seed",
+    )
+
+    with patch("src.market.repository.MarketPriceRepository.seed_default_prices_if_empty", new=AsyncMock()), \
+         patch("src.market.agmarknet_client.AgmarknetClient.fetch_prices", new=AsyncMock(return_value=[])), \
+         patch("src.market.repository.MarketPriceRepository.get_prices_by_commodity", new=AsyncMock(return_value=[mock_db_price])):
+
+        result = await enrich_response_with_market_prices(
+            db=mock_db,
+            query_text=query_text,
+            ai_response=ai_response,
+            farmer=farmer,
+        )
+
+        assert "⚠️ Today's market price data for Warangal Cotton is unavailable." in result
+        assert "📅 Last available price: 23 Aug 2026" in result
+        assert "Warangal Mandi" in result
+        assert "7,450" in result
+        assert "23 Aug 2026" in result
+
+
+@pytest.mark.asyncio
+async def test_latest_market_query_without_today_keyword_shows_standard_header_with_true_date():
+    """Verify that general queries (not asking for today) return standard header with exact historic record date."""
+    from src.market.service import enrich_response_with_market_prices
+    from src.core.models import Farmer
+
+    mock_db = AsyncMock()
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = None
+    mock_db.execute.return_value = mock_res
+
+    farmer = Farmer(id=uuid4(), phone_number="+919876543210", preferred_language="te")
+    query_text = "వరంగల్ పత్తి మార్కెట్ ధర ఎంత?"
+    ai_response = "పత్తి సమాచారం"
+
+    past_date = datetime(2026, 8, 23)
+    mock_db_price = _mock_price_model(
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Warangal Mandi",
+        modal_price=7450.0,
+        min_price=7100.0,
+        max_price=7650.0,
+        price_date=past_date,
+        source="local_seed",
+    )
+
+    with patch("src.market.repository.MarketPriceRepository.seed_default_prices_if_empty", new=AsyncMock()), \
+         patch("src.market.agmarknet_client.AgmarknetClient.fetch_prices", new=AsyncMock(return_value=[])), \
+         patch("src.market.repository.MarketPriceRepository.get_prices_by_commodity", new=AsyncMock(return_value=[mock_db_price])):
+
+        result = await enrich_response_with_market_prices(
+            db=mock_db,
+            query_text=query_text,
+            ai_response=ai_response,
+            farmer=farmer,
+        )
+
+        assert "📊 పత్తి మార్కెట్ ధరలు" in result
+        assert "⚠️ ఈరోజు" not in result
+        assert "Warangal Mandi" in result
+        assert "7,450" in result
+        assert "23 Aug 2026" in result

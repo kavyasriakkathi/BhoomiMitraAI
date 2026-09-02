@@ -58,3 +58,4 @@ class MarketPriceQueryResponse(BaseModel):
     data_freshness_hours: Optional[float] = None   # How old is the newest record?
     source_note: str                                # Human-readable freshness note
     is_live: bool                                   # True = from API, False = from local DB or cache
+    is_today_requested: bool = False                # True if user specifically queried for today's price

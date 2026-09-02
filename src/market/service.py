@@ -12,7 +12,8 @@ SAFETY RULES:
 """
 import re
 from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 
 from src.core.logging import logger
 from src.market.repository import MarketPriceRepository
@@ -22,6 +23,41 @@ from src.market.schemas import (
     MarketPriceResponse,
     MarketPriceQueryResponse,
 )
+
+try:
+    IST_TZ = ZoneInfo("Asia/Kolkata")
+except Exception:
+    IST_TZ = timezone(timedelta(hours=5, minutes=30))
+
+
+def get_current_ist_date():
+    """Return the current calendar date in India Standard Time (Asia/Kolkata)."""
+    return datetime.now(IST_TZ).date()
+
+
+def is_record_from_today(price_dt) -> bool:
+    """Check whether a price datetime matches today's date in IST."""
+    if not price_dt:
+        return False
+    if isinstance(price_dt, str):
+        try:
+            price_dt = datetime.fromisoformat(price_dt.strip())
+        except ValueError:
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+                try:
+                    price_dt = datetime.strptime(price_dt.strip(), fmt)
+                    break
+                except ValueError:
+                    continue
+            else:
+                return False
+    today_ist = get_current_ist_date()
+    if isinstance(price_dt, datetime):
+        return price_dt.date() == today_ist
+    elif hasattr(price_dt, "year"):
+        return price_dt == today_ist
+    return False
+
 
 # ------------------------------------------------------------------
 # Commodity keyword map — Telugu and English → canonical English name
@@ -38,14 +74,14 @@ COMMODITY_MAP = {
     "onion": "Onion", "onions": "Onion",
     "ఉల్లిపాయ": "Onion", "ఉల్లి": "Onion",
     # Cotton
-    "cotton": "Cotton",
-    "పత్తి": "Cotton",
+    "cotton": "Cotton", "kapas": "Cotton",
+    "పత్తి": "Cotton", "కాపాస్": "Cotton", "ఖరీఫ్ పత్తి": "Cotton",
     # Maize / Corn
     "maize": "Maize", "corn": "Maize",
     "మొక్కజొన్న": "Maize",
     # Chilli
     "chilli": "Chilli", "chili": "Chilli", "chilies": "Chilli", "chillies": "Chilli",
-    "మిర్చి": "Chilli", "మిర్చి": "Chilli",  # noqa: F601
+    "మిర్చి": "Chilli",
     # Groundnut
     "groundnut": "Groundnut", "peanut": "Groundnut",
     "వేరుశనగ": "Groundnut",
@@ -82,6 +118,44 @@ PRICE_INTENT_KEYWORDS_TE = {
     "మార్కెట్ ధరలు", "మండి ధర", "మండి ధరలు", "ఎంత ధర", "అమ్మకం ధర",
     "క్వింటాల్", "క్వింటాలు", "ఖరీదు", "మార్కెట్", "మార్కెట్లో", "ధర ఎంత",
 }
+
+# Today-specific intent keywords — used to distinguish queries explicitly asking for today's price
+TODAY_KEYWORDS = {
+    # English
+    "today", "today's", "todays", "current price", "today price", "today's price",
+    "current rate", "today rate", "present price", "present rate", "current market",
+    # Telugu
+    "ఈరోజు", "ఈ రోజు", "నేడు", "నేటి", "ఈనాటి", "ఈ నాటి", "ఈరోజున", "ఈ రోజున",
+    "ఈరోజుటి", "ఈ రోజుటి", "నేటిధర", "ఈరోజుధర", "ప్రస్తుతం", "ప్రస్తుత",
+    "ఇప్పటి", "ఇప్పటికి", "ఇవాల్టి", "ఇవాళ", "ఇవాళ్టి", "ఈవేళ",
+}
+
+_TELUGU_DISTRICT_MAP = {
+    "Warangal": "వరంగల్",
+    "Enumamula": "వరంగల్ (ఎనుమాముల)",
+    "Adilabad": "ఆదిలాబాద్",
+    "Khammam": "ఖమ్మం",
+    "Nizamabad": "నిజామాబాద్",
+    "Karimnagar": "కరీంనగర్",
+    "Nalgonda": "నల్గొండ",
+    "Mahabubnagar": "మహబూబ్‌నగర్",
+    "Hyderabad": "హైదరాబాద్",
+    "Guntur": "గుంటూరు",
+    "Krishna": "కృష్ణా",
+    "Kurnool": "కర్నూలు",
+    "Anantapur": "అనంతపురం",
+    "Chittoor": "చిత్తూరు",
+    "Visakhapatnam": "విశాఖపట్నం",
+}
+
+
+def is_today_price_query(query_text: str) -> bool:
+    """Check if the user is explicitly asking for today's market rate."""
+    if not query_text:
+        return False
+    q_lower = query_text.lower()
+    return any(kw in q_lower for kw in TODAY_KEYWORDS)
+
 
 # Non-price intent keywords to detect whether a query is purely about market prices or multi-intent
 OTHER_INTENT_KEYWORDS = [
@@ -187,33 +261,98 @@ class MarketService:
         commodity: str,
         district: Optional[str] = None,
         state: Optional[str] = None,
+        is_today_requested: bool = False,
     ) -> MarketPriceQueryResponse:
         """
-        1. Try the Agmarknet API first.
-        2. If API returns data → upsert to local DB → return as live data.
-        3. If API fails or key is absent → query local DB.
-        4. If local DB is also empty → return data_available=False.
+        1. Try the Agmarknet API first (passing is_today_requested).
+        2. If API returns data → upsert to local DB.
+        3. Check if today's records exist (matching IST calendar date).
+        4. If is_today_requested and live API has today records → return them as live data.
+        5. If live API does not have today records or fails → query local DB.
+        6. If local DB has today records → return them.
+        7. If is_today_requested and NO today data exists anywhere → return latest DB records with is_today_requested=True.
+        8. If not is_today_requested → return latest DB records.
         """
         is_live = False
         source_note = ""
+        today_ist = get_current_ist_date()
+
+        logger.info(
+            f"[MARKET SERVICE] Query start -> commodity='{commodity}', district='{district}', "
+            f"state='{state}', is_today_requested={is_today_requested}, today_ist={today_ist}"
+        )
 
         # Step 1: Try live API
         api_records = await self.client.fetch_prices(
             commodity=commodity,
             state=state,
             district=district,
+            is_today_requested=is_today_requested,
+        )
+
+        has_today_live = any(is_record_from_today(r.get("arrival_date")) for r in api_records) if api_records else False
+        logger.info(
+            f"[MARKET SERVICE] External API result -> count={len(api_records)}, "
+            f"has_today_live={has_today_live}"
         )
 
         if api_records:
-            is_live = True
             await self._upsert_api_records(api_records, commodity)
+
+        # If today's price was specifically requested and live API provided today's records
+        if is_today_requested and has_today_live:
+            is_live = True
             source_note = "Live data from Agmarknet / data.gov.in"
+            today_api_records = [r for r in api_records if is_record_from_today(r.get("arrival_date"))]
+            results = []
+            for r in today_api_records:
+                telugu_name = None
+                for kw, canon in COMMODITY_MAP.items():
+                    if canon.lower() == commodity.lower() and any(ord(c) > 127 for c in kw):
+                        telugu_name = kw
+                        break
+                arr_dt = r.get("arrival_date")
+                if not isinstance(arr_dt, datetime):
+                    try:
+                        arr_dt = datetime.fromisoformat(str(arr_dt))
+                    except Exception:
+                        arr_dt = datetime.utcnow()
+                results.append(
+                    MarketPriceResponse(
+                        id=None,
+                        commodity=commodity,
+                        commodity_telugu=telugu_name,
+                        market_name=r.get("market", "Unknown Market"),
+                        district=r.get("district", district or ""),
+                        state=r.get("state", state or "Telangana"),
+                        min_price=float(r.get("min_price", 0)),
+                        max_price=float(r.get("max_price", 0)),
+                        modal_price=float(r.get("modal_price", 0)),
+                        unit=r.get("unit", "Quintal"),
+                        price_date=arr_dt,
+                        source="agmarknet_api",
+                        created_at=datetime.utcnow(),
+                        updated_at=datetime.utcnow(),
+                    )
+                )
             logger.info(
-                f"[MARKET SERVICE] API returned {len(api_records)} records "
-                f"for '{commodity}'"
+                f"[MARKET SERVICE] Selected LIVE TODAY record -> "
+                f"market='{results[0].market_name}', modal={results[0].modal_price}, "
+                f"price_date={results[0].price_date.strftime('%Y-%m-%d')}"
+            )
+            return MarketPriceQueryResponse(
+                commodity=commodity,
+                district=district,
+                state=state,
+                results=results,
+                data_available=True,
+                data_freshness_hours=0.0,
+                source_note=source_note,
+                is_live=True,
+                is_today_requested=True,
             )
 
-        # Step 2: Query local DB (regardless of API — DB may have fresher data from earlier call)
+        # Step 2: Query local DB (for latest records or when API didn't return today's data)
         db_records = await self.repository.get_prices_by_commodity(
             commodity=commodity,
             district=district,
@@ -222,7 +361,7 @@ class MarketService:
 
         if not db_records:
             logger.info(
-                f"[MARKET SERVICE] No price data found for '{commodity}' "
+                f"[MARKET SERVICE] No price data found in DB or API for '{commodity}' "
                 f"(district={district}, state={state})"
             )
             return MarketPriceQueryResponse(
@@ -234,17 +373,30 @@ class MarketService:
                 data_freshness_hours=None,
                 source_note="No price data available in local database or API.",
                 is_live=False,
+                is_today_requested=is_today_requested,
             )
 
-        # Compute freshness
+        has_today_db = any(is_record_from_today(r.price_date) for r in db_records)
         newest = max(r.price_date for r in db_records)
         freshness_hours = round(
             (datetime.utcnow() - newest).total_seconds() / 3600, 1
         )
-        if not is_live:
+
+        if api_records and not is_today_requested:
+            is_live = True
+            source_note = "Live data from Agmarknet / data.gov.in"
+        else:
+            is_live = False
             source_note = f"Local database (data is ~{freshness_hours}h old)"
 
         results = [MarketPriceResponse.model_validate(r) for r in db_records]
+
+        logger.info(
+            f"[MARKET SERVICE] Selected DB record -> "
+            f"market='{results[0].market_name}', modal={results[0].modal_price}, "
+            f"price_date={results[0].price_date.strftime('%Y-%m-%d')}, "
+            f"has_today_match={has_today_db}, is_live={is_live}"
+        )
 
         return MarketPriceQueryResponse(
             commodity=commodity,
@@ -255,70 +407,80 @@ class MarketService:
             data_freshness_hours=freshness_hours,
             source_note=source_note,
             is_live=is_live,
+            is_today_requested=is_today_requested,
         )
 
     async def create_price(self, data: MarketPriceCreate):
         """Admin: manually insert a market price record."""
-        from src.core.models import MarketPrice
-        count = await self.repository.upsert_prices([data])
-        # Re-fetch to return the stored object
-        from sqlalchemy import select, and_, func
-        result = await self.repository.db.execute(
-            select(MarketPrice).where(
-                and_(
-                    MarketPrice.commodity.ilike(data.commodity),
-                    MarketPrice.market_name.ilike(data.market_name),
-                    func.date(MarketPrice.price_date) == data.price_date.date(),
-                )
-            ).order_by(MarketPrice.created_at.desc()).limit(1)
-        )
-        record = result.scalar_one_or_none()
-        if record:
-            return MarketPriceResponse.model_validate(record)
-        return None
+        return await self.repository.create_price(data)
 
-    async def list_commodities(self) -> List[str]:
-        return await self.repository.list_commodities()
-
-    # ------------------------------------------------------------------
-    # Internal: upsert API records into the local DB
-    # ------------------------------------------------------------------
-
-    async def _upsert_api_records(self, api_records: List[dict], commodity: str) -> None:
-        """Convert raw API dicts to MarketPriceCreate and upsert."""
+    async def _upsert_api_records(self, records: List[dict], commodity: str):
+        """Convert Agmarknet client dicts into MarketPriceCreate schemas and save to DB."""
         creates = []
-        for rec in api_records:
+        for r in records:
             try:
-                creates.append(MarketPriceCreate(
-                    commodity=rec.get("commodity") or commodity,
-                    market_name=rec.get("market") or "Unknown Market",
-                    district=rec.get("district") or "",
-                    state=rec.get("state") or "",
-                    min_price=float(rec.get("min_price", 0)),
-                    max_price=float(rec.get("max_price", 0)),
-                    modal_price=float(rec.get("modal_price", 0)),
-                    unit="Quintal",
-                    price_date=rec.get("arrival_date") or datetime.utcnow(),
-                    source="agmarknet_api",
-                ))
-            except Exception as exc:
-                logger.warning(f"[MARKET SERVICE] Skipping malformed API record: {exc}")
+                # Determine Telugu name if commodity matches COMMODITY_MAP
+                telugu_name = None
+                for kw, canon in COMMODITY_MAP.items():
+                    if canon.lower() == commodity.lower() and any(
+                        ord(c) > 127 for c in kw
+                    ):
+                        telugu_name = kw
+                        break
+
+                arr_date = r.get("arrival_date")
+                if isinstance(arr_date, datetime):
+                    price_dt = arr_date
+                elif isinstance(arr_date, str):
+                    try:
+                        price_dt = datetime.strptime(arr_date, "%Y-%m-%d")
+                    except ValueError:
+                        price_dt = datetime.fromisoformat(arr_date)
+                else:
+                    price_dt = datetime.utcnow()
+
+                creates.append(
+                    MarketPriceCreate(
+                        commodity=commodity,
+                        commodity_telugu=telugu_name,
+                        market_name=r.get("market", "Unknown Market"),
+                        district=r.get("district", ""),
+                        state=r.get("state", ""),
+                        min_price=float(r.get("min_price", 0)),
+                        max_price=float(r.get("max_price", 0)),
+                        modal_price=float(r.get("modal_price", 0)),
+                        unit=r.get("unit", "Quintal"),
+                        price_date=price_dt,
+                        source="agmarknet_api",
+                    )
+                )
+            except (ValueError, TypeError) as exc:
+                logger.warning(
+                    f"[MARKET SERVICE] Skipping invalid record {r}: {exc}"
+                )
                 continue
 
         if creates:
             await self.repository.upsert_prices(creates)
 
     # ------------------------------------------------------------------
-    # Public: WhatsApp reply formatter
+    # WhatsApp response formatting
     # ------------------------------------------------------------------
 
     def format_whatsapp_reply(
-        self, query_response: MarketPriceQueryResponse, language: str = "en"
+        self,
+        query_response: MarketPriceQueryResponse,
+        language: str = "te",
+        is_today_query: bool = False,
     ) -> str:
         """
-        Format a MarketPriceQueryResponse into a WhatsApp-friendly text block.
-        Telugu labels are used when language == "te".
-        Returns an honest "unavailable" message when no data is found.
+        Render a MarketPriceQueryResponse into a localized WhatsApp text message.
+
+        Handles:
+        - Live vs local DB source attribution
+        - Telugu and English
+        - Price freshness notice (especially when today's price was requested but only older data exists)
+        - Empty data fallback
         """
         labels = _TE_LABELS if language == "te" else _EN_LABELS
         commodity = query_response.commodity
@@ -353,25 +515,40 @@ class MarketService:
             if len(deduplicated) >= 3:
                 break
 
+        has_today_data = any(is_record_from_today(r.price_date) for r in deduplicated)
         source_str = labels["source_live"] if query_response.is_live else labels["source_local"]
-        lines = [labels["title"].format(commodity=commodity_display)]
+
+        # If farmer specifically asked for today's price, but all available records are from older dates
+        if is_today_query and not has_today_data:
+            newest_date = max(r.price_date for r in deduplicated)
+            latest_date_str = newest_date.strftime("%d %b %Y")
+
+            if language == "te":
+                dist_str = ""
+                if query_response.district:
+                    tel_dist = _TELUGU_DISTRICT_MAP.get(query_response.district, query_response.district)
+                    dist_str = f"{tel_dist} "
+                lines = [
+                    f"⚠️ ఈరోజు {dist_str}{commodity_display} మార్కెట్ ధర డేటా అందుబాటులో లేదు.",
+                    f"📅 చివరిగా లభించిన ధర: {latest_date_str}",
+                ]
+            else:
+                dist_str = f"{query_response.district} " if query_response.district else ""
+                lines = [
+                    f"⚠️ Today's market price data for {dist_str}{commodity} is unavailable.",
+                    f"📅 Last available price: {latest_date_str}",
+                ]
+        else:
+            lines = [labels["title"].format(commodity=commodity_display)]
 
         for r in deduplicated:
             date_str = r.price_date.strftime("%d %b %Y")
-            if language == "te":
-                block = (
-                    f"\n{labels['market']}: {r.market_name}, {r.state}\n"
-                    f"{labels['modal']}: ₹{r.modal_price:,.0f}/{labels['unit_suffix']}\n"
-                    f"{labels['min']}: ₹{r.min_price:,.0f} | {labels['max']}: ₹{r.max_price:,.0f}\n"
-                    f"{labels['date']}: {date_str}"
-                )
-            else:
-                block = (
-                    f"\n{labels['market']}: {r.market_name}, {r.state}\n"
-                    f"{labels['modal']}: ₹{r.modal_price:,.0f}/{labels['unit_suffix']}\n"
-                    f"{labels['min']}: ₹{r.min_price:,.0f} | {labels['max']}: ₹{r.max_price:,.0f}\n"
-                    f"{labels['date']}: {date_str}"
-                )
+            block = (
+                f"\n{labels['market']}: {r.market_name}, {r.state}\n"
+                f"{labels['modal']}: ₹{r.modal_price:,.0f}/{labels['unit_suffix']}\n"
+                f"{labels['min']}: ₹{r.min_price:,.0f} | {labels['max']}: ₹{r.max_price:,.0f}\n"
+                f"{labels['date']}: {date_str}"
+            )
             lines.append(block)
 
         lines.append(f"\n📡 {source_str}")
@@ -518,7 +695,7 @@ async def enrich_response_with_market_prices(
     if any(ord(c) > 127 for c in query_text):
         language = "te"
 
-    # Extract district from query text if explicitly mentioned (e.g. "వరంగల్లో", "Warangal")
+    # Extract district from query text if explicitly mentioned (e.g. "వరంగల్లో", "Warangal", "Enumamula")
     try:
         from src.weather.service import _extract_district_from_query
         q_dist = _extract_district_from_query(query_text)
@@ -545,9 +722,12 @@ async def enrich_response_with_market_prices(
     except Exception as exc:
         logger.warning(f"[MARKET ENRICH] Could not load farmer profile: {exc}")
 
+    today_requested = is_today_price_query(query_text)
+
     logger.info(
-        f"[MARKET ENRICH] Parameters -> matched_commodity='{matched_commodity}', "
-        f"district='{district}', state='{state}', language='{language}'"
+        f"[MARKET ENRICH] Parameters -> detected_crop='{matched_commodity}', "
+        f"detected_location_or_mandi='{district}', state='{state}', "
+        f"is_today_requested={today_requested}, language='{language}'"
     )
 
     if not matched_commodity:
@@ -575,14 +755,18 @@ async def enrich_response_with_market_prices(
             commodity=matched_commodity,
             district=district,
             state=state,
+            is_today_requested=today_requested,
         )
 
         logger.info(
             f"[MARKET ENRICH] Query response -> data_available={query_response.data_available}, "
-            f"record_count={len(query_response.results)}, is_live={query_response.is_live}"
+            f"record_count={len(query_response.results)}, is_live={query_response.is_live}, "
+            f"is_today_requested={today_requested}"
         )
 
-        price_block = svc.format_whatsapp_reply(query_response, language=language)
+        price_block = svc.format_whatsapp_reply(
+            query_response, language=language, is_today_query=today_requested
+        )
 
         if query_response.data_available:
             logger.info(

@@ -248,13 +248,18 @@ def clean_crop_advice_for_multi_intent(ai_text: str) -> str:
         para = para.strip()
         if not para:
             continue
+        if para.startswith("⚠️ గమనిక:") or para.startswith("⚠️ Note:"):
+            continue
+        para = clean_outros(para)
         sentences = [s.strip() for s in re.split(r'(?<=[।\.\?\!])\s+', para) if s.strip()]
         valid_sentences = [
             s for s in sentences
             if not any(marker in s.lower() for marker in speculative_sentence_markers)
         ]
         if valid_sentences:
-            cleaned_paragraphs.append(" ".join(valid_sentences))
+            cleaned_p = clean_outros(" ".join(valid_sentences))
+            if cleaned_p:
+                cleaned_paragraphs.append(cleaned_p)
 
     result = "\n".join(cleaned_paragraphs).strip()
     result = clean_introductions(result)
@@ -284,7 +289,7 @@ def decompose_assembled_response(assembled_text: str) -> Dict[str, str]:
     if not assembled_text:
         return sections
 
-    pattern = r"(?=(?:^|\n\n)(?:🏬|📊|🌡️|🌦️|🏛️|👨‍🌾))"
+    pattern = r"(?=(?:^|\n\n)(?:🏬|📊|🌡️|🌦️|🏛️|👨‍🌾|⚠️))"
     chunks = re.split(pattern, assembled_text.strip())
 
     base_ai_parts = []
@@ -296,6 +301,8 @@ def decompose_assembled_response(assembled_text: str) -> Dict[str, str]:
         if chunk.startswith("🏬") or "Available Nearby Shops" in chunk or "సమీప వ్యవసాయ దుకాణాలు" in chunk or "Nearby Agricultural Shops" in chunk:
             sections["shop"] = chunk
         elif chunk.startswith("📊") or "Mandi Prices" in chunk or "మార్కెట్ ధరలు" in chunk:
+            sections["market"] = chunk
+        elif chunk.startswith("⚠️") and ("మార్కెట్ ధర" in chunk or "market price" in chunk.lower() or "మండి" in chunk or "mandi" in chunk.lower()):
             sections["market"] = chunk
         elif chunk.startswith("🌡️") or chunk.startswith("🌦️") or "Weather Information" in chunk or "వాతావరణ సమాచారం" in chunk:
             sections["weather"] = chunk
@@ -353,7 +360,7 @@ def compact_section(section_key: str, section_text: str, language: str = "en") -
     elif section_key == "market":
         body_lines = []
         for line in lines:
-            if line.startswith("📊"):
+            if line.startswith("📊") or line.startswith("⚠️"):
                 section_header = line
                 continue
             if line.startswith("📡"):
