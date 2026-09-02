@@ -367,13 +367,18 @@ async def enrich_response_with_escalation(
         # Step 4: Resolve Region Context from FarmerProfile/Memory
         region_str = ""
         try:
+            import inspect
             from sqlalchemy import select
             from src.core.models import FarmerProfile
             if farmer_id:
                 prof_res = await db.execute(select(FarmerProfile).where(FarmerProfile.farmer_id == farmer_id))
+                if inspect.iscoroutine(prof_res):
+                    prof_res = await prof_res
                 prof = prof_res.scalar_one_or_none() if hasattr(prof_res, "scalar_one_or_none") else None
-                if prof and hasattr(prof, "district") and isinstance(prof.district, str):
-                    region_str = f"{prof.district}" + (f", {prof.state}" if isinstance(getattr(prof, "state", None), str) else "")
+                if inspect.iscoroutine(prof):
+                    prof = await prof
+                if prof and hasattr(prof, "district") and isinstance(prof.district, str) and prof.district:
+                    region_str = f"{prof.district.strip()}" + (f", {prof.state.strip()}" if isinstance(getattr(prof, "state", None), str) and prof.state else "")
         except Exception as reg_err:
             logger.warning(f"[ENRICH ESCALATION] Could not resolve region: {reg_err}")
 

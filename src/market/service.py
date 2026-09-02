@@ -289,8 +289,10 @@ class MarketService:
             district=district,
             is_today_requested=is_today_requested,
         )
+        if api_records is None:
+            api_records = []
 
-        has_today_live = any(is_record_from_today(r.get("arrival_date")) for r in api_records) if api_records else False
+        has_today_live = any(is_record_from_today(r.get("arrival_date")) for r in api_records if isinstance(r, dict)) if api_records else False
         logger.info(
             f"[MARKET SERVICE] External API result -> count={len(api_records)}, "
             f"has_today_live={has_today_live}"
@@ -376,10 +378,17 @@ class MarketService:
                 is_today_requested=is_today_requested,
             )
 
-        has_today_db = any(is_record_from_today(r.price_date) for r in db_records)
-        newest = max(r.price_date for r in db_records)
-        freshness_hours = round(
-            (datetime.utcnow() - newest).total_seconds() / 3600, 1
+        has_today_db = any(is_record_from_today(getattr(r, "price_date", None)) for r in db_records)
+        dates = [
+            r.price_date
+            for r in db_records
+            if getattr(r, "price_date", None) and isinstance(r.price_date, datetime)
+        ]
+        newest = max(dates) if dates else None
+        freshness_hours = (
+            round((datetime.utcnow() - newest).total_seconds() / 3600, 1)
+            if newest
+            else 0.0
         )
 
         if api_records and not is_today_requested:
@@ -394,7 +403,7 @@ class MarketService:
         logger.info(
             f"[MARKET SERVICE] Selected DB record -> "
             f"market='{results[0].market_name}', modal={results[0].modal_price}, "
-            f"price_date={results[0].price_date.strftime('%Y-%m-%d')}, "
+            f"price_date={results[0].price_date.strftime('%Y-%m-%d') if results[0].price_date else 'N/A'}, "
             f"has_today_match={has_today_db}, is_live={is_live}"
         )
 
@@ -409,6 +418,10 @@ class MarketService:
             is_live=is_live,
             is_today_requested=is_today_requested,
         )
+
+    async def list_commodities(self) -> List[str]:
+        """Return distinct commodity names stored in the local database."""
+        return await self.repository.list_commodities()
 
     async def create_price(self, data: MarketPriceCreate):
         """Admin: manually insert a market price record."""
@@ -705,20 +718,25 @@ async def enrich_response_with_market_prices(
         logger.debug(f"[MARKET ENRICH] Query district extraction skipped: {dist_err}")
 
     try:
+        import inspect
         from sqlalchemy import select
         from src.core.models import FarmerProfile
         if farmer and hasattr(farmer, "id"):
             profile_result = await db.execute(
                 select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
             )
-            profile = profile_result.scalar_one_or_none()
+            if inspect.iscoroutine(profile_result):
+                profile_result = await profile_result
+            profile = profile_result.scalar_one_or_none() if hasattr(profile_result, "scalar_one_or_none") else None
+            if inspect.iscoroutine(profile):
+                profile = await profile
             if profile:
-                if not district and isinstance(getattr(profile, "district", None), str):
-                    district = profile.district
-                if isinstance(getattr(profile, "state", None), str):
-                    state = profile.state
+                if not district and isinstance(getattr(profile, "district", None), str) and profile.district:
+                    district = profile.district.strip()
+                if isinstance(getattr(profile, "state", None), str) and profile.state:
+                    state = profile.state.strip()
                 if not matched_commodity and isinstance(getattr(profile, "current_crop", None), str) and profile.current_crop:
-                    matched_commodity = profile.current_crop
+                    matched_commodity = profile.current_crop.strip()
     except Exception as exc:
         logger.warning(f"[MARKET ENRICH] Could not load farmer profile: {exc}")
 

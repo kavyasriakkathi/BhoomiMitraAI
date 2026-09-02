@@ -57,11 +57,14 @@ class SchemeService:
         # Seed defaults
         schemes = await self.repository.seed_default_schemes_if_empty()
 
-        profile: Optional[FarmerProfile] = farmer.profile
-        farmer_state = (profile.state if profile and profile.state else "Telangana").strip()
-        farmer_district = (profile.district if profile and profile.district else "Jagtial").strip()
-        farmer_land = profile.land_size_acres if profile and profile.land_size_acres is not None else 5.0
-        farmer_name = profile.full_name if profile and profile.full_name else "Farmer"
+        import inspect
+        profile = getattr(farmer, "profile", None)
+        if inspect.iscoroutine(profile):
+            profile = await profile
+        farmer_state = (profile.state if profile and isinstance(getattr(profile, "state", None), str) and profile.state else "Telangana").strip()
+        farmer_district = (profile.district if profile and isinstance(getattr(profile, "district", None), str) and profile.district else "Jagtial").strip()
+        farmer_land = profile.land_size_acres if profile and getattr(profile, "land_size_acres", None) is not None else 5.0
+        farmer_name = profile.full_name if profile and getattr(profile, "full_name", None) else "Farmer"
 
         evaluated_items: List[SchemeEligibilityItem] = []
         eligible_count = 0
@@ -347,14 +350,20 @@ async def enrich_response_with_schemes(
     language = getattr(farmer, "preferred_language", "en") or "en"
 
     try:
+        import inspect
         from sqlalchemy import select
         from src.core.models import FarmerProfile
-        profile_result = await db.execute(
-            select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
-        )
-        profile = profile_result.scalar_one_or_none()
-        if profile and profile.state:
-            farmer_state = profile.state.strip()
+        if farmer and hasattr(farmer, "id"):
+            profile_result = await db.execute(
+                select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
+            )
+            if inspect.iscoroutine(profile_result):
+                profile_result = await profile_result
+            profile = profile_result.scalar_one_or_none() if hasattr(profile_result, "scalar_one_or_none") else None
+            if inspect.iscoroutine(profile):
+                profile = await profile
+            if profile and isinstance(getattr(profile, "state", None), str) and profile.state:
+                farmer_state = profile.state.strip()
     except Exception as loc_err:
         logger.warning(f"[SCHEMES ENRICH] Could not resolve farmer state: {loc_err}")
 
