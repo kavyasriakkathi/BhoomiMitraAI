@@ -843,7 +843,7 @@ async def test_enrich_response_extracts_district_from_query_and_preserves_db_dat
 @pytest.mark.asyncio
 async def test_today_market_query_telugu_with_today_data_available():
     """Verify that when today's data is available, it returns standard title without warning."""
-    from src.market.service import enrich_response_with_market_prices
+    from src.market.service import enrich_response_with_market_prices, IST_TZ
     from src.core.models import Farmer
 
     mock_db = AsyncMock()
@@ -855,7 +855,7 @@ async def test_today_market_query_telugu_with_today_data_available():
     query_text = "వరంగల్లో ఈరోజు పత్తి ధర ఎంత?"
     ai_response = "పత్తి సమాచారం"
 
-    today_dt = datetime.utcnow()
+    today_dt = datetime.now(IST_TZ).replace(tzinfo=None)
     mock_db_price = _mock_price_model(
         commodity="Cotton",
         commodity_telugu="పత్తి",
