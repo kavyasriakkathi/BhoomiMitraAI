@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>BhoomiMitra AI — Farmer & Shop Owner Dashboard</title>
   <link rel="stylesheet" href="/static/styles.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -12,12 +12,13 @@
   <!-- Navbar -->
   <header class="navbar">
     <a href="#" class="brand">
-      <span class="brand-icon">🌾</span> BhoomiMitra AI
+      <span class="brand-icon">🌾</span>
+      <span class="brand-name">BhoomiMitra AI</span>
     </a>
 
     <div class="nav-controls">
       <!-- Role Switcher -->
-      <div class="role-switcher">
+      <div class="role-switcher desktop-only">
         <button class="role-btn active" id="btn-role-farmer" onclick="switchDashboardRole('farmer')">
           👨‍🌾 Farmer Dashboard
         </button>
@@ -27,12 +28,14 @@
       </div>
 
       <!-- Language Selector -->
-      <select class="lang-select" id="lang-select" onchange="changeLanguage(this.value)">
-        <option value="en">English</option>
-        <option value="te">తెలుగు (Telugu)</option>
-        <option value="hi">हिन्दी (Hindi)</option>
-        <option value="kn">ಕನ್ನಡ (Kannada)</option>
-      </select>
+      <div class="lang-selector-wrapper">
+        <select class="lang-select" id="lang-select" onchange="changeLanguage(this.value)">
+          <option value="en">English</option>
+          <option value="te">తెలుగు (Telugu)</option>
+          <option value="hi">हिन्दी (Hindi)</option>
+          <option value="kn">ಕನ್ನಡ (Kannada)</option>
+        </select>
+      </div>
     </div>
   </header>
 

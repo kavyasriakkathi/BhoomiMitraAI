@@ -24,7 +24,9 @@ let lastAiResponseText = "";
 document.addEventListener('DOMContentLoaded', async () => {
   await initializeData();
   // Apply default language translations
-  applyLanguageTranslation('en');
+  if (typeof applyLanguageTranslation === 'function') {
+    applyLanguageTranslation('en');
+  }
   // Start background live polling for new WhatsApp Webhook messages
   startWebhookPolling();
 });
@@ -112,6 +114,12 @@ function updateAuthUI() {
   const emailDisplay = document.getElementById('user-email-display');
   const roleBadge = document.getElementById('user-role-badge');
 
+  // Mobile Auth elements
+  const mobLoggedIn = document.getElementById('mob-user-logged-in');
+  const mobLoggedOut = document.getElementById('mob-user-logged-out');
+  const mobEmail = document.getElementById('mob-user-email');
+  const mobRole = document.getElementById('mob-user-role');
+
   if (currentUser) {
     if (btnLogin) btnLogin.style.display = 'none';
     if (userBadge) userBadge.style.display = 'flex';
@@ -120,9 +128,20 @@ function updateAuthUI() {
       roleBadge.innerText = currentUser.role.replace('_', ' ').toUpperCase();
       roleBadge.className = `badge badge-${currentUser.role === 'admin' ? 'open' : currentUser.role === 'expert' ? 'accepted' : 'completed'}`;
     }
+
+    if (mobLoggedIn) mobLoggedIn.style.display = 'block';
+    if (mobLoggedOut) mobLoggedOut.style.display = 'none';
+    if (mobEmail) mobEmail.innerText = currentUser.email;
+    if (mobRole) {
+      mobRole.innerText = currentUser.role.replace('_', ' ').toUpperCase();
+      mobRole.className = `badge badge-${currentUser.role === 'admin' ? 'open' : currentUser.role === 'expert' ? 'accepted' : 'completed'}`;
+    }
   } else {
     if (btnLogin) btnLogin.style.display = 'inline-block';
     if (userBadge) userBadge.style.display = 'none';
+
+    if (mobLoggedIn) mobLoggedIn.style.display = 'none';
+    if (mobLoggedOut) mobLoggedOut.style.display = 'block';
   }
 }
 
@@ -329,10 +348,14 @@ function switchDashboardRole(role) {
 
   currentRole = role;
   document.querySelectorAll('.role-btn').forEach(btn => btn.classList.remove('active'));
+  document.querySelectorAll('.mob-role-item').forEach(btn => btn.classList.remove('active'));
   document.querySelectorAll('.dashboard-view').forEach(view => {
     view.classList.remove('active');
     view.style.display = 'none';
   });
+
+  const mobRoleBtn = document.getElementById(`mob-btn-role-${role}`);
+  if (mobRoleBtn) mobRoleBtn.classList.add('active');
 
   if (role === 'farmer') {
     const btn = document.getElementById('btn-role-farmer');
@@ -381,15 +404,84 @@ function switchDashboardRole(role) {
   }
 }
 
+// Mobile Bottom Navigation Controller (< 768px)
+function switchMobileNav(tab, el) {
+  document.querySelectorAll('.mob-nav-btn').forEach(btn => btn.classList.remove('active'));
+  if (el) {
+    el.classList.add('active');
+  } else {
+    const targetBtn = document.getElementById(`mob-nav-${tab}`);
+    if (targetBtn) targetBtn.classList.add('active');
+  }
+
+  if (tab === 'home') {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (currentRole === 'farmer') {
+      switchFarmerTab('shops');
+    }
+  } else if (tab === 'ai') {
+    const heroCard = document.querySelector('.voice-hero-card');
+    if (heroCard) {
+      heroCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const micBtn = document.getElementById('main-mic-btn');
+      if (micBtn) {
+        micBtn.style.transform = 'scale(1.12)';
+        setTimeout(() => { micBtn.style.transform = ''; }, 300);
+      }
+    }
+  } else if (tab === 'farm') {
+    if (currentRole !== 'farmer') {
+      switchDashboardRole('farmer');
+    }
+    switchFarmerTab('orders');
+    const farmTab = document.getElementById('farmer-tab-orders');
+    if (farmTab) {
+      farmTab.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  } else if (tab === 'alerts') {
+    const alertsCard = document.querySelector('.notification-banner-card');
+    if (alertsCard) {
+      alertsCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      alertsCard.style.outline = '2px solid var(--accent)';
+      setTimeout(() => { alertsCard.style.outline = ''; }, 1200);
+    }
+  } else if (tab === 'profile') {
+    openMobileMenu();
+  }
+}
+
+function openMobileMenu() {
+  const modal = document.getElementById('modal-mobile-menu');
+  if (modal) modal.classList.add('active');
+}
+
+function closeMobileMenu() {
+  closeModal('modal-mobile-menu');
+}
+
 
 // Farmer Tab Switching
-function switchFarmerTab(tabName) {
+function switchFarmerTab(tabName, btnEl) {
   document.querySelectorAll('.farmer-tab-content').forEach(el => el.style.display = 'none');
-  document.querySelectorAll('#view-farmer .tab-btn').forEach(btn => btn.classList.remove('active'));
+  const allBtns = document.querySelectorAll('#view-farmer .tab-btn');
+  allBtns.forEach(btn => btn.classList.remove('active'));
 
   const targetTab = document.getElementById(`farmer-tab-${tabName}`);
   if (targetTab) targetTab.style.display = 'block';
-  if (event && event.target) event.target.classList.add('active');
+
+  if (btnEl && btnEl.classList) {
+    btnEl.classList.add('active');
+  } else if (typeof event !== 'undefined' && event && event.target) {
+    const clickedBtn = event.target.closest ? event.target.closest('.tab-btn') : event.target;
+    if (clickedBtn && clickedBtn.classList) clickedBtn.classList.add('active');
+  } else {
+    allBtns.forEach(btn => {
+      const onclickAttr = btn.getAttribute('onclick') || '';
+      if (onclickAttr.includes(`'${tabName}'`) || onclickAttr.includes(`"${tabName}"`)) {
+        btn.classList.add('active');
+      }
+    });
+  }
 
   if (tabName === 'shops') loadNearbyShops();
   if (tabName === 'orders') loadFarmerOrders();
@@ -398,13 +490,27 @@ function switchFarmerTab(tabName) {
 }
 
 // Shop Tab Switching
-function switchShopTab(tabName) {
+function switchShopTab(tabName, btnEl) {
   document.querySelectorAll('.shop-tab-content').forEach(el => el.style.display = 'none');
-  document.querySelectorAll('#view-shop .tab-btn').forEach(btn => btn.classList.remove('active'));
+  const allBtns = document.querySelectorAll('#view-shop .tab-btn');
+  allBtns.forEach(btn => btn.classList.remove('active'));
 
   const targetTab = document.getElementById(`shop-tab-${tabName}`);
   if (targetTab) targetTab.style.display = 'block';
-  if (event && event.target) event.target.classList.add('active');
+
+  if (btnEl && btnEl.classList) {
+    btnEl.classList.add('active');
+  } else if (typeof event !== 'undefined' && event && event.target) {
+    const clickedBtn = event.target.closest ? event.target.closest('.tab-btn') : event.target;
+    if (clickedBtn && clickedBtn.classList) clickedBtn.classList.add('active');
+  } else {
+    allBtns.forEach(btn => {
+      const onclickAttr = btn.getAttribute('onclick') || '';
+      if (onclickAttr.includes(`'${tabName}'`) || onclickAttr.includes(`"${tabName}"`)) {
+        btn.classList.add('active');
+      }
+    });
+  }
 
   if (tabName === 'orders') loadShopOrders();
   if (tabName === 'inventory') loadShopInventory();

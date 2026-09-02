@@ -586,3 +586,60 @@ function t(key, lang = 'en') {
   const dict = I18N_DICTIONARY[lang] || I18N_DICTIONARY.en;
   return dict[key] || I18N_DICTIONARY.en[key] || key;
 }
+
+let currentLang = 'en';
+
+function changeLanguage(lang) {
+  currentLang = lang;
+  applyLanguageTranslation(lang);
+  if (typeof voiceEngine !== 'undefined' && voiceEngine.setLanguage) {
+    voiceEngine.setLanguage(lang);
+  }
+}
+
+function applyLanguageTranslation(lang = 'en') {
+  const dict = I18N_DICTIONARY[lang] || I18N_DICTIONARY.en;
+  const map = {
+    'ui-brand-name': dict.title,
+    'ui-brand-sub': dict.subTitle,
+    'ui-role-farmer': dict.roleFarmer,
+    'ui-role-shop': dict.roleShop,
+    'ui-profile-title': dict.profileTitle,
+    'ui-ai-banner-title': dict.aiBannerTitle,
+    'voice-state-text': dict.micInstruction,
+    'ui-tab-shops': dict.tabShops,
+    'ui-tab-search': dict.tabSearch,
+    'ui-tab-orders': dict.tabOrders,
+    'ui-tab-chat': dict.tabChat,
+    'ui-nearby-heading': dict.nearbyHeading,
+    'ui-search-btn': dict.searchBtn,
+    'ui-orders-heading': dict.ordersHeading,
+    'ui-refresh-btn': dict.refreshBtn,
+    'ui-chat-heading': dict.chatHeading,
+    'ui-send-btn': dict.sendBtn,
+    'ui-stat-total-products': dict.statTotalProducts,
+    'ui-stat-low-stock': dict.statLowStock,
+    'ui-stat-active-orders': dict.statActiveOrders,
+    'ui-stat-total-revenue': dict.statTotalRevenue,
+    'ui-shop-orders-title': dict.shopOrdersTitle,
+    'ui-shop-inventory-title': dict.shopInventoryTitle,
+    'ui-add-product-btn': dict.addProductBtn,
+    'ui-shop-profile-title': dict.shopProfileTitle,
+    'ui-save-profile-btn': dict.saveProfileBtn,
+    'ui-order-modal-title': dict.orderModalTitle,
+    'ui-confirm-order': dict.confirmOrder
+  };
+
+  for (const [id, val] of Object.entries(map)) {
+    const el = document.getElementById(id);
+    if (el && val) {
+      el.innerText = val;
+    }
+  }
+
+  // Update language selector dropdown value if present
+  const langSelect = document.getElementById('lang-select');
+  if (langSelect && langSelect.value !== lang) {
+    langSelect.value = lang;
+  }
+}

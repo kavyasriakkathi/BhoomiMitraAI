@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>BhoomiMitra AI — Voice-First Multilingual Agriculture Platform</title>
   <link rel="stylesheet" href="/static/styles.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -21,8 +21,8 @@
     </a>
 
     <div class="nav-controls">
-      <!-- Role Switcher -->
-      <div class="role-switcher">
+      <!-- Role Switcher (Desktop) -->
+      <div class="role-switcher desktop-only">
         <button class="role-btn active" id="btn-role-farmer" onclick="switchDashboardRole('farmer')">
           <span id="ui-role-farmer">👨‍🌾 Farmer Dashboard</span>
         </button>
@@ -41,7 +41,7 @@
       </div>
 
       <!-- Auth Controls (Login / User Profile / Logout) -->
-      <div class="auth-controls" id="auth-controls">
+      <div class="auth-controls desktop-only" id="auth-controls">
         <button class="btn btn-primary btn-sm" id="btn-nav-login" onclick="openAuthModal('login')">
           🔑 Login
         </button>
@@ -53,8 +53,8 @@
         </div>
       </div>
 
-      <!-- Developer Portal Quick Access -->
-      <a href="/docs" target="_blank" class="dev-docs-link" title="Open Swagger API Documentation">
+      <!-- Developer Portal Quick Access (Desktop) -->
+      <a href="/docs" target="_blank" class="dev-docs-link desktop-only" title="Open Swagger API Documentation">
         ⚡ API Docs (/docs)
       </a>
 
@@ -75,6 +75,11 @@
           <option value="or">ଓଡ଼ିଆ (Odia)</option>
         </select>
       </div>
+
+      <!-- Mobile Quick Menu/Profile Trigger (Mobile Only) -->
+      <button class="mobile-menu-btn mobile-only" onclick="openMobileMenu()" aria-label="Open Menu">
+        <span class="mob-menu-icon">👤</span>
+      </button>
     </div>
   </header>
 
@@ -256,10 +261,10 @@
       <!-- Tab Content 2: Product & Stock Search -->
       <div id="farmer-tab-search" class="farmer-tab-content" style="display: none;">
         <div class="card" style="margin-bottom: 1.5rem;">
-          <div style="display: flex; gap: 1rem;">
-            <input type="text" id="search-product-input" class="form-control" placeholder="Search product (e.g. Urea, DAP, Imidacloprid)..." onkeypress="if(event.key === 'Enter') executeFarmerProductSearch()">
-            <button class="btn btn-primary" onclick="executeFarmerProductSearch()"><span id="ui-search-btn">Search Inventory</span></button>
-            <button class="btn btn-secondary" onclick="startVoiceSearch()">🎤 Voice Search</button>
+          <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <input type="text" id="search-product-input" class="form-control" style="flex: 1 1 220px;" placeholder="Search product (e.g. Urea, DAP, Imidacloprid)..." onkeypress="if(event.key === 'Enter') executeFarmerProductSearch()">
+            <button class="btn btn-primary" onclick="executeFarmerProductSearch()" style="flex: 0 0 auto;"><span id="ui-search-btn">Search Inventory</span></button>
+            <button class="btn btn-secondary" onclick="startVoiceSearch()" style="flex: 0 0 auto;">🎤 Voice Search</button>
           </div>
         </div>
         <div id="search-results-container" class="grid-3">
@@ -479,12 +484,12 @@
               <label class="form-label">Address</label>
               <input type="text" id="shop-address-input" class="form-control" required>
             </div>
-            <div style="display: flex; gap: 1rem;">
-              <div class="form-group" style="flex:1;">
+            <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+              <div class="form-group" style="flex: 1 1 200px;">
                 <label class="form-label">Opening Time</label>
                 <input type="text" id="shop-opening-input" class="form-control" placeholder="08:00 AM">
               </div>
-              <div class="form-group" style="flex:1;">
+              <div class="form-group" style="flex: 1 1 200px;">
                 <label class="form-label">Closing Time</label>
                 <input type="text" id="shop-closing-input" class="form-control" placeholder="08:00 PM">
               </div>
@@ -698,7 +703,7 @@
             <div class="form-group">
               <input type="text" id="rag-search-input" class="form-control" placeholder="Enter query (e.g., how to treat chilli thrips)..." onkeypress="if(event.key==='Enter') executeRagSearch()">
             </div>
-            <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+            <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;">
               <button class="btn btn-primary btn-sm" onclick="executeRagSearch()">Search Knowledge Base</button>
               <button class="btn btn-secondary btn-sm" onclick="loadRagDocuments()">🔄 Refresh List</button>
             </div>
@@ -901,16 +906,25 @@
             <option value="Farm Equipment">Farm Equipment</option>
           </select>
         </div>
-        <div style="display: flex; gap: 1rem;">
-          <div class="form-group" style="flex:1;">
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+          <div class="form-group" style="flex: 1 1 180px;">
             <label class="form-label">Price (₹)</label>
             <input type="number" step="0.01" id="prod-price" class="form-control" required>
           </div>
-          <div class="form-group" style="flex:1;">
+          <div class="form-group" style="flex: 1 1 180px;">
             <label class="form-label">Stock Quantity</label>
             <input type="number" id="prod-stock" class="form-control" required>
           </div>
         </div>
+        <div class="form-group">
+          <label class="form-label">Minimum Stock Level (Alert Threshold)</label>
+          <input type="number" id="prod-min-stock" class="form-control" value="5" required>
+        </div>
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Save Product</button>
+      </form>
+    </div>
+  </div>
+
   <!-- Authentication Modal (Login & Registration) -->
   <div id="modal-auth" class="modal-overlay">
     <div class="modal-content" style="max-width: 460px;">
@@ -989,6 +1003,117 @@
       </form>
     </div>
   </div>
+
+  <!-- Mobile Profile & Roles Drawer / Modal -->
+  <div id="modal-mobile-menu" class="modal-overlay">
+    <div class="modal-content mobile-menu-modal">
+      <div class="modal-header">
+        <div style="display:flex; align-items:center; gap:0.5rem;">
+          <span style="font-size:1.4rem;">🌾</span>
+          <div>
+            <h3 style="font-size:1.1rem; line-height:1.2;">BhoomiMitra AI</h3>
+            <span style="font-size:0.75rem; color:var(--text-muted);">Roles & Profile Settings</span>
+          </div>
+        </div>
+        <button class="modal-close" onclick="closeModal('modal-mobile-menu')">&times;</button>
+      </div>
+
+      <div class="mob-menu-body">
+        <!-- Auth Status on Mobile -->
+        <div class="mob-auth-section" id="mob-auth-section">
+          <div id="mob-user-logged-in" style="display: none; background: var(--bg-main); padding: 0.85rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin-bottom: 1rem;">
+            <div style="display:flex; align-items:center; gap:0.6rem; margin-bottom:0.4rem;">
+              <span style="font-size:1.2rem;">👤</span>
+              <div style="overflow:hidden;">
+                <div id="mob-user-email" style="font-weight:600; font-size:0.9rem; text-overflow:ellipsis; overflow:hidden; white-space:nowrap;">user@bhoomimitra.ai</div>
+                <span class="badge badge-open" id="mob-user-role" style="font-size:0.7rem;">shop_owner</span>
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="authLogout(); closeModal('modal-mobile-menu');" style="width: 100%; margin-top:0.4rem;">🚪 Logout</button>
+          </div>
+          <div id="mob-user-logged-out" style="margin-bottom: 1.25rem;">
+            <button class="btn btn-primary" onclick="closeModal('modal-mobile-menu'); openAuthModal('login');" style="width: 100%;">🔑 Login to Dashboard</button>
+          </div>
+        </div>
+
+        <!-- Role Switcher on Mobile -->
+        <div style="margin-bottom: 1.25rem;">
+          <div style="font-size: 0.82rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.6rem; letter-spacing: 0.5px;">
+            Switch Dashboard Role
+          </div>
+          <div class="mob-role-list">
+            <button class="mob-role-item active" id="mob-btn-role-farmer" onclick="switchDashboardRole('farmer'); closeModal('modal-mobile-menu');">
+              <span class="mob-role-icon">👨‍🌾</span>
+              <div class="mob-role-info">
+                <strong>Farmer Dashboard</strong>
+                <span>Nearby shops, search, AI chat & schemes</span>
+              </div>
+            </button>
+            <button class="mob-role-item" id="mob-btn-role-shop" onclick="switchDashboardRole('shop'); closeModal('modal-mobile-menu');">
+              <span class="mob-role-icon">🏬</span>
+              <div class="mob-role-info">
+                <strong>Shop Owner Dashboard</strong>
+                <span>Inventory, orders & sales analytics</span>
+              </div>
+            </button>
+            <button class="mob-role-item" id="mob-btn-role-expert" onclick="switchDashboardRole('expert'); closeModal('modal-mobile-menu');">
+              <span class="mob-role-icon">🧑‍⚕️</span>
+              <div class="mob-role-info">
+                <strong>Expert Dashboard</strong>
+                <span>Crop disease consultations & queue</span>
+              </div>
+            </button>
+            <button class="mob-role-item" id="mob-btn-role-rag" onclick="switchDashboardRole('rag'); closeModal('modal-mobile-menu');">
+              <span class="mob-role-icon">📚</span>
+              <div class="mob-role-info">
+                <strong>Admin RAG Knowledge</strong>
+                <span>ICAR/Govt PDF indexing & search</span>
+              </div>
+            </button>
+            <button class="mob-role-item" id="mob-btn-role-analytics" onclick="switchDashboardRole('analytics'); closeModal('modal-mobile-menu');">
+              <span class="mob-role-icon">📊</span>
+              <div class="mob-role-info">
+                <strong>Pilot Telemetry & Analytics</strong>
+                <span>DAU/WAU & WhatsApp health</span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        <!-- Quick Links -->
+        <div style="padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+          <a href="/docs" target="_blank" class="mob-docs-link">
+            <span>⚡ Swagger API Documentation (/docs)</span>
+            <span>↗</span>
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Fixed Bottom Navigation Bar (< 768px) -->
+  <nav class="mobile-bottom-nav mobile-only" id="mobile-bottom-nav" aria-label="Mobile Navigation">
+    <button class="mob-nav-btn active" id="mob-nav-home" onclick="switchMobileNav('home', this)">
+      <span class="mob-nav-btn-icon">🏠</span>
+      <span class="mob-nav-btn-label">Home</span>
+    </button>
+    <button class="mob-nav-btn" id="mob-nav-ai" onclick="switchMobileNav('ai', this)">
+      <span class="mob-nav-btn-icon">🤖</span>
+      <span class="mob-nav-btn-label">AI Assistant</span>
+    </button>
+    <button class="mob-nav-btn" id="mob-nav-farm" onclick="switchMobileNav('farm', this)">
+      <span class="mob-nav-btn-icon">🌾</span>
+      <span class="mob-nav-btn-label">My Farm</span>
+    </button>
+    <button class="mob-nav-btn" id="mob-nav-alerts" onclick="switchMobileNav('alerts', this)">
+      <span class="mob-nav-btn-icon">🔔</span>
+      <span class="mob-nav-btn-label">Alerts</span>
+    </button>
+    <button class="mob-nav-btn" id="mob-nav-profile" onclick="switchMobileNav('profile', this)">
+      <span class="mob-nav-btn-icon">👤</span>
+      <span class="mob-nav-btn-label">Profile</span>
+    </button>
+  </nav>
 
   <script src="/static/i18n.js"></script>
   <script src="/static/voice.js"></script>
