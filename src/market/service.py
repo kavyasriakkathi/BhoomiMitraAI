@@ -454,22 +454,48 @@ async def enrich_response_with_market_prices(
         language = "te"
 
     try:
+        from src.weather.service import _extract_district_from_query
+        q_dist = _extract_district_from_query(query_text)
+        if q_dist:
+            district = q_dist
+
         from sqlalchemy import select
         from src.core.models import FarmerProfile
+        from src.memory.models import FarmerMemory
         if farmer and hasattr(farmer, "id"):
             profile_result = await db.execute(
                 select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
             )
             profile = profile_result.scalar_one_or_none()
-            if profile:
-                if isinstance(getattr(profile, "district", None), str):
+            if isinstance(profile, FarmerProfile):
+                if not district and isinstance(getattr(profile, "district", None), str):
                     district = profile.district
                 if isinstance(getattr(profile, "state", None), str):
                     state = profile.state
                 if not matched_commodity and isinstance(getattr(profile, "current_crop", None), str) and profile.current_crop:
                     matched_commodity = profile.current_crop
+
+            if not district:
+                mem_result = await db.execute(
+                    select(FarmerMemory).where(FarmerMemory.farmer_id == farmer.id)
+                )
+                memory = mem_result.scalar_one_or_none()
+                if isinstance(memory, FarmerMemory):
+                    if isinstance(memory.district, str):
+                        district = memory.district
+                    elif isinstance(memory.village, str):
+                        district = _extract_district_from_query(memory.village)
+                    if not state and isinstance(memory.state, str):
+                        state = memory.state
+
+        if district and not isinstance(district, str):
+            district = None
+        if state and not isinstance(state, str):
+            state = None
+        if district and not state:
+            state = "Telangana"
     except Exception as exc:
-        logger.warning(f"[MARKET ENRICH] Could not load farmer profile: {exc}")
+        logger.warning(f"[MARKET ENRICH] Could not load farmer profile/location: {exc}")
 
     logger.info(
         f"[MARKET ENRICH] Parameters -> matched_commodity='{matched_commodity}', "

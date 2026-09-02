@@ -168,7 +168,14 @@ async def process_message_pipeline(
             logger.info("STAGE 3: Resolving farmer profile in DB")
             try:
                 farmer = await get_or_create_farmer(db, parsed.phone_number, sender_name)
-                logger.info(f"STAGE 3: Farmer resolved successfully. Farmer ID = {farmer.id}")
+                # If message contains Telugu characters or audio was transcribed in Telugu, set preferred language to "te"
+                if parsed.text_content and any(ord(c) > 127 for c in parsed.text_content):
+                    if getattr(farmer, "preferred_language", None) != "te":
+                        farmer.preferred_language = "te"
+                        db.add(farmer)
+                        await db.commit()
+                        await db.refresh(farmer)
+                logger.info(f"STAGE 3: Farmer resolved successfully. Farmer ID = {farmer.id}, language = {farmer.preferred_language}")
             except Exception as db_farmer_err:
                 logger.exception(f"[PIPELINE STAGE FAILED: Stage 3 - Farmer Resolution] Phone: {parsed.phone_number}, Error: {db_farmer_err}")
                 return

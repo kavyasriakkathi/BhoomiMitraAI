@@ -86,14 +86,33 @@ class FarmerMemoryService:
                 except ValueError:
                     pass
 
-            # Village regex (e.g., "my village is Karimnagar", "village: Warangal", "naa ooru Karimnagar")
-            village_match = re.search(r"(?:my village is|village is|village:|naa ooru|naji ooru)\s+([a-zA-Z\s]+)", msg_lower)
+            # Village / Location regex (e.g., "my village is Karimnagar", "Location: Korutla", "village: Warangal")
+            village_match = re.search(
+                r"(?:my village is|village is|village:|naa ooru|naji ooru)\s+([a-zA-Z\s]+)",
+                msg_lower
+            ) or re.search(
+                r"(?:location|village|place|town|mandal|city|district)\s*(?:is|:|-|\s)\s*([a-zA-Z\s]+)",
+                user_message,
+                re.IGNORECASE
+            )
             if village_match:
-                val = village_match.group(1).strip().title()
+                raw_val = village_match.group(1).strip()
+                val = re.split(r"[\n,;.!?]|\s+(?:and|i\b|we\b|my\b|crop\b|farm\b|acres?)\b", raw_val, flags=re.IGNORECASE)[0].strip().title()
                 if len(val) > 2 and confidence_map.get("village", 0.0) <= 0.9:
                     memory.village = val
                     confidence_map["village"] = 0.9
                     updates_applied = True
+
+                    # Also resolve district if the village/town is in _KNOWN_DISTRICTS
+                    from src.weather.service import _KNOWN_DISTRICTS
+                    matched_dist = _KNOWN_DISTRICTS.get(val.lower())
+                    if matched_dist and confidence_map.get("district", 0.0) <= 0.9:
+                        memory.district = matched_dist
+                        confidence_map["district"] = 0.9
+                        if not memory.state:
+                            memory.state = "Telangana"
+                            confidence_map["state"] = 0.9
+                        updates_applied = True
 
             # Primary crops regex (e.g., "I grow cotton", "crop: paddy", "mirchi panta")
             crop_keywords = {
@@ -219,7 +238,36 @@ class FarmerMemoryService:
 
         memory.confidence_scores = confidence_map
         memory.last_updated = datetime.utcnow()
-        return await self.repository.save(memory)
+        saved_memory = await self.repository.save(memory)
+
+        # Synchronize memory updates to FarmerProfile
+        try:
+            from src.core.models import FarmerProfile
+            prof_res = await self.repository.session.execute(
+                select(FarmerProfile).where(FarmerProfile.farmer_id == farmer_id)
+            )
+            prof = prof_res.scalar_one_or_none()
+            if prof and isinstance(prof, FarmerProfile):
+                prof_updated = False
+                if memory.district and not prof.district:
+                    prof.district = memory.district
+                    prof_updated = True
+                if memory.state and not prof.state:
+                    prof.state = memory.state
+                    prof_updated = True
+                if memory.farm_size and not prof.land_size_acres:
+                    prof.land_size_acres = memory.farm_size
+                    prof_updated = True
+                if memory.primary_crops and not prof.current_crop:
+                    prof.current_crop = memory.primary_crops[0]
+                    prof_updated = True
+                if prof_updated:
+                    self.repository.session.add(prof)
+                    await self.repository.session.commit()
+        except Exception as prof_sync_err:
+            logger.warning(f"Failed to sync memory to FarmerProfile: {prof_sync_err}")
+
+        return saved_memory
 
     async def refresh_farmer_memory(self, farmer_id: UUID) -> FarmerMemoryResponse:
         """

@@ -187,6 +187,10 @@ _KNOWN_DISTRICTS = {
     "హనుమకొండ": "Warangal",
     "karimnagar": "Karimnagar",
     "కరీంనగర్": "Karimnagar",
+    "jagtial": "Jagtial",
+    "జగిత్యాల": "Jagtial",
+    "korutla": "Jagtial",
+    "కోరుట్ల": "Jagtial",
     "khammam": "Khammam",
     "ఖమ్మం": "Khammam",
     "guntur": "Guntur",
@@ -468,6 +472,12 @@ async def _resolve_farmer_location(
         if not district and memory and memory.district:
             district = memory.district.strip()
             state = memory.state.strip() if memory.state else None
+
+        # Check FarmerMemory village mapping if district still not set
+        if not district and memory and memory.village:
+            district = _extract_district_from_query(memory.village)
+            if district and not state:
+                state = memory.state.strip() if memory.state else "Telangana"
 
     except Exception as loc_err:
         logger.warning(f"[SHOPS ENRICH] Failed to resolve farmer location: {loc_err}")

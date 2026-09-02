@@ -25,8 +25,25 @@ class AIService:
     async def generate_ai_response(self, request: AIGenerateRequest) -> AIGenerateResponse:
         service_start_time = time.time()
         try:
-            # 1. Fetch farmer profile for context
+            # 1. Fetch farmer profile and long-term memory for unified context
             profile = await self.repository.get_farmer_profile(request.farmer_id)
+
+            from src.memory.service import FarmerMemoryService
+            from src.memory.repository import FarmerMemoryRepository
+            mem_repo = FarmerMemoryRepository(self.repository.session)
+            mem_service = FarmerMemoryService(mem_repo)
+            memory = None
+            memory_context = ""
+            try:
+                from src.memory.models import FarmerMemory
+                mem_res = await mem_service.get_memory(request.farmer_id)
+                if isinstance(mem_res, FarmerMemory):
+                    memory = mem_res
+                mem_ctx_res = await mem_service.format_memory_for_system_prompt(request.farmer_id)
+                if isinstance(mem_ctx_res, str):
+                    memory_context = mem_ctx_res
+            except Exception as mem_fetch_err:
+                logger.warning(f"Could not load farmer memory for {request.farmer_id}: {mem_fetch_err}")
 
             # 2. Fetch conversation history (oldest first for Gemini)
             history_records = await self.repository.get_conversation_history(request.farmer_id)
@@ -53,25 +70,70 @@ class AIService:
                         history.append({"role": "model", "parts": clean_response})
 
             # Priority for crop:
-            # 1. Explicit crop mentioned in current message (e.g. "టమాటా" / Tomato overrides profile's "Cotton")
+            # 1. Explicit crop mentioned in current message (e.g. "Cotton" in "cotton leaves")
             # 2. If short follow-up and query_crop is None, crop from recent conversation history
             # 3. Farmer profile current_crop
-            effective_crop = query_crop or (recent_context_crop if recent_context_crop else (profile.current_crop if profile else None))
+            # 4. Farmer memory primary_crops
+            memory_crops = memory.primary_crops if memory and memory.primary_crops else []
+            memory_primary_crop = memory_crops[0] if memory_crops else None
 
-            # Build farmer context string
-            farmer_context = build_farmer_context(
-                crop=effective_crop or (profile.current_crop if profile else None),
-                district=profile.district if profile else None,
-                state=profile.state if profile else None,
-                land_size=profile.land_size_acres if profile else None,
+            effective_crop = (
+                query_crop
+                or (recent_context_crop if recent_context_crop else None)
+                or (profile.current_crop if profile and profile.current_crop else None)
+                or memory_primary_crop
             )
 
-            # 3. Fetch farmer long-term memory context
-            from src.memory.service import FarmerMemoryService
-            from src.memory.repository import FarmerMemoryRepository
-            mem_repo = FarmerMemoryRepository(self.repository.session)
-            mem_service = FarmerMemoryService(mem_repo)
-            memory_context = await mem_service.format_memory_for_system_prompt(request.farmer_id)
+            # Resolve location / district / state
+            effective_district = (
+                (profile.district if profile and profile.district else None)
+                or (memory.district if memory and memory.district else None)
+            )
+            if not effective_district and memory and memory.village:
+                from src.weather.service import _KNOWN_DISTRICTS
+                effective_district = _KNOWN_DISTRICTS.get(memory.village.lower().strip())
+
+            effective_location = memory.village if memory and memory.village else None
+            effective_state = (
+                (profile.state if profile and profile.state else None)
+                or (memory.state if memory and memory.state else None)
+                or ("Telangana" if effective_district in ["Jagtial", "Warangal", "Karimnagar", "Khammam", "Nizamabad", "Nalgonda", "Adilabad"] else None)
+            )
+            effective_land_size = (
+                (profile.land_size_acres if profile and profile.land_size_acres else None)
+                or (memory.farm_size if memory and memory.farm_size else None)
+            )
+
+            # Sync resolved attributes back to profile if profile is missing them
+            if profile:
+                profile_updated = False
+                if not profile.current_crop and effective_crop:
+                    profile.current_crop = effective_crop
+                    profile_updated = True
+                if not profile.district and effective_district:
+                    profile.district = effective_district
+                    profile_updated = True
+                if not profile.state and effective_state:
+                    profile.state = effective_state
+                    profile_updated = True
+                if not profile.land_size_acres and effective_land_size:
+                    profile.land_size_acres = effective_land_size
+                    profile_updated = True
+                if profile_updated:
+                    try:
+                        self.repository.session.add(profile)
+                        await self.repository.session.flush()
+                    except Exception as prof_flush_err:
+                        logger.debug(f"Profile flush skipped: {prof_flush_err}")
+
+            # Build comprehensive farmer context string
+            farmer_context = build_farmer_context(
+                crop=effective_crop,
+                district=effective_district,
+                state=effective_state,
+                land_size=effective_land_size,
+                location=effective_location,
+            )
 
             # Build enriched RAG query for short follow-ups (e.g. "ఎకరానికి ఎంత కావాలి?" / "ఈ వ్యాధికి ఎంత మందు వేయాలి?")
             rag_query = request.message
@@ -91,7 +153,7 @@ class AIService:
                 rag_results = await rag_service.search_knowledge(
                     query=rag_query,
                     top_k=3,
-                    state=profile.state if profile else None,
+                    state=effective_state,
                     crop=effective_crop,
                 )
                 if rag_results:
@@ -99,6 +161,7 @@ class AIService:
                     rag_context_text = (
                         "=== RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE (GROUND TRUTH) ===\n"
                         "CRITICAL INSTRUCTION: The following knowledge is verified agronomic ground truth. When the farmer asks about disease diagnosis, symptoms, management, or dosage, you MUST prioritize and use these verified treatments/dosages and translate them directly into the response in the farmer's language (Telugu or English):\n"
+                        "If the farmer describes clear crop disease symptoms in text (such as reddish-brown circular spots with concentric rings on cotton leaves = Alternaria Leaf Spot / ఆల్టర్నేరియా ఆకుమచ్చ తెగులు), immediately diagnose the disease and prescribe the verified chemical spray and exact dosage (e.g. Mancozeb 75% WP @ 2.5 to 3.0 g/L or Copper Oxychloride 50% WP @ 3.0 g/L of water) directly from the ground truth. Do NOT deflect with a generic request for a photo/symptoms, and do NOT re-ask for the farmer's location or crop.\n"
                         + "\n".join(rag_snippets)
                     )
             except Exception as rag_err:

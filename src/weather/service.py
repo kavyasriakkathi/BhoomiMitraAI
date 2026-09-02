@@ -63,6 +63,8 @@ _KNOWN_DISTRICTS = {
     "సూర్యాపేట": "Suryapet",
     "jagtial": "Jagtial",
     "జగిత్యాల": "Jagtial",
+    "korutla": "Jagtial",
+    "కోరుట్ల": "Jagtial",
     "mancherial": "Mancherial",
     "మంచిర్యాల": "Mancherial",
     "bhadradri": "Bhadradri Kothagudem",
@@ -434,6 +436,12 @@ async def enrich_response_with_weather(
             if not district and memory and memory.district:
                 district = memory.district.strip()
                 state = memory.state.strip() if memory.state else None
+
+            # 4. Check FarmerMemory village mapping if district still not set
+            if not district and memory and memory.village:
+                district = _extract_district_from_query(memory.village)
+                if district and not state:
+                    state = memory.state.strip() if memory.state else "Telangana"
 
     except Exception as loc_err:
         logger.warning(f"[WEATHER ENRICH] Failed to resolve farmer location: {loc_err}")
