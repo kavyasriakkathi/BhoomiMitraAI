@@ -16,12 +16,18 @@ async def verify_webhook_signature(request: Request, body_bytes: bytes = None) -
     Verifies the X-Hub-Signature-256 header sent by Meta using WHATSAPP_APP_SECRET.
     
     Returns:
-        True if signature is valid or if WHATSAPP_APP_SECRET is not configured.
-        False if signature verification fails.
+        True if signature is valid or if WHATSAPP_APP_SECRET is not configured in development/test.
+        False if signature verification fails or if WHATSAPP_APP_SECRET is missing in production.
     """
     settings = get_settings()
 
     if not settings.whatsapp_app_secret:
+        if settings.is_production:
+            logger.error(
+                "[SECURITY CRITICAL] WHATSAPP_APP_SECRET is not configured in production. "
+                "Webhook signature verification rejected."
+            )
+            return False
         logger.warning(
             "[SECURITY WARNING] WHATSAPP_APP_SECRET is not configured in environment variables. "
             "Webhook signature verification is SKIPPED."

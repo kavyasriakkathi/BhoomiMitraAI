@@ -454,6 +454,7 @@ async def enrich_response_with_weather(
             api_key=settings.openweather_api_key,
             api_url=settings.openweather_api_url,
             cache_ttl_seconds=settings.weather_cache_ttl_seconds,
+            timeout_seconds=getattr(settings, "openweather_api_timeout_seconds", 5.0),
         )
         svc = WeatherService(client)
 

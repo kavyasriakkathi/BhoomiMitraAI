@@ -72,6 +72,160 @@ def get_fallback_response(language: str = "en") -> str:
     return fallbacks.get(language, FALLBACK_RESPONSE_EN)
 
 
+VOICE_FAILURE_RESPONSE_TE = (
+    "క్షమించండి, మీ వాయిస్ మెసేజ్ స్పష్టంగా వినిపించలేదు. "
+    "దయచేసి మళ్ళీ మాట్లాడండి లేదా టైప్ చేయండి 🙏"
+)
+
+VOICE_FAILURE_RESPONSE_EN = (
+    "Sorry, we could not clearly hear your voice message. "
+    "Please speak again or send a text message. 🙏"
+)
+
+
+def get_voice_fallback_response(language: str = "te") -> str:
+    """Return a safe localized fallback message when voice transcription fails."""
+    fallbacks = {
+        "te": VOICE_FAILURE_RESPONSE_TE,
+        "en": VOICE_FAILURE_RESPONSE_EN,
+    }
+    return fallbacks.get(language, VOICE_FAILURE_RESPONSE_TE)
+
+
+IMAGE_FAILURE_RESPONSE_TE = (
+    "ఫోటో డౌన్లోడ్ చేయడంలో సమస్య ఏర్పడింది. "
+    "దయచేసి స్పష్టమైన ఫోటోను మళ్ళీ పంపండి."
+)
+
+IMAGE_FAILURE_RESPONSE_EN = (
+    "There was a problem downloading the photo. "
+    "Please send a clear photo again."
+)
+
+
+def get_image_fallback_response(language: str = "te") -> str:
+    """Return a safe localized fallback message when image download fails."""
+    fallbacks = {
+        "te": IMAGE_FAILURE_RESPONSE_TE,
+        "en": IMAGE_FAILURE_RESPONSE_EN,
+    }
+    return fallbacks.get(language, IMAGE_FAILURE_RESPONSE_TE)
+
+
+MARKET_FALLBACK_RESPONSE_TE = (
+    "ప్రస్తుతం మార్కెట్ ధరల సమాచారం అందుబాటులో లేదు. "
+    "దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి."
+)
+
+MARKET_FALLBACK_RESPONSE_EN = (
+    "Market price information is currently unavailable. "
+    "Please try again after some time."
+)
+
+
+def get_market_fallback_response(language: str = "te") -> str:
+    """Return a safe fallback message when market price service data is unavailable."""
+    fallbacks = {
+        "te": MARKET_FALLBACK_RESPONSE_TE,
+        "en": MARKET_FALLBACK_RESPONSE_EN,
+    }
+    return fallbacks.get(language, MARKET_FALLBACK_RESPONSE_TE)
+
+
+WEATHER_FALLBACK_RESPONSE_TE = (
+    "ప్రస్తుతం వాతావరణ సమాచారం పొందలేకపోతున్నాను. "
+    "దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి."
+)
+
+WEATHER_FALLBACK_RESPONSE_EN = (
+    "Weather information is currently unavailable. "
+    "Please try again after some time."
+)
+
+
+def get_weather_fallback_response(language: str = "te") -> str:
+    """Return a safe fallback message when weather forecast service data is unavailable."""
+    fallbacks = {
+        "te": WEATHER_FALLBACK_RESPONSE_TE,
+        "en": WEATHER_FALLBACK_RESPONSE_EN,
+    }
+    return fallbacks.get(language, WEATHER_FALLBACK_RESPONSE_TE)
+
+
+SCHEMES_FALLBACK_RESPONSE_TE = (
+    "ప్రస్తుతం ప్రభుత్వ పథకాల సమాచారం పొందలేకపోతున్నాను. "
+    "దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి."
+)
+
+SCHEMES_FALLBACK_RESPONSE_EN = (
+    "Government scheme information is currently unavailable. "
+    "Please try again after some time."
+)
+
+
+def get_schemes_fallback_response(language: str = "te") -> str:
+    """Return a safe fallback message when government schemes service data is unavailable."""
+    fallbacks = {
+        "te": SCHEMES_FALLBACK_RESPONSE_TE,
+        "en": SCHEMES_FALLBACK_RESPONSE_EN,
+    }
+    return fallbacks.get(language, SCHEMES_FALLBACK_RESPONSE_TE)
+
+
+SHOPS_FALLBACK_RESPONSE_TE = (
+    "ప్రస్తుతం సమీప దుకాణాల సమాచారం పొందలేకపోతున్నాను. "
+    "దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి."
+)
+
+SHOPS_FALLBACK_RESPONSE_EN = (
+    "Nearby shop information is currently unavailable. "
+    "Please try again after some time."
+)
+
+
+def get_shops_fallback_response(language: str = "te") -> str:
+    """Return a safe fallback message when nearby shop inventory data is unavailable."""
+    fallbacks = {
+        "te": SHOPS_FALLBACK_RESPONSE_TE,
+        "en": SHOPS_FALLBACK_RESPONSE_EN,
+    }
+    return fallbacks.get(language, SHOPS_FALLBACK_RESPONSE_TE)
+
+
+UNSUPPORTED_MEDIA_RESPONSE_TE = "దయచేసి టెక్స్ట్, వాయిస్ మెసేజ్ లేదా పంట ఫోటో పంపండి."
+UNSUPPORTED_MEDIA_RESPONSE_EN = "Please send a text message, voice note, or crop photo."
+
+
+def get_unsupported_media_fallback_response(language: str = "te") -> str:
+    """Return a localized prompt guiding the farmer on supported message formats."""
+    fallbacks = {
+        "te": UNSUPPORTED_MEDIA_RESPONSE_TE,
+        "en": UNSUPPORTED_MEDIA_RESPONSE_EN,
+    }
+    return fallbacks.get(language, UNSUPPORTED_MEDIA_RESPONSE_TE)
+
+
+NON_CROP_IMAGE_RESPONSE_TE = (
+    "పంపిన ఫోటోలో పంట లేదా మొక్క స్పష్టంగా కనిపించడం లేదు. "
+    "దయచేసి వ్యాధి సోకిన ఆకు లేదా పంట భాగం స్పష్టంగా కనిపించే ఫోటోను పంపండి."
+)
+NON_CROP_IMAGE_RESPONSE_EN = (
+    "No crop or plant was clearly detected in the photo. "
+    "Please send a clear, close-up photo of the affected crop leaf, stem, or plant."
+)
+
+
+def get_non_crop_image_response(language: str = "te") -> str:
+    """Return a safe response asking the farmer to send a clear crop/plant image."""
+    fallbacks = {
+        "te": NON_CROP_IMAGE_RESPONSE_TE,
+        "en": NON_CROP_IMAGE_RESPONSE_EN,
+    }
+    return fallbacks.get(language, NON_CROP_IMAGE_RESPONSE_TE)
+
+
+
+
 def build_farmer_context(
     crop: str = None,
     district: str = None,

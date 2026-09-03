@@ -30,17 +30,17 @@ SECTION_HEADERS_TE = {
 
 # Unavailable/Fallback labels per section when requested intent has no active data
 _UNAVAILABLE_LABELS_EN = {
-    "weather": "ℹ️ Weather information is currently unavailable for this location.",
-    "shop": "ℹ️ No registered shops found for this product currently.",
-    "market": "ℹ️ Market prices are currently unavailable for this crop.",
-    "schemes": "ℹ️ No government schemes found currently.",
+    "weather": "ℹ️ Weather information is currently unavailable. Please try again after some time.",
+    "shop": "ℹ️ Nearby shop information is currently unavailable. Please try again after some time.",
+    "market": "ℹ️ Market price information is currently unavailable. Please try again after some time.",
+    "schemes": "ℹ️ Government scheme information is currently unavailable. Please try again after some time.",
 }
 
 _UNAVAILABLE_LABELS_TE = {
-    "weather": "ℹ️ ఈ ప్రాంతానికి ప్రస్తుతం వాతావరణ సమాచారం అందుబాటులో లేదు.",
-    "shop": "ℹ️ ప్రస్తుతం ఈ ఉత్పత్తికి సమీప దుకాణాలు అందుబాటులో లేవు.",
-    "market": "ℹ️ ప్రస్తుతం ఈ పంటకు మార్కెట్ ధరలు అందుబాటులో లేవు.",
-    "schemes": "ℹ️ ప్రస్తుతం సంబంధిత ప్రభుత్వ పథకాలు అందుబాటులో లేవు.",
+    "weather": "ℹ️ ఈ ప్రాంతానికి ప్రస్తుతం వాతావరణ సమాచారం అందుబాటులో లేదు. దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి.",
+    "shop": "ℹ️ ప్రస్తుతం ఈ ఉత్పత్తికి సమీప దుకాణాలు అందుబాటులో లేవు. దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి.",
+    "market": "ℹ️ ఈ పంటకు మార్కెట్ ధరలు అందుబాటులో లేవు. దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి.",
+    "schemes": "ℹ️ ప్రస్తుతం ఈ కేటగిరీలో పథకాలు అందుబాటులో లేవు. దయచేసి కొద్దిసేపటి తర్వాత మళ్లీ ప్రయత్నించండి.",
 }
 
 # Introductory filler patterns to strip from the beginning of text/sections

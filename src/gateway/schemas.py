@@ -113,3 +113,20 @@ class ParsedIncomingMessage(BaseModel):
     sender_name: Optional[str] = None
     model_config = {"extra": "ignore"}
 
+
+def mask_phone_number(phone: str) -> str:
+    """Mask phone number for safe production logging (e.g. 9198****3210)."""
+    if not phone or len(phone) < 7:
+        return "***"
+    return phone[:4] + "****" + phone[-4:]
+
+
+def sanitize_headers_for_logging(headers: dict) -> dict:
+    """Mask sensitive tokens and signatures from header logs."""
+    sensitive_keys = {"authorization", "x-hub-signature", "x-hub-signature-256", "cookie", "set-cookie"}
+    return {
+        k: ("***REDACTED***" if k.lower() in sensitive_keys else v)
+        for k, v in headers.items()
+    }
+
+

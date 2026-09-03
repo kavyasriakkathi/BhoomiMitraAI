@@ -9,6 +9,7 @@ Handles:
 """
 
 import json
+import secrets
 from fastapi import APIRouter, Query, Request, Depends, HTTPException, BackgroundTasks, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -41,13 +42,25 @@ async def verify_webhook(
     """
     settings = get_settings()
 
-    if hub_mode == "subscribe" and hub_verify_token == settings.whatsapp_verify_token:
+    # Reject if server verify token is not configured or empty
+    if not settings.whatsapp_verify_token:
+        logger.error(
+            "Webhook verification rejected: WHATSAPP_VERIFY_TOKEN is not configured on the server."
+        )
+        raise HTTPException(status_code=403, detail="Verification failed.")
+
+    # Validate mode and verify token using constant-time comparison
+    if (
+        hub_mode == "subscribe"
+        and hub_verify_token
+        and secrets.compare_digest(hub_verify_token, settings.whatsapp_verify_token)
+    ):
         logger.info("Webhook verification successful.")
         return Response(content=str(hub_challenge or ""), media_type="text/plain")
 
     logger.warning(
         f"Webhook verification FAILED. "
-        f"Mode={hub_mode}, Token mismatch."
+        f"Mode={hub_mode}, Token mismatch or missing."
     )
     raise HTTPException(status_code=403, detail="Verification failed.")
 
@@ -77,6 +90,22 @@ async def whatsapp_health_check():
     }
 
 
+def mask_phone_number(phone: str) -> str:
+    """Mask phone number for safe production logging (e.g. 9198****3210)."""
+    if not phone or len(phone) < 7:
+        return "***"
+    return phone[:4] + "****" + phone[-4:]
+
+
+def sanitize_headers_for_logging(headers: dict) -> dict:
+    """Mask sensitive tokens and signatures from header logs."""
+    sensitive_keys = {"authorization", "x-hub-signature", "x-hub-signature-256", "cookie", "set-cookie"}
+    return {
+        k: ("***REDACTED***" if k.lower() in sensitive_keys else v)
+        for k, v in headers.items()
+    }
+
+
 # ──────────────────────────────────────────────
 # POST — Incoming Message Handler
 # ──────────────────────────────────────────────
@@ -88,12 +117,12 @@ async def receive_message(
 ):
     """
     Receives incoming WhatsApp messages from Meta's Cloud API.
-    Logs raw request at line 1, verifies signature, parses payload, and queues background processing.
+    Logs raw request safely, verifies signature, parses payload, and queues background processing.
     """
-    # VERY FIRST LINE: Read body bytes and log raw request + headers before any parsing or validation
+    # VERY FIRST LINE: Read body bytes and log sanitized request metadata before any parsing or validation
     body_bytes = await request.body()
     client_ip = request.client.host if request.client else "unknown"
-    headers_dict = dict(request.headers)
+    headers_dict = sanitize_headers_for_logging(dict(request.headers))
 
     try:
         raw_body_str = body_bytes.decode("utf-8", errors="replace")
@@ -164,7 +193,7 @@ async def receive_message(
                     msg_id = status_item.get("id", "unknown")
                     status_type = status_item.get("status", "unknown")
                     recipient_id = status_item.get("recipient_id", "unknown")
-                    logger.info(f"[STATUS RECEIPT] Message {msg_id} to {recipient_id} status updated to: '{status_type}'")
+                    logger.info(f"[STATUS RECEIPT] Message {msg_id} to {mask_phone_number(recipient_id)} status updated to: '{status_type}'")
 
             if not value.messages:
                 logger.info("Webhook change event contained no incoming 'messages' array (likely a status/read receipt update).")
@@ -180,7 +209,7 @@ async def receive_message(
                 parsed = _extract_message(msg, sender_name)
 
                 if parsed is None:
-                    logger.info(f"Unsupported message type: '{msg.type}'. Skipping message ID {msg.id}.")
+                    logger.info(f"Message dropped: sender or message ID missing. Skipping msg: {msg}.")
                     continue
 
                 if parsed.message_id in queued_message_ids:
@@ -194,7 +223,7 @@ async def receive_message(
                 logger.info(f"INCOMING MESSAGE PARSED SUCCESSFULLY:")
                 logger.info(f"  Message ID  : {parsed.message_id}")
                 logger.info(f"  Message Type: {parsed.message_type}")
-                logger.info(f"  Sender Phone: {parsed.phone_number}")
+                logger.info(f"  Sender Phone: {mask_phone_number(parsed.phone_number)}")
                 logger.info(f"  Sender Name : {parsed.sender_name or 'Unknown'}")
                 if parsed.text_content:
                     logger.info(f"  Message Text: {parsed.text_content[:150]}")
@@ -209,7 +238,7 @@ async def receive_message(
                     messages_queued += 1
                     logger.info(
                         f"BACKGROUND PIPELINE QUEUED for message {parsed.message_id} "
-                        f"from {parsed.phone_number}"
+                        f"from {mask_phone_number(parsed.phone_number)}"
                     )
                 except Exception as queue_err:
                     logger.exception(f"Failed to queue background task for message {parsed.message_id}: {queue_err}")
@@ -226,36 +255,50 @@ async def receive_message(
 def _extract_message(msg, sender_name: str = None) -> ParsedIncomingMessage | None:
     """
     Convert a nested WhatsAppMessage into a flat ParsedIncomingMessage.
-    Returns None for unsupported message types.
+    Returns None only when sender or message ID is missing.
+    Safely captures text, audio, image, and unsupported media types without crashing.
     """
     if not msg or not msg.from_ or not msg.id:
         return None
 
+    raw_type = str(msg.type or "text").lower().strip()
     base = {
         "phone_number": str(msg.from_),
         "message_id": str(msg.id),
         "timestamp": str(msg.timestamp or ""),
-        "message_type": str(msg.type or "text"),
+        "message_type": raw_type,
         "sender_name": sender_name,
     }
 
-    if msg.type == "text" and msg.text:
-        return ParsedIncomingMessage(**base, text_content=msg.text.body)
+    if raw_type == "text":
+        if not msg.text:
+            return None
+        body = msg.text.body if msg.text else ""
+        return ParsedIncomingMessage(**base, text_content=body)
 
-    elif msg.type == "audio" and msg.audio:
+    elif raw_type == "audio":
+        media_id = msg.audio.id if msg.audio else None
+        media_mime = msg.audio.mime_type if msg.audio else None
         return ParsedIncomingMessage(
             **base,
-            media_id=msg.audio.id,
-            media_mime_type=msg.audio.mime_type,
+            media_id=media_id,
+            media_mime_type=media_mime,
         )
 
-    elif msg.type == "image" and msg.image:
+    elif raw_type == "image":
+        media_id = msg.image.id if msg.image else None
+        media_mime = msg.image.mime_type if msg.image else None
+        caption = msg.image.caption if msg.image else None
         return ParsedIncomingMessage(
             **base,
-            text_content=msg.image.caption,
-            media_id=msg.image.id,
-            media_mime_type=msg.image.mime_type,
+            text_content=caption,
+            media_id=media_id,
+            media_mime_type=media_mime,
         )
 
-    return None
+    # Unsupported media types (video, document, sticker, contacts, location, interactive, etc.)
+    return ParsedIncomingMessage(
+        **base,
+    )
+
 

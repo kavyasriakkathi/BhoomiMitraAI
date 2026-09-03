@@ -27,6 +27,7 @@ async def send_text_message(
 ) -> Optional[str]:
     """
     Send a text message to a farmer via WhatsApp Cloud API.
+    Enforces empty/None/whitespace protection and phone validation.
 
     Args:
         to_phone: Farmer's phone number (with country code, e.g. "919876543210").
@@ -35,6 +36,23 @@ async def send_text_message(
     Returns:
         The Meta message ID on success, or None on failure.
     """
+    if not to_phone or not str(to_phone).strip():
+        logger.error("[WHATSAPP OUTBOUND SAFETY] Cannot send message: recipient phone number is missing.")
+        return None
+
+    to_phone = str(to_phone).strip()
+
+    # Empty response protection: reject None, empty, and whitespace-only strings
+    if not message_text or not str(message_text).strip():
+        logger.warning(
+            f"[WHATSAPP OUTBOUND SAFETY] Empty or whitespace-only message rejected for phone {to_phone[-4:]}. "
+            "Substituting localized fallback response."
+        )
+        from src.ai.prompts import get_fallback_response
+        message_text = get_fallback_response("te")
+
+    message_text = str(message_text).strip()
+
     settings = get_settings()
 
     if not settings.whatsapp_api_token or not settings.whatsapp_phone_number_id:
@@ -62,11 +80,13 @@ async def send_text_message(
         },
     }
 
+    masked_phone = to_phone[:4] + "****" + to_phone[-4:] if len(to_phone) >= 7 else "***"
+
     logger.info(
         f"[WHATSAPP OUTBOUND START]\n"
         f"  URL             : {url}\n"
         f"  Phone Number ID : {settings.whatsapp_phone_number_id}\n"
-        f"  Recipient Phone : {to_phone}\n"
+        f"  Recipient Phone : {masked_phone}\n"
         f"  Message Length  : {len(message_text)} chars\n"
         f"  Message Preview : '{message_text[:100]}...'"
     )
@@ -74,10 +94,11 @@ async def send_text_message(
     total_wa_start = time.time()
 
     # Retry loop with exponential backoff
+    wa_timeout = float(getattr(settings, "whatsapp_api_timeout_seconds", 15.0))
     for attempt in range(1, MAX_RETRIES + 1):
         attempt_start = time.time()
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=wa_timeout) as client:
                 response = await client.post(url, headers=headers, json=payload)
 
             duration = time.time() - attempt_start
@@ -92,14 +113,14 @@ async def send_text_message(
                 wa_message_id = data.get("messages", [{}])[0].get("id")
                 total_duration = time.time() - total_wa_start
                 logger.info(
-                    f"[WHATSAPP OUTBOUND SUCCESS] Delivered to {to_phone} in {total_duration:.2f}s "
+                    f"[WHATSAPP OUTBOUND SUCCESS] Delivered to {masked_phone} in {total_duration:.2f}s "
                     f"(wa_id={wa_message_id})"
                 )
                 return wa_message_id
 
             if response.status_code == 401:
                 logger.error(
-                    f"[WHATSAPP OUTBOUND ERROR] HTTP 401 Unauthorized for {to_phone} — "
+                    f"[WHATSAPP OUTBOUND ERROR] HTTP 401 Unauthorized for {masked_phone} — "
                     f"The Meta WHATSAPP_API_TOKEN is invalid or expired.\n"
                     f"Meta Response: {response.text}"
                 )
@@ -120,7 +141,7 @@ async def send_text_message(
 
             if response.status_code == 403:
                 logger.error(
-                    f"[WHATSAPP OUTBOUND ERROR] HTTP 403 Forbidden for {to_phone} — "
+                    f"[WHATSAPP OUTBOUND ERROR] HTTP 403 Forbidden for {masked_phone} — "
                     f"Check phone number ID ({settings.whatsapp_phone_number_id}) permissions.\n"
                     f"Meta Response: {response.text}"
                 )
@@ -128,7 +149,7 @@ async def send_text_message(
 
             if response.status_code == 400:
                 logger.error(
-                    f"[WHATSAPP OUTBOUND ERROR] HTTP 400 Bad Request for {to_phone} — "
+                    f"[WHATSAPP OUTBOUND ERROR] HTTP 400 Bad Request for {masked_phone} — "
                     f"Meta Response: {response.text}"
                 )
                 return None
@@ -146,7 +167,7 @@ async def send_text_message(
 
             # Non-retryable error
             logger.error(
-                f"[WHATSAPP OUTBOUND ERROR] Failed to send message to {to_phone}: "
+                f"[WHATSAPP OUTBOUND ERROR] Failed to send message to {masked_phone}: "
                 f"HTTP {response.status_code} — Meta Response: {response.text}"
             )
             return None
@@ -154,7 +175,7 @@ async def send_text_message(
         except httpx.TimeoutException:
             duration = time.time() - attempt_start
             logger.warning(
-                f"[WHATSAPP OUTBOUND TIMEOUT] Timeout after {duration:.2f}s sending to {to_phone} (attempt {attempt}/{MAX_RETRIES})."
+                f"[WHATSAPP OUTBOUND TIMEOUT] Timeout after {duration:.2f}s sending to {masked_phone} (attempt {attempt}/{MAX_RETRIES})."
             )
             if attempt < MAX_RETRIES:
                 import asyncio
@@ -164,11 +185,11 @@ async def send_text_message(
 
         except Exception as e:
             duration = time.time() - attempt_start
-            logger.exception(f"[WHATSAPP OUTBOUND UNEXPECTED ERROR] Failed sending message to {to_phone} after {duration:.2f}s: {e}")
+            logger.exception(f"[WHATSAPP OUTBOUND UNEXPECTED ERROR] Failed sending message to {masked_phone} after {duration:.2f}s: {e}")
             return None
 
     total_duration = time.time() - total_wa_start
-    logger.error(f"[WHATSAPP OUTBOUND EXHAUSTED] All {MAX_RETRIES} retries exhausted for {to_phone} after {total_duration:.2f}s.")
+    logger.error(f"[WHATSAPP OUTBOUND EXHAUSTED] All {MAX_RETRIES} retries exhausted for {masked_phone} after {total_duration:.2f}s.")
     return None
 
 
@@ -229,10 +250,12 @@ async def download_media_bytes(media_id: str) -> Optional[tuple[bytes, str]]:
 
     media_url = None
     mime_type = None
+    wa_timeout = float(getattr(settings, "whatsapp_api_timeout_seconds", 15.0))
+    max_media_bytes = int(getattr(settings, "max_media_download_bytes", 15_728_640))
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=wa_timeout) as client:
                 response = await client.get(resolve_url, headers=headers)
                 
             if response.status_code == 200:
@@ -270,12 +293,20 @@ async def download_media_bytes(media_id: str) -> Optional[tuple[bytes, str]]:
     # Step 2: Download Binary Data
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            download_timeout = max(wa_timeout, 20.0)
+            async with httpx.AsyncClient(timeout=download_timeout) as client:
                 # Meta requires the Bearer token even for the direct media URL download
                 media_response = await client.get(media_url, headers=headers)
                 
             if media_response.status_code == 200:
-                logger.info(f"Successfully downloaded media {media_id} ({len(media_response.content)} bytes)")
+                payload_len = len(media_response.content)
+                if payload_len > max_media_bytes:
+                    logger.warning(
+                        f"Media payload size ({payload_len} bytes) exceeds configured safety limit "
+                        f"({max_media_bytes} bytes) for media {media_id}. Aborting download."
+                    )
+                    return None
+                logger.info(f"Successfully downloaded media {media_id} ({payload_len} bytes)")
                 return media_response.content, mime_type
                 
             if media_response.status_code == 429:

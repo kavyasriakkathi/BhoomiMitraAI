@@ -170,104 +170,14 @@ async def process_text_message(
     conversation: Conversation,
 ) -> str:
     """
-    Backward compatibility wrapper for the gateway router.
-    Instantiates the new architecture components to fulfill legacy requests.
+    Main orchestration entry point for incoming WhatsApp text messages.
+    Uses AIDecisionEngine to classify intents, route to authoritative
+    services, prevent LLM hallucinations, and assemble a polished, verified response.
     """
-    repo = AIRepository(db)
-    service = AIService(repo)
-    
-    logger.info(f"[PROCESS MSG START] Farmer: {farmer.id} | Query: '{conversation.user_message}'")
-    
-    request = AIGenerateRequest(
-        farmer_id=farmer.id,
-        conversation_id=conversation.id,
-        message=conversation.user_message or ""
-    )
-    
-    try:
-        response = await service.generate_ai_response(request)
-        ai_response_text = response.response_text
-        logger.info(f"[PROCESS MSG RAW GEMINI] Length: {len(ai_response_text) if ai_response_text else 0} | Response: '{ai_response_text}'")
-    except Exception as exc:
-        logger.warning(f"AI unavailable for farmer {farmer.id}: {exc}. Deferring fallback until after specialized enrichment.")
-        ai_response_text = ""
+    from src.ai.decision_engine import get_decision_engine
+    engine = get_decision_engine()
+    return await engine.process_message(db, farmer, conversation)
 
-    # Enrich with nearby shop inventory recommendations if products match
-    try:
-        from src.shops.service import enrich_response_with_shops
-        logger.info("[PROCESS MSG] Invoking enrich_response_with_shops()")
-        ai_response_text = await enrich_response_with_shops(
-            db, conversation.user_message or "", ai_response_text, farmer
-        )
-    except Exception as err:
-        logger.warning(f"Failed to enrich response with shops: {err}")
-
-    # Enrich with mandi/market price data if farmer asks about prices
-    try:
-        from src.market.service import enrich_response_with_market_prices
-        logger.info("[PROCESS MSG] Invoking enrich_response_with_market_prices()")
-        ai_response_text = await enrich_response_with_market_prices(
-            db, conversation.user_message or "", ai_response_text, farmer
-        )
-    except Exception as mkt_err:
-        logger.warning(f"Failed to enrich response with market prices: {mkt_err}")
-
-    # Enrich with weather forecast data if farmer asks about weather
-    try:
-        from src.weather.service import enrich_response_with_weather
-        logger.info("[PROCESS MSG] Invoking enrich_response_with_weather()")
-        ai_response_text = await enrich_response_with_weather(
-            db, conversation.user_message or "", ai_response_text, farmer
-        )
-    except Exception as weather_err:
-        logger.warning(f"Failed to enrich response with weather: {weather_err}")
-
-    # Enrich with government scheme information if farmer asks about schemes/subsidies
-    try:
-        from src.schemes.service import enrich_response_with_schemes
-        logger.info("[PROCESS MSG] Invoking enrich_response_with_schemes()")
-        ai_response_text = await enrich_response_with_schemes(
-            db, conversation.user_message or "", ai_response_text, farmer
-        )
-    except Exception as scheme_err:
-        logger.warning(f"Failed to enrich response with schemes: {scheme_err}")
-
-    # Enrich with expert escalation ticket if farmer requests human/specialist assistance
-    try:
-        from src.escalation.service import enrich_response_with_escalation
-        logger.info("[PROCESS MSG] Invoking enrich_response_with_escalation()")
-        ai_response_text = await enrich_response_with_escalation(
-            db, conversation.user_message or "", ai_response_text, farmer
-        )
-    except Exception as esc_err:
-        logger.warning(f"Failed to enrich response with escalation: {esc_err}")
-
-    # Format and optimize multi-intent response if multiple sections were enriched
-    try:
-        from src.ai.formatting import format_multi_intent_response
-        language = getattr(farmer, "preferred_language", "en") or "en"
-        if any(ord(c) > 127 for c in (conversation.user_message or "")):
-            language = "te"
-        ai_response_text = format_multi_intent_response(
-            assembled_text=ai_response_text,
-            user_message=conversation.user_message or "",
-            language=language,
-        )
-    except Exception as fmt_err:
-        logger.warning(f"Multi-intent formatting warning: {fmt_err}")
-
-    ai_response_text = ai_response_text.strip() if ai_response_text else ""
-    if not ai_response_text:
-        pref_lang = getattr(farmer, "preferred_language", "en") or "en"
-        ai_response_text = get_fallback_response(pref_lang)
-
-    logger.info(f"[PROCESS MSG FINAL] Length: {len(ai_response_text)} | Final response immediately before DB save: '{ai_response_text}'")
-
-    conversation.ai_response = ai_response_text
-    db.add(conversation)
-    await db.commit()
-
-    return ai_response_text
 
 
 def _finalize_whatsapp_response(response_text: str, max_chars: int = 1600) -> str:
@@ -279,9 +189,10 @@ def _finalize_whatsapp_response(response_text: str, max_chars: int = 1600) -> st
     - Prevents multi-block bloat while strictly preserving Expert Escalation,
       Market Prices, Weather, and core agronomic advice
     - Never partially truncates safety, escalation, or structured blocks mid-sentence
+    - Preserves numbers, prices, dosages, and units untouched
     """
     import re
-    if not response_text:
+    if not response_text or not response_text.strip():
         return ""
 
     text = re.sub(r'\n{3,}', '\n\n', response_text).strip()
@@ -290,20 +201,16 @@ def _finalize_whatsapp_response(response_text: str, max_chars: int = 1600) -> st
     if len(text) <= max_chars:
         return text
 
-    # If response is overly long due to multiple stacked blocks, prioritize whole blocks:
-    # Priority order:
-    # 0. Expert Escalation (👨‍🌾 / 🚨 / 🆘) - Safety Critical (Always included)
-    # 1. Market Prices (📊)
-    # 2. Weather (🌤️)
-    # 3. Shops (🏬)
-    # 4. Schemes (📜)
     blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
 
     core_blocks = []
     enrichment_blocks = []
 
+    def is_structured_block(block: str) -> bool:
+        return any(m in block for m in ["👨‍🌾", "🚨", "🆘", "📊", "⚠️", "🌡️", "🌤️", "🌦️", "🏬", "🏛️", "📜", "🎫"])
+
     for b in blocks:
-        if any(marker in b for marker in ["👨‍🌾", "🚨", "🆘", "📊", "🌤️", "🏬", "📜"]):
+        if is_structured_block(b):
             enrichment_blocks.append(b)
         else:
             core_blocks.append(b)
@@ -311,29 +218,53 @@ def _finalize_whatsapp_response(response_text: str, max_chars: int = 1600) -> st
     def _block_priority(block: str) -> int:
         if any(m in block for m in ["👨‍🌾", "🚨", "🆘"]):
             return 0
-        if "📊" in block:
+        if any(m in block for m in ["📊", "⚠️"]):
             return 1
-        if "🌤️" in block:
+        if any(m in block for m in ["🌡️", "🌤️", "🌦️"]):
             return 2
         if "🏬" in block:
             return 3
-        if "📜" in block:
+        if any(m in block for m in ["🏛️", "📜"]):
             return 4
         return 5
 
     enrichment_blocks.sort(key=_block_priority)
 
-    selected_blocks = list(core_blocks)
-    current_len = sum(len(b) + 2 for b in selected_blocks)
-
+    # First allocate budget for high-priority structured blocks (escalation, market, weather)
+    reserved_enrichments = []
+    reserved_len = 0
     for eb in enrichment_blocks:
-        is_escalation = any(m in eb for m in ["👨‍🌾", "🚨", "🆘"])
-        # Always include escalation, or include block if within budget or top 2 enrichments
-        if is_escalation or (current_len + len(eb) + 2 <= max_chars) or len(selected_blocks) < 3:
-            selected_blocks.append(eb)
-            current_len += len(eb) + 2
+        priority = _block_priority(eb)
+        # Always reserve escalation and market/weather if present
+        if priority <= 2 or (reserved_len + len(eb) + 2 <= max_chars):
+            reserved_enrichments.append(eb)
+            reserved_len += len(eb) + 2
 
-    return "\n\n".join(selected_blocks).strip()
+    # Remaining budget for core advice
+    advice_budget = max(200, max_chars - reserved_len)
+    final_core = []
+    core_len = 0
+    for cb in core_blocks:
+        if core_len + len(cb) + 2 <= advice_budget:
+            final_core.append(cb)
+            core_len += len(cb) + 2
+        else:
+            rem = advice_budget - core_len
+            if rem >= 100:
+                # Safe sentence-level truncation
+                candidate = cb[:rem]
+                m = re.search(r'([.!?।॥\n])\s*(?!.*[.!?।॥\n])', candidate)
+                if m and m.end() >= rem * 0.4:
+                    safe_chunk = candidate[:m.end()].strip()
+                else:
+                    last_space = candidate.rfind(' ')
+                    safe_chunk = candidate[:last_space].strip() if last_space > 0 else candidate.strip()
+                if safe_chunk:
+                    final_core.append(safe_chunk)
+            break
+
+    combined = final_core + reserved_enrichments
+    return "\n\n".join(b for b in combined if b).strip()
 
 
 async def process_image_message(
@@ -372,6 +303,7 @@ async def process_image_message(
         "- Never claim that an image proves a disease with absolute certainty. Use cautious wording like 'appears consistent with', 'may indicate', or 'possible symptoms of'.\n"
         "- State that visual symptoms alone cannot be 100% confirmed from a single photo and ask the farmer to check front/back of leaf, close-up, or whole plant if uncertain.\n"
         "- Do not recommend unverified chemical pesticides or dosages unless grounded in trusted knowledge. Mention standard cultural practices and advise checking with a local Agriculture Extension Officer (AEO).\n"
+        "- If the image does not show a crop, plant, leaf, or agricultural subject, set disease_name to 'non_agricultural', confidence_score to 0.0, and politely ask the farmer to send a clear photo of the crop or affected plant part.\n"
         "You MUST return a strictly valid JSON object matching this exact schema:\n"
         '{"disease_name": "Name", "confidence_score": 0.85, "severity": "low/medium/high", "symptoms": "Visible symptoms", "treatment_recommendation": "Cautious agronomic steps", "friendly_whatsapp_reply": "Natural language reply for the farmer"}\n'
         "Provide actionable agronomic advice.\n\n"
@@ -403,6 +335,7 @@ async def process_image_message(
             
     # 3. Call Gemini Multimodal
     from src.ai.gemini_client import generate_multimodal_response
+    from src.ai.prompts import get_non_crop_image_response
     import json
     
     user_caption = conversation.user_message or "Please analyze this image."
@@ -421,6 +354,21 @@ async def process_image_message(
         # Parse the structured JSON output
         parsed_json = json.loads(ai_response_text)
         diagnosis_data = MultimodalDiagnosisResponse(**parsed_json)
+
+        # Check if non-agricultural or no crop detected
+        is_non_crop = (
+            not diagnosis_data.disease_name
+            or diagnosis_data.disease_name.lower() in ("non_agricultural", "non_crop", "not_plant", "not_a_plant", "none")
+            or (diagnosis_data.confidence_score is not None and diagnosis_data.confidence_score <= 0.1)
+        )
+
+        if is_non_crop:
+            reply_text = get_non_crop_image_response(farmer.preferred_language or "te")
+            conversation.ai_response = reply_text
+            db.add(conversation)
+            await db.commit()
+            return reply_text
+
         reply_text = diagnosis_data.friendly_whatsapp_reply
 
         # 4. Save to Crop Health Module

@@ -18,7 +18,7 @@ from sqlalchemy import text
 from src.core.database import engine
 
 def audit_environment_variables():
-    """Logs the presence/absence and key values of environment variables on startup."""
+    """Logs the presence/absence and key configuration of environment variables on startup."""
     settings = get_settings()
     
     def _status(val: str) -> str:
@@ -26,34 +26,83 @@ def audit_environment_variables():
             return "MISSING / NOT SET"
         return f"PRESENT (len={len(str(val))})"
 
-    logger.info("=" * 70)
-    logger.info("BHOOMIMITRA AI — ENVIRONMENT AUDIT ON SERVER BOOT")
-    logger.info("=" * 70)
+    logger.info("=" * 75)
+    logger.info("BHOOMIMITRA AI — ENVIRONMENT CONFIGURATION AUDIT ON SERVER BOOT")
+    logger.info("=" * 75)
     logger.info(f"APP_ENV                   : {settings.app_env}")
-    logger.info(f"WHATSAPP_PHONE_NUMBER_ID  : {settings.whatsapp_phone_number_id or 'NOT SET'} (RUNTIME LOADED VALUE)")
+    logger.info(f"DEBUG                     : {settings.debug}")
+    logger.info(f"LOG_LEVEL                 : {settings.log_level}")
+    logger.info("--- REQUIRED IN PRODUCTION ---")
+    logger.info(f"DATABASE_URL              : {_status(settings.database_url)}")
+    logger.info(f"WHATSAPP_PHONE_NUMBER_ID  : {settings.whatsapp_phone_number_id or 'NOT SET'}")
     logger.info(f"WHATSAPP_API_TOKEN        : {_status(settings.whatsapp_api_token)}")
     logger.info(f"WHATSAPP_VERIFY_TOKEN     : {_status(settings.whatsapp_verify_token)}")
     logger.info(f"WHATSAPP_APP_SECRET       : {_status(settings.whatsapp_app_secret)}")
-    logger.info(f"WHATSAPP_BUSINESS_ACCT_ID : {settings.whatsapp_business_account_id or 'NOT SET'}")
-    logger.info(f"GOOGLE_GEMINI_API_KEY     : {_status(settings.google_gemini_api_key)}")
-    logger.info(f"OPENAI_API_KEY            : {_status(settings.openai_api_key)}")
-    logger.info(f"DATABASE_URL              : {_status(settings.database_url)}")
+    logger.info("--- OPTIONAL / FALLBACK-ENABLED SERVICES ---")
+    logger.info(f"GOOGLE_GEMINI_API_KEY     : {_status(settings.google_gemini_api_key)} (Model: {settings.gemini_model})")
+    logger.info(f"STT_PROVIDER              : {settings.stt_provider} (Lang: {settings.stt_default_language})")
+    logger.info(f"GOOGLE_APP_CREDENTIALS    : {_status(settings.google_application_credentials)}")
+    logger.info(f"OPENWEATHER_API_KEY       : {_status(settings.openweather_api_key)} (Mock fallback enabled)")
+    logger.info(f"DATA_GOV_API_KEY          : {_status(settings.data_gov_api_key)} (DB fallback enabled)")
     logger.info(f"REDIS_URL                 : {_status(settings.redis_url)}")
-    logger.info(f"STT_PROVIDER              : {settings.stt_provider}")
-    logger.info("=" * 70)
+    logger.info("--- TIMEOUT SETTINGS ---")
+    logger.info(f"GEMINI_TIMEOUT            : {settings.gemini_api_timeout_seconds}s")
+    logger.info(f"STT_TIMEOUT               : {settings.stt_api_timeout_seconds}s")
+    logger.info(f"WEATHER_TIMEOUT           : {settings.openweather_api_timeout_seconds}s")
+    logger.info(f"AGMARKNET_TIMEOUT         : {settings.agmarknet_api_timeout_seconds}s")
+    logger.info(f"WHATSAPP_TIMEOUT          : {settings.whatsapp_api_timeout_seconds}s")
+    logger.info("=" * 75)
+
+
+def validate_production_settings():
+    """
+    When APP_ENV=production, validates that critical WhatsApp and DB environment variables exist.
+    Fails fast with a clear configuration error without logging actual secret values.
+    """
+    settings = get_settings()
+    if not settings.is_production:
+        return
+
+    missing_wa_vars = []
+    if not settings.whatsapp_api_token:
+        missing_wa_vars.append("WHATSAPP_API_TOKEN")
+    if not settings.whatsapp_phone_number_id:
+        missing_wa_vars.append("WHATSAPP_PHONE_NUMBER_ID")
+    if not settings.whatsapp_verify_token:
+        missing_wa_vars.append("WHATSAPP_VERIFY_TOKEN")
+    if not settings.whatsapp_app_secret:
+        missing_wa_vars.append("WHATSAPP_APP_SECRET")
+
+    if missing_wa_vars:
+        error_msg = (
+            f"[FATAL CONFIG ERROR] Missing required WhatsApp settings for production: "
+            f"{', '.join(missing_wa_vars)}. Server startup aborted."
+        )
+        logger.critical(error_msg)
+        raise RuntimeError(error_msg)
+
+    if hasattr(settings, "database_url") and not settings.database_url:
+        error_msg = (
+            "[FATAL CONFIG ERROR] Missing required production settings: "
+            "DATABASE_URL. Server startup aborted."
+        )
+        logger.critical(error_msg)
+        raise RuntimeError(error_msg)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup validation
     try:
         audit_environment_variables()
+        validate_production_settings()
         from src.core.models import Base
         async with engine.begin() as conn:
             await conn.execute(text("SELECT 1"))
             await conn.run_sync(Base.metadata.create_all)
         logger.info("Database connection validated and tables created successfully.")
     except Exception as e:
-        logger.error(f"Failed to connect to the database: {e}")
+        logger.error(f"Failed to connect to the database or start application: {e}")
         raise e
     yield
     # Shutdown

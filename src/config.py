@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     whatsapp_app_secret: str = Field(default="")  # Used for HMAC-SHA256 signature verification
     whatsapp_phone_number_id: str = Field(default="")
     whatsapp_business_account_id: str = Field(default="")
+    whatsapp_api_timeout_seconds: float = Field(default=15.0)
+    max_media_download_bytes: int = Field(default=15_728_640)  # 15 MB boundary guard
 
     # AI
     openai_api_key: str = Field(default="")
@@ -48,6 +50,7 @@ class Settings(BaseSettings):
     # Speech-to-Text
     stt_provider: str = Field(default="google")
     stt_default_language: str = Field(default="te-IN")
+    stt_api_timeout_seconds: float = Field(default=10.0)
 
     # Expert Escalation
     expert_whatsapp_group_id: str = Field(default="")
@@ -68,6 +71,7 @@ class Settings(BaseSettings):
     openweather_api_url: str = Field(
         default="https://api.openweathermap.org/data/2.5/forecast"
     )
+    openweather_api_timeout_seconds: float = Field(default=5.0)
     weather_cache_ttl_seconds: int = Field(default=1800)  # 30 minutes
 
     # Authentication & JWT

@@ -21,10 +21,11 @@ class OpenWeatherClient:
     Never raises exceptions — handles errors gracefully and returns None.
     """
 
-    def __init__(self, api_key: str, api_url: str, cache_ttl_seconds: int = 1800):
+    def __init__(self, api_key: str, api_url: str, cache_ttl_seconds: int = 1800, timeout_seconds: float = 5.0):
         self.api_key = api_key.strip() if api_key else ""
         self.api_url = api_url
         self.cache_ttl = cache_ttl_seconds
+        self.timeout_seconds = timeout_seconds
 
     # ------------------------------------------------------------------
     # Public interface
@@ -111,7 +112,7 @@ class OpenWeatherClient:
             return None
 
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                 logger.info(f"[WEATHER CLIENT] Calling live OpenWeatherMap API: {params}")
                 response = await client.get(self.api_url, params=params)
 
@@ -126,7 +127,7 @@ class OpenWeatherClient:
             return self._normalise_response(data)
 
         except httpx.TimeoutException:
-            logger.warning("[WEATHER CLIENT] Connection timed out (5s threshold exceeded).")
+            logger.warning(f"[WEATHER CLIENT] Connection timed out ({self.timeout_seconds}s threshold exceeded).")
             return None
         except httpx.RequestError as exc:
             logger.warning(f"[WEATHER CLIENT] HTTP connection error: {exc}")
