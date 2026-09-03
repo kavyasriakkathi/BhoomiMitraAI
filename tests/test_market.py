@@ -738,6 +738,112 @@ async def test_agmarknet_client_network_error_handling():
 
 
 @pytest.mark.asyncio
+async def test_agmarknet_client_strict_timeout_enforced():
+    """Verify AgmarknetClient strictly enforces configured timeout when request hangs."""
+    import asyncio
+    import time
+    from src.market.agmarknet_client import AgmarknetClient
+
+    client_obj = AgmarknetClient(
+        api_key="valid-test-key",
+        api_url="https://api.data.gov.in/resource/test",
+        cache_ttl_seconds=3600,
+        timeout_seconds=0.1,
+    )
+
+    async def slow_get(*args, **kwargs):
+        await asyncio.sleep(3.0)
+        return MagicMock(status_code=200, json=lambda: {"records": []})
+
+    with patch.object(client_obj, "_get_from_cache", new=AsyncMock(return_value=None)), \
+         patch.object(client_obj, "_set_in_cache", new=AsyncMock()), \
+         patch("httpx.AsyncClient.get", side_effect=slow_get):
+
+        t0 = time.time()
+        records = await client_obj.fetch_prices("Cotton", state="Telangana")
+        elapsed = time.time() - t0
+
+    assert records == []
+    # Must have timed out via asyncio.wait_for near 0.1s rather than waiting full 3.0s
+    assert elapsed < 2.9
+
+
+@pytest.mark.asyncio
+async def test_agmarknet_client_infers_telangana_state_for_warangal():
+    """Verify AgmarknetClient automatically resolves state='Telangana' when district is Warangal and state is None."""
+    from src.market.agmarknet_client import AgmarknetClient
+
+    client_obj = AgmarknetClient(
+        api_key="valid-test-key",
+        api_url="https://api.data.gov.in/resource/test",
+        cache_ttl_seconds=3600,
+        timeout_seconds=5.0,
+    )
+
+    mock_resp = MagicMock(status_code=200)
+    mock_resp.json.return_value = {"records": []}
+
+    with patch.object(client_obj, "_get_from_cache", new=AsyncMock(return_value=None)), \
+         patch.object(client_obj, "_set_in_cache", new=AsyncMock()), \
+         patch("httpx.AsyncClient.get", new=AsyncMock(return_value=mock_resp)) as mock_get:
+
+        await client_obj.fetch_prices("Cotton", state=None, district="Warangal")
+
+        assert mock_get.called
+        call_kwargs = mock_get.call_args[1]
+        params = call_kwargs["params"]
+        assert params["filters[commodity]"] == "Cotton"
+        assert params["filters[district]"] == "Warangal"
+        assert params["filters[state.keyword]"] == "Telangana"
+
+
+@pytest.mark.asyncio
+async def test_market_service_live_today_warangal_cotton_data_used_directly():
+    """Verify that when live API returns today's Warangal cotton records, live data is used with is_live=True."""
+    from src.market.service import MarketService, enrich_response_with_market_prices, IST_TZ
+    from src.market.agmarknet_client import AgmarknetClient
+    from src.core.models import Farmer
+
+    mock_repo = AsyncMock()
+    client_obj = AgmarknetClient(api_key="key", api_url="https://api.data.gov.in/test")
+
+    today_dt = datetime.now(IST_TZ).replace(tzinfo=None)
+    live_today_records = [
+        {
+            "commodity": "Cotton",
+            "market": "Warangal Mandi",
+            "district": "Warangal",
+            "state": "Telangana",
+            "min_price": 7500.0,
+            "max_price": 8100.0,
+            "modal_price": 7850.0,
+            "arrival_date": today_dt,
+        }
+    ]
+
+    with patch.object(client_obj, "fetch_prices", new=AsyncMock(return_value=live_today_records)):
+        svc = MarketService(repository=mock_repo, client=client_obj)
+        res = await svc.get_prices_for_query("Cotton", district="Warangal", state="Telangana", is_today_requested=True)
+
+    assert res.data_available is True
+    assert res.is_live is True
+    assert res.data_freshness_hours == 0.0
+    assert len(res.results) == 1
+    assert res.results[0].modal_price == 7850.0
+    assert res.results[0].id is not None  # Must have valid UUID, not None
+    mock_repo.upsert_prices.assert_called_once()
+
+    # Verify formatting produces the normal title without unavailable warning
+    farmer = Farmer(id=uuid4(), phone_number="+919876543210", preferred_language="te")
+    reply = svc.format_whatsapp_reply(res, language="te", is_today_query=True)
+    assert "📊 పత్తి మార్కెట్ ధరలు" in reply
+    assert "అందుబాటులో లేదు" not in reply
+    assert "Warangal Mandi" in reply
+    assert "7,850" in reply
+
+
+
+@pytest.mark.asyncio
 async def test_market_service_live_api_success_path():
     """Verify MarketService upserts live records and marks response as is_live=True."""
     from src.market.service import MarketService

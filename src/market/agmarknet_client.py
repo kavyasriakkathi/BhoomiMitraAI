@@ -10,6 +10,7 @@ IMPORTANT:
 - Results are cached in Redis (TTL = market_price_cache_ttl_seconds) to
   minimise API calls. If Redis is unavailable, caching is silently skipped.
 """
+import asyncio
 import json
 import hashlib
 import time
@@ -19,6 +20,41 @@ from datetime import datetime
 import httpx
 
 from src.core.logging import logger
+
+# Known districts mapped to their respective Indian state for targeted Agmarknet API queries.
+_DISTRICT_STATE_MAP = {
+    # Telangana
+    "warangal": "Telangana",
+    "enumamula": "Telangana",
+    "hanamkonda": "Telangana",
+    "karimnagar": "Telangana",
+    "khammam": "Telangana",
+    "nizamabad": "Telangana",
+    "nalgonda": "Telangana",
+    "mahabubnagar": "Telangana",
+    "hyderabad": "Telangana",
+    "medak": "Telangana",
+    "adilabad": "Telangana",
+    "rangareddy": "Telangana",
+    "siddipet": "Telangana",
+    "suryapet": "Telangana",
+    "jagtial": "Telangana",
+    "mancherial": "Telangana",
+    "bhadradri": "Telangana",
+    "kothagudem": "Telangana",
+    "vikarabad": "Telangana",
+    "sangareddy": "Telangana",
+    "kamareddy": "Telangana",
+    "sircilla": "Telangana",
+    "rajanna sircilla": "Telangana",
+    # Andhra Pradesh
+    "guntur": "Andhra Pradesh",
+    "krishna": "Andhra Pradesh",
+    "kurnool": "Andhra Pradesh",
+    "anantapur": "Andhra Pradesh",
+    "chittoor": "Andhra Pradesh",
+    "visakhapatnam": "Andhra Pradesh",
+}
 
 
 class AgmarknetClient:
@@ -105,28 +141,55 @@ class AgmarknetClient:
         Make the HTTP call to data.gov.in.
         Returns parsed list of normalised price dicts, or None on any error.
         """
+        # Clean up string "None" or whitespace
+        if isinstance(state, str) and state.strip().lower() in ("", "none"):
+            state = None
+        if isinstance(district, str) and district.strip().lower() in ("", "none"):
+            district = None
+
+        # Resolve state from known district if state was not explicitly provided
+        # (e.g. Warangal -> Telangana prevents unindexed nationwide table scan on data.gov.in)
+        resolved_state = state
+        if not resolved_state and district:
+            resolved_state = _DISTRICT_STATE_MAP.get(district.strip().lower())
+
         params = {
             "api-key": self.api_key,
             "format": "json",
             "limit": 100,
             "filters[commodity]": commodity,
         }
-        if state:
-            params["filters[state.keyword]"] = state
+        if resolved_state:
+            params["filters[state.keyword]"] = resolved_state
         if district:
             params["filters[district]"] = district
 
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": "BhoomiMitraAI/1.0 (Agricultural Mandi Advisory)",
+        }
+
         start_time = time.time()
-        connect_timeout = min(3.0, self.timeout_seconds)
-        timeout_config = httpx.Timeout(self.timeout_seconds, connect=connect_timeout)
+        connect_timeout = min(2.0, self.timeout_seconds)
+        timeout_config = httpx.Timeout(
+            self.timeout_seconds,
+            connect=connect_timeout,
+            read=self.timeout_seconds,
+            write=self.timeout_seconds,
+            pool=self.timeout_seconds,
+        )
 
         try:
             async with httpx.AsyncClient(timeout=timeout_config) as client:
                 logger.info(
                     f"[AGMARKNET] Calling live API: commodity='{commodity}' "
-                    f"state='{state}' district='{district}' (timeout={self.timeout_seconds}s)"
+                    f"state='{resolved_state}' district='{district}' (timeout={self.timeout_seconds}s)"
                 )
-                response = await client.get(self.api_url, params=params)
+                start_time = time.time()
+                response = await asyncio.wait_for(
+                    client.get(self.api_url, params=params, headers=headers),
+                    timeout=self.timeout_seconds,
+                )
 
             elapsed = time.time() - start_time
 
@@ -145,7 +208,7 @@ class AgmarknetClient:
             )
             return self._normalise_records(records)
 
-        except httpx.TimeoutException:
+        except (httpx.TimeoutException, asyncio.TimeoutError):
             elapsed = time.time() - start_time
             logger.warning(
                 f"[AGMARKNET] API timeout after {elapsed:.2f}s (limit={self.timeout_seconds}s) "
@@ -230,6 +293,13 @@ class AgmarknetClient:
         state: Optional[str],
         district: Optional[str],
     ) -> str:
+        # Normalize state if known from district to ensure consistent cache hits
+        if isinstance(state, str) and state.strip().lower() in ("", "none"):
+            state = None
+        if isinstance(district, str) and district.strip().lower() in ("", "none"):
+            district = None
+        if not state and district:
+            state = _DISTRICT_STATE_MAP.get(district.strip().lower(), state)
         raw = f"market_price:{commodity.lower()}:{(state or '').lower()}:{(district or '').lower()}"
         return "agmarknet:" + hashlib.md5(raw.encode()).hexdigest()[:16]
 

@@ -13,6 +13,7 @@ SAFETY RULES:
 import re
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
+from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from src.core.logging import logger
@@ -321,7 +322,7 @@ class MarketService:
                         arr_dt = datetime.utcnow()
                 results.append(
                     MarketPriceResponse(
-                        id=None,
+                        id=uuid4(),
                         commodity=commodity,
                         commodity_telugu=telugu_name,
                         market_name=r.get("market", "Unknown Market"),
