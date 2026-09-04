@@ -18,22 +18,21 @@ _initialized = False
 # Resilient fallback chain of supported models
 FALLBACK_MODELS = [
     "gemini-3.5-flash",
-    "gemini-3.5-flash-lite",
     "gemini-flash-latest",
 ]
 
 
 def _ensure_initialized():
-    """Configure the Gemini SDK once on first use."""
+    """Configure the Gemini SDK once on first use with REST transport."""
     global _initialized
     if not _initialized:
         settings = get_settings()
         if not settings.google_gemini_api_key:
             logger.error("[GEMINI CONFIG ERROR] GOOGLE_GEMINI_API_KEY is not configured in settings or environment.")
             raise RuntimeError("Gemini API key is not configured.")
-        genai.configure(api_key=settings.google_gemini_api_key)
+        genai.configure(api_key=settings.google_gemini_api_key, transport="rest")
         _initialized = True
-        logger.info("Gemini SDK initialized successfully.")
+        logger.info("Gemini SDK initialized successfully with transport='rest'.")
 
 
 async def generate_response(
@@ -62,7 +61,7 @@ async def generate_response(
     settings = get_settings()
     if timeout_seconds is None:
         timeout_seconds = float(getattr(settings, "gemini_api_timeout_seconds", 5.0))
-    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.5-flash"
+    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.6-flash"
 
     # Build candidates list starting with primary model
     candidate_models = [primary_model]
@@ -172,7 +171,7 @@ async def generate_multimodal_response(
     """
     _ensure_initialized()
     settings = get_settings()
-    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.5-flash"
+    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.6-flash"
 
     candidate_models = [primary_model]
     for fallback in FALLBACK_MODELS:

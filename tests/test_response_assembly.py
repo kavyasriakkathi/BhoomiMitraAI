@@ -1222,9 +1222,9 @@ async def test_single_intent_five_sample_queries_backward_compatibility():
 
 
 @pytest.mark.asyncio
-async def test_whatsapp_reply_uses_gemini_35_flash_as_primary(monkeypatch):
+async def test_whatsapp_reply_uses_gemini_36_flash_as_primary(monkeypatch):
     """
-    Verify that the natural-language WhatsApp AI reply uses gemini-3.5-flash as the primary model.
+    Verify that the natural-language WhatsApp AI reply uses gemini-3.6-flash as the primary model.
     """
     import src.ai.gemini_client as gemini_module
     from src.ai.service import AIService
@@ -1266,12 +1266,12 @@ async def test_whatsapp_reply_uses_gemini_35_flash_as_primary(monkeypatch):
          patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[]):
         ai_resp = await ai_service.generate_ai_response(req)
 
-    assert models_called[0] == "gemini-3.5-flash"
+    assert models_called[0] == "gemini-3.6-flash"
     assert "పత్తి పంటలో పురుగుల నివారణకు" in ai_resp.response_text
 
 
 @pytest.mark.asyncio
-async def test_multi_intent_whatsapp_response_with_gemini_35_flash():
+async def test_multi_intent_whatsapp_response_with_gemini_36_flash():
     """
     Verify multi-intent WhatsApp message assembly:
     Query: "పత్తి పంటలో పురుగులు వస్తున్నాయి. యూరియా ఎక్కడ దొరుకుతుంది? వరంగల్ ప్రాంతంలో రేపు వర్షం పడుతుందా?"

@@ -85,20 +85,33 @@ def test_generate_ai_response_provider_unavailable(mock_ai_service):
 def test_gemini_model_configuration():
     from src.config import Settings
     s = Settings()
-    assert s.gemini_model == "gemini-3.5-flash"
+    assert s.gemini_model == "gemini-3.6-flash"
 
 
 def test_gemini_fallback_models_order():
     from src.ai.gemini_client import FALLBACK_MODELS
     assert FALLBACK_MODELS == [
         "gemini-3.5-flash",
-        "gemini-3.5-flash-lite",
         "gemini-flash-latest",
     ]
 
 
+def test_gemini_initialization_configures_rest_transport(monkeypatch):
+    from unittest.mock import MagicMock
+    import src.ai.gemini_client as gemini_module
+
+    monkeypatch.setattr(gemini_module, "_initialized", False)
+    mock_configure = MagicMock()
+    monkeypatch.setattr(gemini_module.genai, "configure", mock_configure)
+
+    gemini_module._ensure_initialized()
+
+    assert mock_configure.called
+    assert mock_configure.call_args.kwargs.get("transport") == "rest"
+
+
 @pytest.mark.asyncio
-async def test_gemini_generate_response_primary_model_is_gemini_35_flash(monkeypatch):
+async def test_gemini_generate_response_primary_model_is_gemini_36_flash(monkeypatch):
     from unittest.mock import MagicMock
     import src.ai.gemini_client as gemini_module
 
@@ -111,7 +124,7 @@ async def test_gemini_generate_response_primary_model_is_gemini_35_flash(monkeyp
         mock_instance = MagicMock()
         mock_chat = MagicMock()
         mock_resp = MagicMock()
-        mock_resp.text = "Gemini 3.5 Flash natural language response"
+        mock_resp.text = "Gemini 3.6 Flash natural language response"
         mock_chat.send_message.return_value = mock_resp
         mock_instance.start_chat.return_value = mock_chat
         return mock_instance
@@ -125,8 +138,8 @@ async def test_gemini_generate_response_primary_model_is_gemini_35_flash(monkeyp
         timeout_seconds=5,
     )
 
-    assert response == "Gemini 3.5 Flash natural language response"
-    assert attempts[0] == "gemini-3.5-flash"
+    assert response == "Gemini 3.6 Flash natural language response"
+    assert attempts[0] == "gemini-3.6-flash"
 
 
 @pytest.mark.asyncio
@@ -142,7 +155,7 @@ async def test_gemini_generate_response_fallback_on_error(monkeypatch):
         attempts.append(model_name)
         mock_instance = MagicMock()
         mock_chat = MagicMock()
-        if model_name == "gemini-3.5-flash":
+        if model_name == "gemini-3.6-flash":
             # Primary attempt fails
             mock_chat.send_message.side_effect = Exception("Service Unavailable 503")
         else:
@@ -163,5 +176,5 @@ async def test_gemini_generate_response_fallback_on_error(monkeypatch):
     )
 
     assert response == "Fallback model response"
-    assert attempts[0] == "gemini-3.5-flash"
-    assert "gemini-3.5-flash-lite" in attempts
+    assert attempts[0] == "gemini-3.6-flash"
+    assert "gemini-3.5-flash" in attempts
