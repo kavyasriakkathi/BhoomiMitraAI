@@ -178,3 +178,80 @@ async def test_gemini_generate_response_fallback_on_error(monkeypatch):
     assert response == "Fallback model response"
     assert attempts[0] == "gemini-3.6-flash"
     assert "gemini-3.5-flash" in attempts
+
+
+@pytest.mark.asyncio
+async def test_gemini_generate_response_max_output_tokens_is_1024(monkeypatch):
+    from unittest.mock import MagicMock
+    import src.ai.gemini_client as gemini_module
+
+    monkeypatch.setattr(gemini_module, "_initialized", True)
+
+    captured_configs = []
+
+    def mock_generative_model(model_name, **kwargs):
+        captured_configs.append(kwargs.get("generation_config"))
+        mock_instance = MagicMock()
+        mock_chat = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = "Valid test response"
+        mock_chat.send_message.return_value = mock_resp
+        mock_instance.start_chat.return_value = mock_chat
+        return mock_instance
+
+    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+
+    response = await gemini_module.generate_response(
+        system_prompt="Test prompt",
+        conversation_history=[],
+        user_message="పత్తి పంటలో పురుగుల నివారణ",
+        timeout_seconds=5,
+    )
+
+    assert response == "Valid test response"
+    assert len(captured_configs) > 0
+    gen_config = captured_configs[0]
+    # Check max_output_tokens on genai.GenerationConfig
+    token_limit = getattr(gen_config, "max_output_tokens", None)
+    if token_limit is None and hasattr(gen_config, "_max_output_tokens"):
+        token_limit = gen_config._max_output_tokens
+    assert token_limit == 1024
+
+
+@pytest.mark.asyncio
+async def test_gemini_telugu_response_regression_no_artificial_truncation(monkeypatch):
+    """Regression test ensuring application code returns the complete Telugu response without artificial cutoff."""
+    from unittest.mock import MagicMock
+    import src.ai.gemini_client as gemini_module
+
+    monkeypatch.setattr(gemini_module, "_initialized", True)
+
+    long_telugu_response = (
+        "నమస్తే రైతు సోదరా! మీ పంట సాగులో సరైన యాజమాన్య పద్ధతులు పాటించడం ఎంతో ముఖ్యం. "
+        "పొలంలో నీటి పారుదల మరియు మురుగు నీటి సౌకర్యం సక్రమంగా ఉండేలా చూసుకోవాలి. "
+        "పంట ఎదుగుదల దశలో సేంద్రీయ ఎరువులు మరియు తగిన పోషకాలను సమతుల్యంగా అందించడం ద్వారా మంచి దిగుబడి సాధించవచ్చు. "
+        "క్షేత్రస్థాయిలో ఏవైనా సమస్యలు లేదా సందేహాలు ఉంటే స్థానిక వ్యవసాయ అధికారిని సంప్రదించండి."
+    )
+
+    def mock_generative_model(model_name, **kwargs):
+        mock_instance = MagicMock()
+        mock_chat = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.text = long_telugu_response
+        mock_chat.send_message.return_value = mock_resp
+        mock_instance.start_chat.return_value = mock_chat
+        return mock_instance
+
+    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+
+    response = await gemini_module.generate_response(
+        system_prompt="Test prompt",
+        conversation_history=[],
+        user_message="పంట సాగు మరియు క్షేత్ర యాజమాన్యం గురించి వివరాలు చెప్పండి.",
+        timeout_seconds=5,
+    )
+
+    assert response == long_telugu_response
+    assert len(response) == len(long_telugu_response)
+    assert response.endswith("స్థానిక వ్యవసాయ అధికారిని సంప్రదించండి.")
+
