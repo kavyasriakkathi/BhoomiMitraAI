@@ -119,6 +119,9 @@ async def receive_message(
     Receives incoming WhatsApp messages from Meta's Cloud API.
     Logs raw request safely, verifies signature, parses payload, and queues background processing.
     """
+    import time
+    recv_time = time.time()
+
     # VERY FIRST LINE: Read body bytes and log sanitized request metadata before any parsing or validation
     body_bytes = await request.body()
     client_ip = request.client.host if request.client else "unknown"
@@ -214,12 +217,13 @@ async def receive_message(
 
                 if parsed.message_id in queued_message_ids:
                     logger.warning(
-                        f"Duplicate message ID '{parsed.message_id}' detected within same webhook payload batch. Skipping."
+                        f"[DUPLICATE IN PAYLOAD] Duplicate message ID '{parsed.message_id}' detected within same webhook payload batch. Skipping."
                     )
                     continue
 
                 queued_message_ids.add(parsed.message_id)
 
+                logger.info(f"[WEBHOOK EVENT] msg_id={parsed.message_id} meta_ts={parsed.timestamp} type={parsed.message_type} sender={mask_phone_number(parsed.phone_number)}")
                 logger.info(f"INCOMING MESSAGE PARSED SUCCESSFULLY:")
                 logger.info(f"  Message ID  : {parsed.message_id}")
                 logger.info(f"  Message Type: {parsed.message_type}")
@@ -244,7 +248,10 @@ async def receive_message(
                     logger.exception(f"Failed to queue background task for message {parsed.message_id}: {queue_err}")
 
     # Step 6: Return HTTP 200 OK immediately to Meta
-    logger.info(f"Webhook processing complete. Responding HTTP 200 OK to Meta ({messages_queued} messages queued).")
+    ack_duration_ms = (time.time() - recv_time) * 1000.0
+    logger.info(
+        f"[WEBHOOK ACK] Responded HTTP 200 OK to Meta in {ack_duration_ms:.2f}ms ({messages_queued} messages queued)."
+    )
     return {"status": "ok", "messages_queued": messages_queued}
 
 

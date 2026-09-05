@@ -717,4 +717,143 @@ async def test_existing_successful_text_message_processing_still_works():
         )
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 3 REGRESSION TESTS: Fast Acknowledgement & Multi-Layer Duplicate Defense
+# ─────────────────────────────────────────────────────────────────────────────
 
+def test_post_webhook_acknowledges_http_200_immediately():
+    """Verify that Meta webhook POST returns HTTP 200 OK immediately and queues background task."""
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "1993680168018884",
+                "changes": [
+                    {
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "metadata": {
+                                "display_phone_number": "15551234567",
+                                "phone_number_id": "1211671805365875"
+                            },
+                            "contacts": [
+                                {
+                                    "profile": {"name": "Rao"},
+                                    "wa_id": "919876543210"
+                                }
+                            ],
+                            "messages": [
+                                {
+                                    "from": "919876543210",
+                                    "id": "wamid.FAST_ACK_TEST_123",
+                                    "timestamp": "1700000000",
+                                    "text": {"body": "రైతు బంధు పథకం వివరాలు"},
+                                    "type": "text"
+                                }
+                            ]
+                        },
+                        "field": "messages"
+                    }
+                ]
+            }
+        ]
+    }
+
+    with patch("src.gateway.router.process_message_pipeline") as mock_pipeline:
+        response = client.post("/webhook/whatsapp", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["messages_queued"] == 1
+
+
+@pytest.mark.asyncio
+async def test_duplicate_webhook_in_flight_logged_and_aborted():
+    """Verify that in-flight duplicate delivery is halted at Stage 0 before DB or AI processing."""
+    from src.gateway.service import _IN_FLIGHT_MESSAGE_IDS
+
+    msg_id = "wamid.IN_FLIGHT_REGRESSION_TEST"
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543210",
+        message_id=msg_id,
+        timestamp="1700000000",
+        message_type="text",
+        text_content="Price of tomato?",
+    )
+
+    _IN_FLIGHT_MESSAGE_IDS.add(msg_id)
+    try:
+        with patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock) as mock_dup, \
+             patch("src.gateway.service.process_text_message", new_callable=AsyncMock) as mock_ai, \
+             patch("src.gateway.service.send_text_message", new_callable=AsyncMock) as mock_send:
+
+            await process_message_pipeline(parsed)
+
+            # Neither DB, AI, nor outbound send should be triggered
+            mock_dup.assert_not_called()
+            mock_ai.assert_not_called()
+            mock_send.assert_not_called()
+    finally:
+        _IN_FLIGHT_MESSAGE_IDS.discard(msg_id)
+
+
+@pytest.mark.asyncio
+async def test_duplicate_webhook_db_exists_logged_and_aborted():
+    """Verify that duplicate message already committed to DB is halted at Stage 1 before AI or outbound sending."""
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543210",
+        message_id="wamid.DB_EXISTS_REGRESSION_TEST",
+        timestamp="1700000000",
+        message_type="text",
+        text_content="Price of cotton?",
+    )
+
+    mock_db = AsyncMock()
+    mock_db_cm = AsyncMock()
+    mock_db_cm.__aenter__.return_value = mock_db
+    mock_db_cm.__aexit__.return_value = None
+
+    with patch("src.gateway.service.AsyncSessionLocal", return_value=mock_db_cm), \
+         patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=True) as mock_dup, \
+         patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock) as mock_farmer, \
+         patch("src.gateway.service.process_text_message", new_callable=AsyncMock) as mock_ai, \
+         patch("src.gateway.service.send_text_message", new_callable=AsyncMock) as mock_send:
+
+        await process_message_pipeline(parsed)
+
+        mock_dup.assert_awaited_once()
+        mock_farmer.assert_not_called()
+        mock_ai.assert_not_called()
+        mock_send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_webhook_concurrent_db_collision_logged_and_rolled_back():
+    """Verify that a concurrent DB collision during store_incoming_message safely rolls back and halts the pipeline."""
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543210",
+        message_id="wamid.DB_COLLISION_REGRESSION_TEST",
+        timestamp="1700000000",
+        message_type="text",
+        text_content="Weather report today",
+    )
+
+    mock_farmer = Farmer(id=uuid.uuid4(), phone_number="919876543210", preferred_language="te")
+
+    mock_db = AsyncMock()
+    mock_db_cm = AsyncMock()
+    mock_db_cm.__aenter__.return_value = mock_db
+    mock_db_cm.__aexit__.return_value = None
+
+    with patch("src.gateway.service.AsyncSessionLocal", return_value=mock_db_cm), \
+         patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=False), \
+         patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock, return_value=mock_farmer), \
+         patch("src.gateway.service.store_incoming_message", new_callable=AsyncMock, return_value=None) as mock_store, \
+         patch("src.gateway.service.process_text_message", new_callable=AsyncMock) as mock_ai, \
+         patch("src.gateway.service.send_text_message", new_callable=AsyncMock) as mock_send:
+
+        await process_message_pipeline(parsed)
+
+        mock_store.assert_awaited_once()
+        mock_ai.assert_not_called()
+        mock_send.assert_not_called()
