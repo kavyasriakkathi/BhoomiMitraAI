@@ -857,3 +857,54 @@ async def test_duplicate_webhook_concurrent_db_collision_logged_and_rolled_back(
         mock_store.assert_awaited_once()
         mock_ai.assert_not_called()
         mock_send.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_language_detector_module_import_and_pipeline_integration():
+    """Verify that src.language.detector is importable and integrates properly with the pipeline."""
+    from src.language.detector import detect_language
+    from src.language.languages import SUPPORTED_LANGUAGES
+
+    # Verify detector imports and basic functionality
+    assert callable(detect_language)
+    assert "te" in SUPPORTED_LANGUAGES
+    assert detect_language("పత్తి పంట రక్షణ") == "te"
+    assert detect_language("How to apply urea?") == "en"
+
+    # Verify pipeline execution with language detection
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543210",
+        message_id="wamid.LANG_DETECT_TEST_01",
+        timestamp="1700000000",
+        message_type="text",
+        text_content="పత్తి పంటలో పురుగు నివారణ",
+    )
+
+    mock_farmer = Farmer(id=uuid.uuid4(), phone_number="919876543210", preferred_language="te")
+    mock_conv = Conversation(
+        id=uuid.uuid4(),
+        farmer_id=mock_farmer.id,
+        message_id=parsed.message_id,
+        user_message=parsed.text_content,
+        user_message_type="text",
+    )
+
+    mock_db = AsyncMock()
+    mock_db_cm = AsyncMock()
+    mock_db_cm.__aenter__.return_value = mock_db
+    mock_db_cm.__aexit__.return_value = None
+
+    with patch("src.gateway.service.AsyncSessionLocal", return_value=mock_db_cm), \
+         patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=False), \
+         patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock, return_value=mock_farmer), \
+         patch("src.gateway.service.store_incoming_message", new_callable=AsyncMock, return_value=mock_conv), \
+         patch("src.gateway.service.process_text_message", new_callable=AsyncMock, return_value="పురుగు నివారణకు సిఫార్సు చేయబడిన మందులు..."), \
+         patch("src.gateway.service.send_text_message", new_callable=AsyncMock, return_value="wamid.OUT_LANG_OK") as mock_send, \
+         patch("src.gateway.service.mark_message_as_read", new_callable=AsyncMock):
+
+        await process_message_pipeline(parsed)
+
+        mock_send.assert_awaited_once_with(
+            to_phone="919876543210",
+            message_text="పురుగు నివారణకు సిఫార్సు చేయబడిన మందులు...",
+        )

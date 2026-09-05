@@ -66,10 +66,18 @@ class LanguageService:
             # For OGG_OPUS, sample_rate_hertz is not specified so Google STT reads it natively from the container header.
             encoding = speech.RecognitionConfig.AudioEncoding.OGG_OPUS
 
+            # Support multi-lingual alternatives for Indian languages
+            alt_codes = [
+                "te-IN", "hi-IN", "en-IN", "ta-IN", "kn-IN", "ml-IN",
+                "mr-IN", "bn-IN", "gu-IN", "pa-IN", "ur-IN", "or-IN", "as-IN"
+            ]
+            default_lang = self.settings.stt_default_language
+            filtered_alts = [c for c in alt_codes if c != default_lang]
+
             config = speech.RecognitionConfig(
                 encoding=encoding,
-                language_code=self.settings.stt_default_language,
-                alternative_language_codes=["te-IN", "hi-IN", "en-IN"],
+                language_code=default_lang,
+                alternative_language_codes=filtered_alts,
             )
 
             call_res = self.google_client.recognize(config=config, audio=audio)
@@ -91,16 +99,20 @@ class LanguageService:
             confidence = best_alternative.confidence
             
             # Attempt to extract the language code that was actually detected, fallback to default.
-            detected_language = best_result.language_code if hasattr(best_result, "language_code") and best_result.language_code else self.settings.stt_default_language
+            detected_language = best_result.language_code if hasattr(best_result, "language_code") and best_result.language_code else default_lang
             
             if not transcript or not transcript.strip():
                 raise BhoomiMitraException("Transcription resulted in empty text.", status_code=422)
 
-            logger.info(f"Google STT Success: Detected language '{detected_language}' with confidence {confidence}")
+            # Refine detected language using our deterministic script & text analyzer
+            from src.language.detector import detect_language
+            refined_lang = detect_language(transcript.strip(), fallback=detected_language[:2] if detected_language else "te")
+
+            logger.info(f"Google STT Success: Detected STT code '{detected_language}', Refined language '{refined_lang}' with confidence {confidence}")
 
             return TranscriptionResponse(
                 transcription_text=transcript.strip(),
-                detected_language=detected_language,
+                detected_language=refined_lang,
                 confidence=confidence,
                 provider_used="google"
             )
