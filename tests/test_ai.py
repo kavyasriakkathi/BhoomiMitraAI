@@ -255,3 +255,122 @@ async def test_gemini_telugu_response_regression_no_artificial_truncation(monkey
     assert len(response) == len(long_telugu_response)
     assert response.endswith("స్థానిక వ్యవసాయ అధికారిని సంప్రదించండి.")
 
+
+@pytest.mark.asyncio
+async def test_gemini_primary_timeout_is_15_seconds(monkeypatch):
+    """Verify that primary Gemini attempt receives a 15.0 second timeout by default."""
+    from unittest.mock import MagicMock
+    import asyncio
+    import src.ai.gemini_client as gemini_module
+
+    monkeypatch.setattr(gemini_module, "_initialized", True)
+
+    captured_timeouts = []
+    original_wait_for = asyncio.wait_for
+
+    async def mock_wait_for(fut, timeout):
+        captured_timeouts.append(timeout)
+        mock_resp = MagicMock()
+        mock_resp.text = "Success with 15s timeout"
+        return mock_resp
+
+    monkeypatch.setattr(gemini_module.asyncio, "wait_for", mock_wait_for)
+
+    def mock_generative_model(model_name, **kwargs):
+        mock_instance = MagicMock()
+        mock_chat = MagicMock()
+        mock_instance.start_chat.return_value = mock_chat
+        return mock_instance
+
+    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+
+    response = await gemini_module.generate_response(
+        system_prompt="Test prompt",
+        conversation_history=[],
+        user_message="Test message",
+    )
+
+    assert response == "Success with 15s timeout"
+    assert len(captured_timeouts) == 1
+    assert captured_timeouts[0] == 15.0
+
+
+@pytest.mark.asyncio
+async def test_gemini_fallback_timeout_is_bounded_to_10_seconds(monkeypatch):
+    """Verify that fallback Gemini model attempts receive a bounded 10.0s timeout."""
+    from unittest.mock import MagicMock
+    import asyncio
+    import src.ai.gemini_client as gemini_module
+
+    monkeypatch.setattr(gemini_module, "_initialized", True)
+
+    captured_timeouts = []
+
+    async def mock_wait_for(fut, timeout):
+        captured_timeouts.append(timeout)
+        if len(captured_timeouts) == 1:
+            # First attempt (primary) fails with timeout
+            raise asyncio.TimeoutError()
+        # Second attempt (fallback) succeeds
+        mock_resp = MagicMock()
+        mock_resp.text = "Fallback success with 10s timeout"
+        return mock_resp
+
+    monkeypatch.setattr(gemini_module.asyncio, "wait_for", mock_wait_for)
+
+    def mock_generative_model(model_name, **kwargs):
+        mock_instance = MagicMock()
+        mock_chat = MagicMock()
+        mock_instance.start_chat.return_value = mock_chat
+        return mock_instance
+
+    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+
+    response = await gemini_module.generate_response(
+        system_prompt="Test prompt",
+        conversation_history=[],
+        user_message="Test message",
+    )
+
+    assert response == "Fallback success with 10s timeout"
+    assert len(captured_timeouts) == 2
+    assert captured_timeouts[0] == 15.0  # Primary attempt
+    assert captured_timeouts[1] == 10.0  # Fallback attempt (bounded)
+
+
+@pytest.mark.asyncio
+async def test_gemini_timeout_ceiling_aborts_without_infinite_loop(monkeypatch):
+    """Verify that after 2 timeouts, the retry ceiling aborts and raises TimeoutError cleanly."""
+    from unittest.mock import MagicMock
+    import asyncio
+    import src.ai.gemini_client as gemini_module
+
+    monkeypatch.setattr(gemini_module, "_initialized", True)
+
+    captured_attempts = []
+
+    async def mock_wait_for(fut, timeout):
+        captured_attempts.append(timeout)
+        raise asyncio.TimeoutError()
+
+    monkeypatch.setattr(gemini_module.asyncio, "wait_for", mock_wait_for)
+
+    def mock_generative_model(model_name, **kwargs):
+        mock_instance = MagicMock()
+        mock_chat = MagicMock()
+        mock_instance.start_chat.return_value = mock_chat
+        return mock_instance
+
+    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+
+    with pytest.raises(TimeoutError) as exc_info:
+        await gemini_module.generate_response(
+            system_prompt="Test prompt",
+            conversation_history=[],
+            user_message="Test message",
+        )
+
+    # Exactly 2 attempts (primary + 1 fallback), no infinite retry
+    assert len(captured_attempts) == 2
+    assert "Gemini API timed out" in str(exc_info.value)
+

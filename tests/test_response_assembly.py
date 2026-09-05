@@ -869,7 +869,7 @@ def test_gemini_config_timeout_field():
     from src.config import get_settings
     settings = get_settings()
     assert hasattr(settings, "gemini_api_timeout_seconds")
-    assert settings.gemini_api_timeout_seconds == 5.0
+    assert settings.gemini_api_timeout_seconds == 15.0
 
 
 @pytest.mark.asyncio

@@ -40,7 +40,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="")
     google_gemini_api_key: str = Field(default="")
     gemini_model: str = Field(default="gemini-3.6-flash")
-    gemini_api_timeout_seconds: float = Field(default=5.0)
+    gemini_api_timeout_seconds: float = Field(default=15.0)
     ai_confidence_threshold: float = Field(default=0.75)
 
     # Google Cloud

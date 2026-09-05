@@ -60,7 +60,7 @@ async def generate_response(
     _ensure_initialized()
     settings = get_settings()
     if timeout_seconds is None:
-        timeout_seconds = float(getattr(settings, "gemini_api_timeout_seconds", 5.0))
+        timeout_seconds = float(getattr(settings, "gemini_api_timeout_seconds", 15.0))
     primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.6-flash"
 
     # Build candidates list starting with primary model
@@ -79,7 +79,7 @@ async def generate_response(
 
     for attempt_idx, model_name in enumerate(candidate_models):
         req_start_time = time.time()
-        current_timeout = timeout_seconds if attempt_idx == 0 else min(timeout_seconds, 3.0)
+        current_timeout = timeout_seconds if attempt_idx == 0 else min(timeout_seconds, 10.0)
         logger.info(
             f"[GEMINI API REQUEST START] (Attempt {attempt_idx + 1}/{len(candidate_models)})\n"
             f"  Model            : {model_name}\n"

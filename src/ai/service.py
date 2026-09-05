@@ -118,7 +118,7 @@ class AIService:
                 system_prompt=full_system_prompt,
                 conversation_history=history,
                 user_message=request.message,
-                timeout_seconds=getattr(get_settings(), "gemini_api_timeout_seconds", 5.0),
+                timeout_seconds=getattr(get_settings(), "gemini_api_timeout_seconds", 15.0),
             )
 
             if ai_text is None or not ai_text.strip():
