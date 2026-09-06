@@ -1103,3 +1103,375 @@ async def test_latest_market_query_without_today_keyword_shows_standard_header_w
         assert "Warangal Mandi" in result
         assert "7,450" in result
         assert "23 Aug 2026" in result
+
+
+# ---------------------------------------------------------------------------
+# 18. Regression Tests: Local Market Routing Hierarchy & Anti-Hijack
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_warangal_farmer_wins_over_live_out_of_state_records():
+    """1. Warangal farmer + live AP/MP records → Telangana/Warangal records win."""
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from sqlalchemy.pool import StaticPool
+    from src.core.database import Base
+    from src.core.models import MarketPrice
+    from src.market.repository import MarketPriceRepository
+    from datetime import datetime, timedelta
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+    now = datetime.utcnow()
+    async with factory() as db:
+        # Live out-of-state records (e.g. MP, AP with current date)
+        db.add(MarketPrice(
+            commodity="Cotton",
+            market_name="Khargone APMC",
+            district="Khargone",
+            state="Madhya Pradesh",
+            modal_price=7100.0,
+            min_price=6800.0,
+            max_price=7300.0,
+            unit="Quintal",
+            price_date=now,
+            source="agmarknet_api",
+        ))
+        db.add(MarketPrice(
+            commodity="Cotton",
+            market_name="Cumbum APMC",
+            district="Prakasam",
+            state="Andhra Pradesh",
+            modal_price=7200.0,
+            min_price=6900.0,
+            max_price=7400.0,
+            unit="Quintal",
+            price_date=now,
+            source="agmarknet_api",
+        ))
+        # Local Warangal DB record (seeded/older date)
+        db.add(MarketPrice(
+            commodity="Cotton",
+            market_name="Warangal Mandi",
+            district="Warangal",
+            state="Telangana",
+            modal_price=7450.0,
+            min_price=7100.0,
+            max_price=7650.0,
+            unit="Quintal",
+            price_date=now - timedelta(days=5),
+            source="manual_seed",
+        ))
+        await db.commit()
+
+        repo = MarketPriceRepository(db)
+        results = await repo.get_prices_by_commodity(
+            commodity="Cotton",
+            district="Warangal",
+            state="Telangana",
+            limit_days=3,
+        )
+
+        assert len(results) > 0
+        assert results[0].market_name == "Warangal Mandi"
+        assert results[0].district == "Warangal"
+        assert results[0].state == "Telangana"
+
+
+@pytest.mark.asyncio
+async def test_warangal_farmer_latest_local_district_wins_when_no_recent_district():
+    """2. Warangal farmer + no current local rows → latest local district rows win."""
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from sqlalchemy.pool import StaticPool
+    from src.core.database import Base
+    from src.core.models import MarketPrice
+    from src.market.repository import MarketPriceRepository
+    from datetime import datetime, timedelta
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+    now = datetime.utcnow()
+    async with factory() as db:
+        # Older Warangal record
+        db.add(MarketPrice(
+            commodity="Cotton",
+            market_name="Enumamula Mandi",
+            district="Warangal",
+            state="Telangana",
+            modal_price=7500.0,
+            min_price=7200.0,
+            max_price=7700.0,
+            unit="Quintal",
+            price_date=now - timedelta(days=10),
+            source="manual_seed",
+        ))
+        # Newer out-of-state record
+        db.add(MarketPrice(
+            commodity="Cotton",
+            market_name="Krosuru APMC",
+            district="Guntur",
+            state="Andhra Pradesh",
+            modal_price=7100.0,
+            min_price=6800.0,
+            max_price=7300.0,
+            unit="Quintal",
+            price_date=now,
+            source="agmarknet_api",
+        ))
+        await db.commit()
+
+        repo = MarketPriceRepository(db)
+        results = await repo.get_prices_by_commodity(
+            commodity="Cotton",
+            district="Warangal",
+            state="Telangana",
+            limit_days=3,
+        )
+
+        assert len(results) > 0
+        assert results[0].market_name == "Enumamula Mandi"
+        assert results[0].state == "Telangana"
+
+
+@pytest.mark.asyncio
+async def test_warangal_farmer_telangana_rows_win_when_no_district_rows():
+    """3. Warangal farmer + no district rows → Telangana rows win."""
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from sqlalchemy.pool import StaticPool
+    from src.core.database import Base
+    from src.core.models import MarketPrice
+    from src.market.repository import MarketPriceRepository
+    from datetime import datetime
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", poolclass=StaticPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+    now = datetime.utcnow()
+    async with factory() as db:
+        # Telangana record from another district (Karimnagar)
+        db.add(MarketPrice(
+            commodity="Cotton",
+            market_name="Karimnagar Mandi",
+            district="Karimnagar",
+            state="Telangana",
+            modal_price=7480.0,
+            min_price=7150.0,
+            max_price=7680.0,
+            unit="Quintal",
+            price_date=now,
+            source="manual_seed",
+        ))
+        # Out-of-state record
+        db.add(MarketPrice(
+            commodity="Cotton",
+            market_name="Khargone APMC",
+            district="Khargone",
+            state="Madhya Pradesh",
+            modal_price=7100.0,
+            min_price=6800.0,
+            max_price=7300.0,
+            unit="Quintal",
+            price_date=now,
+            source="agmarknet_api",
+        ))
+        await db.commit()
+
+        repo = MarketPriceRepository(db)
+        results = await repo.get_prices_by_commodity(
+            commodity="Cotton",
+            district="Warangal",
+            state="Telangana",
+            limit_days=3,
+        )
+
+        assert len(results) > 0
+        assert results[0].market_name == "Karimnagar Mandi"
+        assert results[0].state == "Telangana"
+
+
+def test_only_national_rows_clearly_labeled_with_actual_state():
+    """4. Only national rows → national fallback is clearly labeled with actual state."""
+    from src.market.service import MarketService as MS
+    from src.market.schemas import MarketPriceQueryResponse, MarketPriceResponse
+
+    svc = MS.__new__(MS)
+    price_resp = MarketPriceResponse(
+        id=uuid4(),
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Khargone APMC",
+        district="Khargone",
+        state="Madhya Pradesh",
+        min_price=6800.0,
+        max_price=7300.0,
+        modal_price=7100.0,
+        unit="Quintal",
+        price_date=datetime(2026, 8, 20),
+        source="agmarknet_api",
+        created_at=NOW,
+    )
+    query_resp = MarketPriceQueryResponse(
+        commodity="Cotton",
+        district=None,
+        state=None,
+        results=[price_resp],
+        data_available=True,
+        data_freshness_hours=1.0,
+        source_note="Live data from Agmarknet",
+        is_live=True,
+    )
+
+    reply_en = svc.format_whatsapp_reply(query_resp, language="en")
+    assert "Khargone APMC, Madhya Pradesh" in reply_en
+    assert "Madhya Pradesh" in reply_en
+
+    reply_te = svc.format_whatsapp_reply(query_resp, language="te")
+    assert "Khargone APMC, Madhya Pradesh" in reply_te
+    assert "Madhya Pradesh" in reply_te
+
+
+def test_enumamula_alias_resolves_to_warangal_context():
+    """5. Enumamula in English and Telugu resolves to Warangal context."""
+    from src.weather.service import _extract_district_from_query
+
+    assert _extract_district_from_query("what is cotton price in enumamula?") == "Warangal"
+    assert _extract_district_from_query("enamamula market mandi rate") == "Warangal"
+    assert _extract_district_from_query("ఎనుమాముల మార్కెట్లో పత్తి ధర ఎంత?") == "Warangal"
+    assert _extract_district_from_query("ఏనుమాముల మార్కెట్ ధరలు") == "Warangal"
+
+
+def test_agmarknet_client_client_side_protection_from_broad_results():
+    """6. API returns broader results despite parameters → client-side protection prevents local hijacking."""
+    from src.market.agmarknet_client import AgmarknetClient
+
+    client_obj = AgmarknetClient(api_key="", api_url="", cache_ttl_seconds=3600)
+    broad_records = [
+        {
+            "commodity": "Cotton",
+            "market": "Khargone APMC",
+            "district": "Khargone",
+            "state": "Madhya Pradesh",
+            "modal_price": 7100.0,
+        },
+        {
+            "commodity": "Cotton",
+            "market": "Warangal APMC",
+            "district": "Warangal",
+            "state": "Telangana",
+            "modal_price": 7450.0,
+        },
+        {
+            "commodity": "Cotton",
+            "market": "Khammam Mandi",
+            "district": "Khammam",
+            "state": "Telangana",
+            "modal_price": 7400.0,
+        },
+    ]
+
+    prioritized = client_obj._prioritize_records(
+        broad_records, state="Telangana", district="Warangal"
+    )
+    assert len(prioritized) == 2
+    assert prioritized[0]["market"] == "Warangal APMC"
+    assert prioritized[0]["state"] == "Telangana"
+    assert prioritized[1]["market"] == "Khammam Mandi"
+
+
+@pytest.mark.asyncio
+async def test_upsert_preserves_source_arrival_date():
+    """7. Upsert preserves source market date instead of replacing it with now()."""
+    from src.market.service import MarketService
+    from src.market.repository import MarketPriceRepository
+    from src.market.agmarknet_client import AgmarknetClient
+
+    repo_mock = AsyncMock(spec=MarketPriceRepository)
+    client_mock = AsyncMock(spec=AgmarknetClient)
+    svc = MarketService(repository=repo_mock, client=client_mock)
+
+    exact_source_date = datetime(2026, 8, 15, 10, 30, 0)
+    api_records = [
+        {
+            "commodity": "Cotton",
+            "market": "Warangal Mandi",
+            "district": "Warangal",
+            "state": "Telangana",
+            "min_price": 7000.0,
+            "max_price": 7600.0,
+            "modal_price": 7400.0,
+            "arrival_date": exact_source_date,
+        },
+        {
+            "commodity": "Cotton",
+            "market": "Invalid Date Mandi",
+            "arrival_date": None,  # should be skipped, not replaced with now()
+        },
+    ]
+
+    await svc._upsert_api_records(api_records, "Cotton")
+
+    repo_mock.upsert_prices.assert_called_once()
+    saved_creates = repo_mock.upsert_prices.call_args[0][0]
+    assert len(saved_creates) == 1
+    assert saved_creates[0].price_date == exact_source_date
+
+
+def test_existing_market_deduplication_and_formatting_preserved():
+    """8. Existing market deduplication/formatting behavior remains unchanged."""
+    from src.market.service import MarketService as MS
+    from src.market.schemas import MarketPriceQueryResponse, MarketPriceResponse
+
+    svc = MS.__new__(MS)
+    price_1 = MarketPriceResponse(
+        id=uuid4(),
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Warangal Mandi",
+        district="Warangal",
+        state="Telangana",
+        min_price=7100.0,
+        max_price=7650.0,
+        modal_price=7450.0,
+        unit="Quintal",
+        price_date=datetime(2026, 8, 20),
+        source="manual_seed",
+        created_at=NOW,
+    )
+    price_2 = MarketPriceResponse(
+        id=uuid4(),
+        commodity="Cotton",
+        commodity_telugu="పత్తి",
+        market_name="Warangal Mandi",  # Duplicate market name
+        district="Warangal",
+        state="Telangana",
+        min_price=7000.0,
+        max_price=7500.0,
+        modal_price=7400.0,
+        unit="Quintal",
+        price_date=datetime(2026, 8, 19),
+        source="manual_seed",
+        created_at=NOW,
+    )
+
+    query_resp = MarketPriceQueryResponse(
+        commodity="Cotton",
+        district="Warangal",
+        state="Telangana",
+        results=[price_1, price_2],
+        data_available=True,
+        data_freshness_hours=2.0,
+        source_note="Local database",
+        is_live=False,
+    )
+
+    formatted = svc.format_whatsapp_reply(query_resp, language="te")
+    # Must only contain Warangal Mandi once
+    assert formatted.count("Warangal Mandi") == 1
+    assert "7,450" in formatted
