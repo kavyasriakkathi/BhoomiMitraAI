@@ -602,3 +602,413 @@ async def test_general_education_allowed_through_without_blocking(monkeypatch):
         mock_gemini.assert_called_once()
         assert response.provider_used == "gemini"
         assert "chlorophyll" in response.response_text
+
+
+@pytest.mark.asyncio
+async def test_production_query_blocks_gemini_when_rag_returns_unrelated_paddy_blast_document():
+    """
+    CRITICAL PRODUCTION SAFETY TEST:
+    Query: 'వరికి ఎంత యూరియా వేయాలి?'
+    RAG returns the baseline Paddy Blast & Stem Borer document (non-empty).
+    Because the document has 0 urea/fertilizer dosage, Gemini must NOT be called,
+    safe Telugu fallback must be returned, and no numeric kg/acre dosage must be produced.
+    """
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.rag.schemas import RAGSearchResult
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    paddy_blast_chunk = RAGSearchResult(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_title="ICAR / PJTSAU Paddy Blast and Stem Borer Management",
+        source="ICAR-IIRR / PJTSAU",
+        category="Pest & Disease Control",
+        language="te",
+        state="Telangana",
+        crop="Paddy",
+        page=1,
+        chunk_text=(
+            "Title: Paddy Blast and Stem Borer Management. Crop: Paddy / Rice (వరి). "
+            "Disease 1: Blast (అగ్గి తెగులు / Pyricularia oryzae). Symptoms: Spindle-shaped lesions. "
+            "Blast Control & Dosage: Tricyclazole 75% WP @ 0.6 g per litre of water, or Isoprothiolane 40% EC @ 1.5 ml per litre of water. "
+            "Pest 2: Stem Borer (కాండం తొలిచే పురుగు). Stem Borer Control & Dosage: Chlorantraniliprole 18.5% SC @ 0.3 ml per litre of water."
+        ),
+        similarity_score=0.88,
+    )
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        # Non-empty RAG search returning unrelated disease chunk
+        mock_rag_search.return_value = [paddy_blast_chunk]
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="వరికి ఎంత యూరియా వేయాలి?"
+        )
+        response = await service.generate_ai_response(request)
+
+        # Gemini must NOT be called
+        mock_gemini.assert_not_called()
+        assert response.provider_used == "hard_grounding_gate"
+        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
+        assert "30" not in response.response_text
+        assert "35" not in response.response_text
+        assert "కిలోల" not in response.response_text
+
+
+@pytest.mark.asyncio
+async def test_production_query_blocks_gemini_when_rag_returns_unrelated_cotton_document():
+    """Verify that unrelated cotton pesticide document does NOT satisfy Paddy Urea query."""
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.rag.schemas import RAGSearchResult
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    cotton_chunk = RAGSearchResult(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_title="ICAR / PJTSAU Cotton Pink Bollworm Management Guide",
+        source="ICAR-CICR / PJTSAU",
+        category="Pest & Disease Control",
+        language="te",
+        state="Telangana",
+        crop="Cotton",
+        page=1,
+        chunk_text="Crop: Cotton. Profenofos 50% EC: 2.0 ml per litre of water.",
+        similarity_score=0.75,
+    )
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = [cotton_chunk]
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="వరికి ఎంత యూరియా వేయాలి?"
+        )
+        response = await service.generate_ai_response(request)
+
+        mock_gemini.assert_not_called()
+        assert response.provider_used == "hard_grounding_gate"
+        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
+
+
+@pytest.mark.asyncio
+async def test_production_query_allows_gemini_when_verified_urea_ground_truth_present():
+    """Verify that when verified Urea Ground Truth for Paddy IS present, Gemini IS called."""
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.rag.schemas import RAGSearchResult
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    urea_chunk = RAGSearchResult(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_title="PJTSAU Paddy Fertilizer Guide",
+        source="PJTSAU",
+        category="Fertilizer Management",
+        language="te",
+        state="Telangana",
+        crop="Paddy",
+        page=1,
+        chunk_text="Crop: Paddy (వరి). Fertilizer Schedule: Apply 30 kg Urea per acre at tillering stage.",
+        similarity_score=0.92,
+    )
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = [urea_chunk]
+        mock_gemini.return_value = "PJTSAU సిఫార్సుల ప్రకారం, పిలకల దశలో ఎకరానికి 30 kg యూరియా వేసుకోవాలి."
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="వరికి ఎంత యూరియా వేయాలి?"
+        )
+        response = await service.generate_ai_response(request)
+
+        mock_gemini.assert_called_once()
+        assert response.provider_used == "gemini"
+        assert "30 kg" in response.response_text
+
+
+@pytest.mark.asyncio
+async def test_paddy_blast_pesticide_query_allows_gemini_with_verified_blast_ground_truth():
+    """Verify that a specific Paddy Blast pesticide dosage query is allowed when RAG contains verified blast ground truth."""
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.rag.schemas import RAGSearchResult
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    paddy_blast_chunk = RAGSearchResult(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_title="ICAR / PJTSAU Paddy Blast and Stem Borer Management",
+        source="ICAR-IIRR / PJTSAU",
+        category="Pest & Disease Control",
+        language="te",
+        state="Telangana",
+        crop="Paddy",
+        page=1,
+        chunk_text=(
+            "Crop: Paddy. Disease 1: Blast (అగ్గి తెగులు). "
+            "Blast Control & Dosage: Tricyclazole 75% WP @ 0.6 g per litre of water."
+        ),
+        similarity_score=0.95,
+    )
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = [paddy_blast_chunk]
+        mock_gemini.return_value = "వరిలో అగ్గి తెగులు నివారణకు ట్రైసైక్లాజోల్ 75% WP ను లీటరు నీటికి 0.6 g చొప్పున కలిపి పిచికారీ చేయాలి."
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="వరిలో అగ్గితెగులు నివారణకు మందు ఎంత డోస్ వేయాలి?"
+        )
+        response = await service.generate_ai_response(request)
+
+        mock_gemini.assert_called_once()
+        assert response.provider_used == "gemini"
+        assert "0.6 g" in response.response_text
+
+
+@pytest.mark.asyncio
+async def test_tanglish_urea_query_blocked_with_unrelated_rag():
+    """Verify Tanglish urea query is blocked when RAG returns unrelated pesticide doc."""
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.rag.schemas import RAGSearchResult
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    paddy_blast_chunk = RAGSearchResult(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_title="ICAR / PJTSAU Paddy Blast Management",
+        source="ICAR-IIRR",
+        category="Pest & Disease Control",
+        language="te",
+        state="Telangana",
+        crop="Paddy",
+        page=1,
+        chunk_text="Crop: Paddy. Tricyclazole 75% WP @ 0.6 g per litre.",
+        similarity_score=0.8,
+    )
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = [paddy_blast_chunk]
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="vari ki entha urea veyali"
+        )
+        response = await service.generate_ai_response(request)
+
+        mock_gemini.assert_not_called()
+        assert response.provider_used == "hard_grounding_gate"
+        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
+
+
+@pytest.mark.asyncio
+async def test_english_urea_query_blocked_with_unrelated_rag():
+    """Verify English urea query is blocked when RAG returns unrelated pesticide doc."""
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.rag.schemas import RAGSearchResult
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    paddy_blast_chunk = RAGSearchResult(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_title="ICAR / PJTSAU Paddy Blast Management",
+        source="ICAR-IIRR",
+        category="Pest & Disease Control",
+        language="te",
+        state="Telangana",
+        crop="Paddy",
+        page=1,
+        chunk_text="Crop: Paddy. Tricyclazole 75% WP @ 0.6 g per litre.",
+        similarity_score=0.8,
+    )
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = [paddy_blast_chunk]
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="How much urea should I apply to paddy?"
+        )
+        response = await service.generate_ai_response(request)
+
+        mock_gemini.assert_not_called()
+        assert response.provider_used == "hard_grounding_gate"
+        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["en"]
+
+
+@pytest.mark.asyncio
+async def test_defense_in_depth_sanitizer_intercepts_hallucinated_numbers():
+    """
+    Verify defense-in-depth output sanitizer: If Gemini returns '30-35 kg urea per acre'
+    with numbers not present in RAG ground truth, response is replaced with safe fallback.
+    """
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.rag.schemas import RAGSearchResult
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    # RAG has verified 25 kg dosage
+    urea_chunk = RAGSearchResult(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_title="PJTSAU Fertilizer Guide",
+        source="PJTSAU",
+        category="Fertilizer Management",
+        language="te",
+        state="Telangana",
+        crop="Paddy",
+        page=1,
+        chunk_text="Crop: Paddy. Apply 25 kg Urea per acre at tillering stage.",
+        similarity_score=0.9,
+    )
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = [urea_chunk]
+        # Gemini hallucinates ungrounded 35 kg number instead of grounded 25 kg
+        mock_gemini.return_value = "వరి నాటిన 25 రోజుల పిలకల దశలో ఎకరానికి 35 కిలోల యూరియా వేసుకోవాలి."
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="వరికి ఎంత యూరియా వేయాలి?"
+        )
+        response = await service.generate_ai_response(request)
+
+        # Output sanitizer intercepts hallucinated '35'
+        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
+
+
+@pytest.mark.asyncio
+async def test_defense_in_depth_sanitizer_allows_grounded_numbers():
+    """
+    Verify defense-in-depth output sanitizer: If Ground Truth contains verified 25 kg dosage
+    and Gemini uses that exact number, response is allowed through.
+    """
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.rag.schemas import RAGSearchResult
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    urea_chunk = RAGSearchResult(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_title="PJTSAU Fertilizer Guide",
+        source="PJTSAU",
+        category="Fertilizer Management",
+        language="te",
+        state="Telangana",
+        crop="Paddy",
+        page=1,
+        chunk_text="Crop: Paddy. Apply 25 kg Urea per acre at tillering stage.",
+        similarity_score=0.9,
+    )
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = [urea_chunk]
+        mock_gemini.return_value = "PJTSAU ప్రకారం, పిలకల దశలో ఎకరానికి 25 kg యూరియా వేసుకోవాలి."
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="వరికి ఎంత యూరియా వేయాలి?"
+        )
+        response = await service.generate_ai_response(request)
+
+        assert response.provider_used == "gemini"
+        assert "25 kg" in response.response_text

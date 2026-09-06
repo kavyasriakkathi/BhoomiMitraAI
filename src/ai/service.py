@@ -106,6 +106,207 @@ def is_dosage_sensitive_query(text: str) -> bool:
 
     return has_general_dosage_intent
 
+
+def extract_query_dosage_topics(query: str) -> dict:
+    """
+    Extracts the crop, specific fertilizer / chemical substances, and intent category
+    from a dosage-sensitive query across multiple languages and Romanized inputs.
+    """
+    if not query:
+        return {
+            "crop": None,
+            "is_fertilizer_query": False,
+            "requested_fertilizers": [],
+            "is_pest_disease_query": False,
+            "requested_chemicals": [],
+        }
+
+    t = query.lower().strip()
+
+    # 1. Detect crop
+    crop = None
+    if any(k in t for k in ["వరి", "వరికి", "వరిలో", "వరిపంట", "paddy", "rice", "vari", "dhan", "धान", "நெல்", "ಭತ್ತ"]):
+        crop = "paddy"
+    elif any(k in t for k in ["పత్తి", "పత్తికి", "పత్తిలో", "cotton", "patti", "kapas", "कपास", "பருத்தி", "ಹತ್ತಿ"]):
+        crop = "cotton"
+    elif any(k in t for k in ["మిర్చి", "మిరప", "మిరపకి", "chilli", "chili", "mirchi", "mirapa", "मिर्च", "மிளகாய்", "ಮೆಣಸಿನಕಾಯಿ"]):
+        crop = "chilli"
+    elif any(k in t for k in ["మొక్కజొన్న", "maize", "corn", "mokkajonna", "मक्का", "மக்காச்சோளம்", "ಮೆಕ್ಕೆಜೋಳ"]):
+        crop = "maize"
+    elif any(k in t for k in ["టమాటా", "టమాట", "tomato", "tamata", "टमाटर", "தக்காளி", "ಟೊಮ್ಯಾಟೊ"]):
+        crop = "tomato"
+
+    # 2. Specific fertilizer substances
+    is_fertilizer_query = False
+    requested_fertilizers = []
+
+    if any(k in t for k in ["యూరియా", "urea", "यूरिया", "ইউরিয়া", "യൂറിയ", "యురియా"]):
+        requested_fertilizers.append("urea")
+        is_fertilizer_query = True
+    if any(k in t for k in ["డిఎపి", "డి.ఎ.పి", "dap", "डीएपी"]):
+        requested_fertilizers.append("dap")
+        is_fertilizer_query = True
+    if any(k in t for k in ["పొటాష్", "potash", "mop", "पोटाश"]):
+        requested_fertilizers.append("potash")
+        is_fertilizer_query = True
+    if any(k in t for k in ["npk", "ఎన్పికె", "కాంప్లెక్స్", "19:19:19", "20:20:0:13", "10:26:26"]):
+        requested_fertilizers.append("npk")
+        is_fertilizer_query = True
+    if any(k in t for k in ["జింక్", "జింకు", "zinc", "जिंक"]):
+        requested_fertilizers.append("zinc")
+        is_fertilizer_query = True
+    if any(k in t for k in [
+        "నత్రజని", "భాస్వరం", "nitrogen", "phosphorus", "fertilizer", "fertilizers",
+        "ఎరువు", "ఎరువులు", "ఎరువుల", "eruvu", "eruvulu", "ఖాతరు", "खाद", "उर्वरक", "உரம்", "ಗೊಬ್ಬರ"
+    ]):
+        is_fertilizer_query = True
+
+    # 3. Specific pests / diseases / chemicals
+    requested_chemicals = []
+    if any(k in t for k in ["mancozeb", "మాంకోజెబ్"]):
+        requested_chemicals.append("mancozeb")
+    if any(k in t for k in ["tricyclazole", "ట్రైసైక్లాజోల్", "ట్రైసైక్లజోల్"]):
+        requested_chemicals.append("tricyclazole")
+    if any(k in t for k in ["chlorantraniliprole", "క్లోరాంట్రానిలిప్రోల్", "కోరాజెన్", "coragen"]):
+        requested_chemicals.append("chlorantraniliprole")
+    if any(k in t for k in ["emamectin", "ఎమామెక్టిన్"]):
+        requested_chemicals.append("emamectin")
+    if any(k in t for k in ["fipronil", "ఫిప్రోనిల్"]):
+        requested_chemicals.append("fipronil")
+    if any(k in t for k in ["spinetoram", "స్పైనిటోరం"]):
+        requested_chemicals.append("spinetoram")
+    if any(k in t for k in ["profenofos", "ప్రొఫెనోఫాస్"]):
+        requested_chemicals.append("profenofos")
+
+    is_pest_disease_query = False
+    if any(k in t for k in [
+        "blast", "అగ్గి తెగులు", "అగ్గితెగులు",
+        "stem borer", "కాండం తొలిచే పురుగు", "కాండం తొలిచే",
+        "leaf spot", "ఆకుమచ్చ", "ఆకు మచ్చ", "alternaria", "ఆల్టర్నేరియా",
+        "pink bollworm", "గులాబీ రంగు పురుగు",
+        "thrips", "తామర పురుగులు", "తామరపురుగులు",
+        "fall armyworm", "కత్తెర పురుగు", "కత్తెరపురుగు",
+        "pesticide", "fungicide", "insecticide", "పురుగుమందు", "తెగులు", "పురుగు", "మందు", "పిచికారీ", "స్ప్రే"
+    ]) or requested_chemicals:
+        is_pest_disease_query = True
+
+    return {
+        "crop": crop,
+        "is_fertilizer_query": is_fertilizer_query,
+        "requested_fertilizers": requested_fertilizers,
+        "is_pest_disease_query": is_pest_disease_query,
+        "requested_chemicals": requested_chemicals,
+    }
+
+
+def has_relevant_dosage_ground_truth(query: str, rag_snippets: list) -> bool:
+    """
+    Deterministically evaluates whether the retrieved RAG snippets contain verified,
+    topically relevant Ground Truth for the exact substance (fertilizer / pesticide / chemical)
+    and crop requested in a dosage-sensitive query.
+
+    Safety Guarantees:
+    - An empty RAG list -> False.
+    - An unrelated crop snippet (e.g. Cotton for a Paddy query) -> DISCARDED.
+    - If user asks for fertilizer/urea dosage, a disease document with only pesticide dosages -> DISCARDED.
+    - If user asks for a specific chemical/fertilizer (e.g. Urea, DAP, Tricyclazole), the snippet MUST
+      explicitly mention that substance AND provide verified numeric dosage/application rates.
+    - If user asks for general fertilizer dosage for a crop, the snippet MUST belong to that crop
+      and provide verified fertilizer dosage recommendations.
+    """
+    if not rag_snippets:
+        return False
+
+    topics = extract_query_dosage_topics(query)
+    q_crop = topics["crop"]
+    is_fert = topics["is_fertilizer_query"]
+    req_ferts = topics["requested_fertilizers"]
+    is_pest = topics["is_pest_disease_query"]
+    req_chems = topics["requested_chemicals"]
+
+    for snippet in rag_snippets:
+        s_lower = snippet.lower()
+
+        # 1. Crop Match Verification
+        # If query specifies a crop, ensure the snippet does not belong to a different crop
+        if q_crop:
+            crop_decl_match = re.search(r'crop:\s*([a-zA-Z]+)', s_lower)
+            if crop_decl_match:
+                s_crop = crop_decl_match.group(1).strip()
+                if s_crop not in ["general", "all"] and s_crop != q_crop:
+                    # Snippet belongs to a different crop
+                    continue
+            else:
+                if q_crop == "paddy" and ("cotton" in s_lower or "పత్తి" in s_lower) and ("paddy" not in s_lower and "వరి" not in s_lower and "rice" not in s_lower):
+                    continue
+                if q_crop == "cotton" and ("paddy" in s_lower or "వరి" in s_lower) and ("cotton" not in s_lower and "పత్తి" not in s_lower):
+                    continue
+                if q_crop == "chilli" and ("cotton" in s_lower or "paddy" in s_lower) and ("chilli" not in s_lower and "మిర్చి" not in s_lower):
+                    continue
+
+        # 2. Check for numeric dosage patterns in snippet (e.g., 25 kg, 2.5 g per litre, 1.0 ml/l)
+        has_dosage_in_snippet = bool(re.search(
+            r'\b\d+(?:[.,]\d+)?\s*(?:-\s*\d+(?:[.,]\d+)?)?\s*'
+            r'(?:kg|kgs|g|gm|gms|grams?|ml|litres?|ltr|l|కేజీలు|కేజీల|కేజీ|కిలోలు|కిలోల|కిలో|గ్రాములు|గ్రాముల|గ్రాము|మి\.లీ|లీటర్లు|లీటర్ల|లీటరు|किलो|ग्राम|मिली|लीटर)'
+            r'(?:\s*(?:per|\/|ప్రతి|ఎకరాకి|ఎకరానికి|प्रति|లీటరుకు|लीटर|@)\s*(?:acre|hectare|ha|l(?:itre)?|లీటరు|एकड़|water|నీరు)?)?',
+            s_lower
+        ))
+        if not has_dosage_in_snippet:
+            continue
+
+        # 3. Fertilizer Query Grounding Check
+        if is_fert:
+            # If user explicitly requested specific fertilizers (e.g. Urea, DAP, Potash, Zinc)
+            if req_ferts:
+                matched_specific_fert = any(
+                    fert in s_lower or
+                    (fert == "urea" and ("యూరియా" in s_lower or "यूरिया" in s_lower or "urea" in s_lower)) or
+                    (fert == "dap" and ("డిఎపి" in s_lower or "डीएपी" in s_lower or "dap" in s_lower)) or
+                    (fert == "potash" and ("పొటాష్" in s_lower or "पोटाश" in s_lower or "mop" in s_lower or "potash" in s_lower)) or
+                    (fert == "zinc" and ("జింక్" in s_lower or "జింకు" in s_lower or "जिंक" in s_lower or "zinc" in s_lower))
+                    for fert in req_ferts
+                )
+                if matched_specific_fert:
+                    return True
+            else:
+                # General fertilizer query: snippet must discuss fertilizer / nutrient management
+                is_fert_snippet = any(k in s_lower for k in [
+                    "fertilizer", "fertilizers", "nutrient", "npk", "urea", "dap", "potash", "manure",
+                    "ఎరువు", "ఎరువులు", "నత్రజని", "భాస్వరం", "యూరియా", "పోషకాలు", "खाद", "उर्वरक"
+                ])
+                # Ensure snippet is not merely a pest/disease guide with fungicide/insecticide only
+                if is_fert_snippet and not (
+                    ("fungicide" in s_lower or "blast" in s_lower or "stem borer" in s_lower)
+                    and "fertilizer" not in s_lower and "urea" not in s_lower and "npk" not in s_lower and "ఎరువు" not in s_lower
+                ):
+                    return True
+
+        # 4. Pest / Disease / Chemical Query Grounding Check
+        if is_pest and not is_fert:
+            if req_chems:
+                matched_chem = any(chem in s_lower for chem in req_chems)
+                if matched_chem:
+                    return True
+            else:
+                is_pest_snippet = any(k in s_lower for k in [
+                    "pest", "disease", "fungicide", "insecticide", "spray", "control", "management",
+                    "తెగులు", "పురుగు", "నివారణ", "పిచికారీ", "రోగం", "कीट", "रोग"
+                ])
+                if any(w in s_lower for w in [
+                    "blast", "stem borer", "leaf spot", "pink bollworm", "thrips", "fall armyworm",
+                    "అగ్గి తెగులు", "అగ్గితెగులు", "కాండం తొలిచే పురుగు", "ఆకుమచ్చ", "గులాబీ రంగు పురుగు", "తామర పురుగులు", "కత్తెర పురుగు"
+                ]):
+                    return True
+                if is_pest_snippet:
+                    return True
+
+        # 5. General dosage query
+        if not is_fert and not is_pest and has_dosage_in_snippet:
+            return True
+
+    return False
+
+
 class AIService:
     def __init__(self, repository: AIRepository):
         self.repository = repository
@@ -198,9 +399,11 @@ class AIService:
 
             # 3.8 HARD GROUNDING GATE: Block unverified numeric dosage generation
             is_dosage_req = is_dosage_sensitive_query(request.message)
-            if is_dosage_req and not rag_snippets:
+            has_grounding = has_relevant_dosage_ground_truth(request.message, rag_snippets)
+
+            if is_dosage_req and not has_grounding:
                 logger.warning(
-                    f"[HARD GROUNDING GATE TRIGGERED] Dosage-sensitive query with empty RAG ground truth. "
+                    f"[HARD GROUNDING GATE TRIGGERED] Dosage-sensitive query lacking relevant verified Ground Truth. "
                     f"Farmer ID: {request.farmer_id}, Language: '{user_lang}', Query: '{request.message[:80]}...'"
                 )
                 safe_fallback = get_unverified_dosage_fallback_response(user_lang)
@@ -233,22 +436,36 @@ class AIService:
                     detail="AI provider timed out or returned empty response."
                 )
 
-            # Defense-in-depth: If RAG was empty, ensure Gemini did not invent numeric dosage patterns
-            if not rag_snippets:
-                has_numeric_dosage = bool(re.search(
-                    r'\b\d+(?:[.,]\d+)?\s*(?:-\s*\d+(?:[.,]\d+)?)?\s*'
-                    r'(?:kg|kgs|g|gm|gms|grams?|ml|litres?|ltr|l|కేజీలు|కిలోలు|గ్రాములు|మి\.లీ|किलो|ग्राम|मिली)'
-                    r'(?:\s*(?:per|\/|ప్రతి|ఎకరాకి|ఎకరానికి|प्रति|లీటరుకు|लीटर)\s*(?:acre|hectare|ha|l(?:itre)?|లీటరు|एकड़)?)?'
-                    r'\s*(?:urea|dap|mop|zinc|sulphate|potash|fertilizer|యూరియా|ఎరువు|జింక్|यूरिया|खाद)?',
-                    ai_text,
-                    re.IGNORECASE
-                ))
-                if is_dosage_req or (has_numeric_dosage and any(term in request.message.lower() for term in ["fertilizer", "urea", "pesticide", "dose", "dosage", "spray", "ఎరువు", "మందు", "యూరియా"])):
+            # 6.5 Defense-in-depth: Ensure Gemini did not invent ungrounded numeric dosage patterns
+            dosage_pattern = (
+                r'\b\d+(?:[.,]\d+)?\s*(?:-\s*\d+(?:[.,]\d+)?)?\s*'
+                r'(?:kg|kgs|g|gm|gms|grams?|ml|litres?|ltr|l|కేజీలు|కేజీల|కేజీ|కిలోలు|కిలోల|కిలో|గ్రాములు|గ్రాముల|గ్రాము|మి\.లీ|లీటర్లు|లీటర్ల|లీటరు|किलो|ग्राम|मिली|लीटर)'
+                r'(?:\s*(?:per|\/|ప్రతి|ఎకరాకి|ఎకరానికి|प्रति|లీటరుకు|लीटर)\s*(?:acre|hectare|ha|l(?:itre)?|లీటరు|एकड़)?)?'
+                r'(?:\s*(?:urea|dap|mop|zinc|sulphate|potash|fertilizer|యూరియా|ఎరువు|జింక్|यूरिया|खाद))?'
+            )
+            output_dosage_matches = re.findall(dosage_pattern, ai_text, re.IGNORECASE)
+
+            if output_dosage_matches:
+                if not has_grounding:
                     logger.warning(
-                        f"[DEFENSE-IN-DEPTH GATE TRIGGERED] Hallucinated dosage detected in ungrounded AI output for farmer {request.farmer_id}. "
+                        f"[DEFENSE-IN-DEPTH GATE TRIGGERED] Unverified dosage generated in ungrounded output for farmer {request.farmer_id}. "
                         f"Replacing with safe fallback."
                     )
                     ai_text = get_unverified_dosage_fallback_response(user_lang)
+                else:
+                    # Verify generated numeric figures exist in the provided RAG ground truth
+                    rag_text_lower = rag_context_text.lower()
+                    generated_numbers = re.findall(r'\b\d+(?:[.,]\d+)?\b', " ".join(output_dosage_matches))
+                    rag_numbers = set(re.findall(r'\b\d+(?:[.,]\d+)?\b', rag_text_lower))
+                    unverified_numbers = [n for n in generated_numbers if n not in rag_numbers]
+                    if unverified_numbers:
+                        logger.warning(
+                            f"[DEFENSE-IN-DEPTH GATE TRIGGERED] Hallucinated dosage numbers {unverified_numbers} not found in RAG ground truth for farmer {request.farmer_id}. "
+                            f"Replacing with safe fallback."
+                        )
+                        ai_text = get_unverified_dosage_fallback_response(user_lang)
+            elif is_dosage_req and not has_grounding:
+                ai_text = get_unverified_dosage_fallback_response(user_lang)
 
             total_ai_time = time.time() - service_start_time
             logger.info(
