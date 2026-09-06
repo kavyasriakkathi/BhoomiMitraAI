@@ -35,8 +35,12 @@ _KNOWN_DISTRICTS = {
     # Telangana
     "warangal": "Warangal",
     "hanamkonda": "Warangal",
+    "enumamula": "Warangal",
+    "enamamula": "Warangal",
     "వరంగల్": "Warangal",
     "హనుమకొండ": "Warangal",
+    "ఎనుమాముల": "Warangal",
+    "ఏనుమాముల": "Warangal",
     "karimnagar": "Karimnagar",
     "కరీంనగర్": "Karimnagar",
     "khammam": "Khammam",
