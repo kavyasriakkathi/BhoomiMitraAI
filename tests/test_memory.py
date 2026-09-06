@@ -296,3 +296,101 @@ async def test_extract_and_update_memory_heuristics():
         assert "Ramesh Fertilizers" in updated_mem.favorite_shops
         assert updated_mem.confidence_scores.get("farm_size") == 0.9
         assert updated_mem.confidence_scores.get("village") == 0.9
+
+
+@pytest.mark.asyncio
+async def test_extract_and_update_memory_on_429_keeps_heuristics_single_attempt():
+    """Verify that HTTP 429 quota error does not crash memory extraction and preserves heuristic data without retrying other models."""
+    from src.memory.service import FarmerMemoryService
+    from src.memory.repository import FarmerMemoryRepository
+    from unittest.mock import MagicMock
+    from src.memory.models import FarmerMemory
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock(spec=FarmerMemoryRepository)
+    mock_repo.session = mock_session
+
+    farmer_id = uuid4()
+    mem = FarmerMemory(
+        farmer_id=farmer_id,
+        primary_crops=[],
+        favorite_shops=[],
+        confidence_scores={}
+    )
+    mock_repo.get_or_create.return_value = mem
+    mock_repo.save.side_effect = lambda m: m
+
+    service = FarmerMemoryService(mock_repo)
+
+    with patch("src.memory.service.generate_response", side_effect=RuntimeError("HTTP 429: Resource has been exhausted (e.g. check quota)")) as mock_gen:
+        updated_mem = await service.extract_and_update_memory(
+            farmer_id=farmer_id,
+            user_message="My farm is 12 acres and my village is Warangal. I grow chilli.",
+            ai_response="Chilli management advice for Warangal."
+        )
+
+        # Confirm generate_response was called with allow_fallback=False (single attempt)
+        mock_gen.assert_called_once()
+        _, kwargs = mock_gen.call_args
+        assert kwargs.get("allow_fallback") is False
+        assert kwargs.get("timeout_seconds") <= 4.0
+
+        # Heuristic extraction succeeded despite LLM 429
+        assert updated_mem.farm_size == 12.0
+        assert updated_mem.village == "Warangal"
+        assert "Chilli" in updated_mem.primary_crops
+
+
+@pytest.mark.asyncio
+async def test_extract_and_update_memory_on_timeout_keeps_heuristics():
+    """Verify that LLM timeout gracefully falls back to heuristic memory."""
+    from src.memory.service import FarmerMemoryService
+    from src.memory.repository import FarmerMemoryRepository
+    from unittest.mock import MagicMock
+    from src.memory.models import FarmerMemory
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock(spec=FarmerMemoryRepository)
+    mock_repo.session = mock_session
+
+    farmer_id = uuid4()
+    mem = FarmerMemory(
+        farmer_id=farmer_id,
+        primary_crops=[],
+        favorite_shops=[],
+        confidence_scores={}
+    )
+    mock_repo.get_or_create.return_value = mem
+    mock_repo.save.side_effect = lambda m: m
+
+    service = FarmerMemoryService(mock_repo)
+
+    with patch("src.memory.service.generate_response", side_effect=TimeoutError("Gemini timed out after 3.5s")):
+        updated_mem = await service.extract_and_update_memory(
+            farmer_id=farmer_id,
+            user_message="My farm is 3 acres and my village is Karimnagar. I grow paddy.",
+            ai_response="Paddy fertilizer advice."
+        )
+
+        assert updated_mem.farm_size == 3.0
+        assert updated_mem.village == "Karimnagar"
+        assert "Paddy" in updated_mem.primary_crops
+
+
+@pytest.mark.asyncio
+async def test_trigger_background_memory_extraction_non_blocking():
+    """Verify trigger_background_memory_extraction schedules an independent task that handles exceptions safely."""
+    from src.memory.service import trigger_background_memory_extraction
+
+    farmer_id = uuid4()
+
+    # Trigger with valid event loop
+    task = trigger_background_memory_extraction(
+        farmer_id=farmer_id,
+        user_message="5 acres in Warangal",
+        ai_response="Advice"
+    )
+
+    assert task is not None
+    # Await background task completion to ensure no unhandled exceptions
+    await task

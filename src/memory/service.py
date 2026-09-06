@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import time
@@ -138,8 +139,9 @@ class FarmerMemoryService:
                 system_prompt=MEMORY_EXTRACTION_SYSTEM_PROMPT,
                 conversation_history=[],
                 user_message=prompt_input,
-                timeout_seconds=8,
+                timeout_seconds=3.5,
                 model_override="gemini-3.5-flash-lite",
+                allow_fallback=False,
             )
             mem_duration = time.time() - mem_llm_start
             logger.info(f"[MEMORY LLM EXTRACTION SUCCESS] (took {mem_duration:.2f}s) for farmer_id={farmer_id}")
@@ -365,8 +367,9 @@ class FarmerMemoryService:
                 system_prompt=MEMORY_SUMMARIZATION_SYSTEM_PROMPT,
                 conversation_history=[],
                 user_message=transcript,
-                timeout_seconds=10,
+                timeout_seconds=4.0,
                 model_override="gemini-3.5-flash-lite",
+                allow_fallback=False,
             )
 
             if summary:
@@ -394,3 +397,35 @@ class FarmerMemoryService:
             voice_speed=memory.voice_speed or 1.0,
             voice_gender=memory.voice_gender or "FEMALE"
         )
+
+
+def trigger_background_memory_extraction(
+    farmer_id: UUID,
+    user_message: str,
+    ai_response: str = "",
+) -> Optional[asyncio.Task]:
+    """
+    Schedules memory extraction as an independent background task with its own database session.
+    Ensures outbound WhatsApp delivery is never blocked by memory LLM processing or quota issues.
+    """
+    async def _runner():
+        try:
+            from src.core.database import AsyncSessionLocal
+            async with AsyncSessionLocal() as session:
+                repo = FarmerMemoryRepository(session)
+                service = FarmerMemoryService(repo)
+                await service.extract_and_update_memory(
+                    farmer_id=farmer_id,
+                    user_message=user_message,
+                    ai_response=ai_response
+                )
+        except Exception as e:
+            logger.warning(
+                f"[BACKGROUND MEMORY EXTRACTION FAILED] farmer_id={farmer_id}: {type(e).__name__} - {e}"
+            )
+
+    try:
+        return asyncio.create_task(_runner())
+    except RuntimeError:
+        # Fallback if no running event loop (e.g. in some synchronous unit tests)
+        return None

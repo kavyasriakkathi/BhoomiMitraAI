@@ -41,6 +41,7 @@ async def generate_response(
     user_message: str,
     timeout_seconds: Optional[float] = None,
     model_override: Optional[str] = None,
+    allow_fallback: bool = True,
 ) -> Optional[str]:
     """
     Send a message to the Gemini model and return the response text.
@@ -53,6 +54,7 @@ async def generate_response(
         user_message: The farmer's current message.
         timeout_seconds: Max time to wait for API response (default: from settings or 5.0s).
         model_override: Optional model name to use instead of default.
+        allow_fallback: Whether to attempt fallback models on failure (default: True).
 
     Returns:
         The AI response text, or raises exception if all attempts fail.
@@ -65,9 +67,10 @@ async def generate_response(
 
     # Build candidates list starting with primary model
     candidate_models = [primary_model]
-    for fallback in FALLBACK_MODELS:
-        if fallback not in candidate_models:
-            candidate_models.append(fallback)
+    if allow_fallback:
+        for fallback in FALLBACK_MODELS:
+            if fallback not in candidate_models:
+                candidate_models.append(fallback)
 
     history = []
     for msg in conversation_history:

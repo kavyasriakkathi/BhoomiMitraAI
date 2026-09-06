@@ -495,15 +495,16 @@ class AIService:
                 f"  Preview      : '{ai_text[:120]}...'"
             )
 
-            # 7. Automatic memory extraction from exchange (runs safely & swiftly)
+            # 7. Non-blocking automatic memory extraction in background
             try:
-                await mem_service.extract_and_update_memory(
+                from src.memory.service import trigger_background_memory_extraction
+                trigger_background_memory_extraction(
                     farmer_id=request.farmer_id,
                     user_message=request.message,
                     ai_response=ai_text
                 )
             except Exception as mem_err:
-                logger.warning(f"Automatic memory extraction warning for farmer {request.farmer_id}: {mem_err}")
+                logger.warning(f"Automatic memory extraction scheduling warning for farmer {request.farmer_id}: {mem_err}")
 
             # 8. Return structured response
             return AIGenerateResponse(
@@ -760,15 +761,16 @@ async def process_image_message(
             await crop_health_service.create_diagnosis(create_data)
             logger.info(f"Structured diagnosis saved to CropHealth for farmer {farmer.id}")
 
-        # Update Farmer Memory with diagnosis
+        # Update Farmer Memory with diagnosis in background
         try:
-            await mem_service.extract_and_update_memory(
+            from src.memory.service import trigger_background_memory_extraction
+            trigger_background_memory_extraction(
                 farmer_id=farmer.id,
-                user_message=user_caption,
+                user_message=user_caption or "",
                 ai_response=f"Disease Diagnosed: {diagnosis_data.disease_name}. Treatment: {diagnosis_data.treatment_recommendation}"
             )
         except Exception as mem_err:
-            logger.warning(f"Memory update failed for image message: {mem_err}")
+            logger.warning(f"Memory update scheduling failed for image message: {mem_err}")
 
         # Check if escalation is required for unknown disease or explicit farmer request
         try:

@@ -1140,3 +1140,38 @@ async def test_general_farming_query_uses_compact_rag_at_most_2_chunks():
         # Long chunk text was safely truncated with ellipsis
         assert "..." in system_prompt
         assert response.provider_used == "gemini"
+
+
+@pytest.mark.asyncio
+async def test_generate_ai_response_triggers_background_memory_extraction():
+    """Verify that AIService.generate_ai_response triggers non-blocking memory extraction and returns immediately."""
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(repository=mock_repo)
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value="Here is standard paddy advice."), \
+         patch("src.memory.service.trigger_background_memory_extraction") as mock_trigger:
+
+        farmer_id = uuid4()
+        req = AIGenerateRequest(
+            farmer_id=farmer_id,
+            message="What is the spacing for paddy?"
+        )
+
+        resp = await service.generate_ai_response(req)
+
+        assert resp.response_text == "Here is standard paddy advice."
+        mock_trigger.assert_called_once_with(
+            farmer_id=farmer_id,
+            user_message="What is the spacing for paddy?",
+            ai_response="Here is standard paddy advice."
+        )
