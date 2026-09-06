@@ -1012,3 +1012,131 @@ async def test_defense_in_depth_sanitizer_allows_grounded_numbers():
 
         assert response.provider_used == "gemini"
         assert "25 kg" in response.response_text
+
+
+@pytest.mark.asyncio
+async def test_conversation_history_capped_at_3_turns_and_6_messages():
+    """
+    Verify conversation history is capped to 3 DB turns (at most 6 historical messages:
+    3 user + 3 model) and preserves correct chronological ordering (oldest first).
+    """
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.core.models import Conversation
+    from datetime import datetime, timedelta
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+
+    # 3 DB turns returned by repository (ordered newest first from DB)
+    t0 = datetime.utcnow()
+    records = [
+        Conversation(user_message="Message 3", ai_response="Answer 3", created_at=t0),
+        Conversation(user_message="Message 2", ai_response="Answer 2", created_at=t0 - timedelta(minutes=5)),
+        Conversation(user_message="Message 1", ai_response="Answer 1", created_at=t0 - timedelta(minutes=10)),
+    ]
+    mock_repo.get_conversation_history = AsyncMock(return_value=records)
+
+    service = AIService(repository=mock_repo)
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_gemini.return_value = "General advice response."
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="వరి పంటలో పిలకలు బాగా రావడానికి ఏం చేయాలి?"
+        )
+        response = await service.generate_ai_response(request)
+
+        # Verify get_conversation_history was called with limit=3
+        mock_repo.get_conversation_history.assert_called_once_with(request.farmer_id, limit=3)
+
+        # Verify history passed to Gemini has exactly 6 messages ordered chronologically (oldest first)
+        mock_gemini.assert_called_once()
+        passed_history = mock_gemini.call_args.kwargs["conversation_history"]
+        assert len(passed_history) == 6
+        assert passed_history[0] == {"role": "user", "parts": "Message 1"}
+        assert passed_history[1] == {"role": "model", "parts": "Answer 1"}
+        assert passed_history[2] == {"role": "user", "parts": "Message 2"}
+        assert passed_history[3] == {"role": "model", "parts": "Answer 2"}
+        assert passed_history[4] == {"role": "user", "parts": "Message 3"}
+        assert passed_history[5] == {"role": "model", "parts": "Answer 3"}
+        assert response.provider_used == "gemini"
+
+
+@pytest.mark.asyncio
+async def test_general_farming_query_uses_compact_rag_at_most_2_chunks():
+    """
+    Verify general non-dosage farming questions use at most top_k=2 compact RAG chunks
+    and respect character limits in the system prompt.
+    """
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.rag.schemas import RAGSearchResult
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    chunk1 = RAGSearchResult(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_title="Paddy Agronomy Guide",
+        source="PJTSAU",
+        category="Agronomy",
+        language="te",
+        state="Telangana",
+        crop="Paddy",
+        page=1,
+        chunk_text="Paddy tillering management requires shallow water depth and proper spacing." + (" Extra detail" * 50),
+        similarity_score=0.9,
+    )
+    chunk2 = RAGSearchResult(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_title="Water Management in Rice",
+        source="ICAR",
+        category="Agronomy",
+        language="te",
+        state="Telangana",
+        crop="Paddy",
+        page=2,
+        chunk_text="Maintain 2-3 cm water during tillering stage to encourage maximum productive tillers.",
+        similarity_score=0.85,
+    )
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = [chunk1, chunk2]
+        mock_gemini.return_value = "వరిలో పిలకలు బాగా రావడానికి నీటిని 2-3 సెం.మీ మేర ఉంచాలి మరియు సకాలంలో కలుపు తీయాలి."
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="వరి పంటలో పిలకలు బాగా రావడానికి ఏం చేయాలి?"
+        )
+        response = await service.generate_ai_response(request)
+
+        # Verify top_k=2 was requested for non-dosage question
+        mock_rag_search.assert_called_once()
+        assert mock_rag_search.call_args.kwargs["top_k"] == 2
+
+        # Verify system prompt passed to Gemini is compact
+        mock_gemini.assert_called_once()
+        system_prompt = mock_gemini.call_args.kwargs["system_prompt"]
+        assert "RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE" in system_prompt
+        # Long chunk text was safely truncated with ellipsis
+        assert "..." in system_prompt
+        assert response.provider_used == "gemini"

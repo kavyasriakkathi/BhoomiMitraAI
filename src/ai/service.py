@@ -317,8 +317,8 @@ class AIService:
             # 1. Fetch farmer profile for context
             profile = await self.repository.get_farmer_profile(request.farmer_id)
 
-            # 2. Fetch conversation history (oldest first for Gemini)
-            history_records = await self.repository.get_conversation_history(request.farmer_id)
+            # 2. Fetch conversation history (oldest first for Gemini, max 3 DB turns / 6 messages)
+            history_records = await self.repository.get_conversation_history(request.farmer_id, limit=3)
             history_records.reverse()
             history = []
             recent_context_crop = None
@@ -375,30 +375,49 @@ class AIService:
             rag_context_text = ""
             from src.language.detector import detect_language
             user_lang = detect_language(request.message, fallback=getattr(profile, "preferred_language", "te") or "te")
+            is_dosage_req = is_dosage_sensitive_query(request.message)
 
             try:
                 from src.rag.service import RAGService
                 from src.rag.repository import RAGRepository
                 rag_repo = RAGRepository(self.repository.session)
                 rag_service = RAGService(rag_repo)
+                rag_top_k = 3 if is_dosage_req else 2
                 rag_results = await rag_service.search_knowledge(
                     query=rag_query,
-                    top_k=3,
+                    top_k=rag_top_k,
                     state=profile.state if profile else None,
                     crop=effective_crop,
                 )
                 if rag_results:
-                    rag_snippets = [f"• Document: {r.document_title} (Crop: {r.crop or 'General'}, Source: {r.source}): {r.chunk_text}" for r in rag_results]
-                    rag_context_text = (
-                        "=== RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE (GROUND TRUTH) ===\n"
-                        "CRITICAL INSTRUCTION: The following knowledge is verified agronomic ground truth. You MUST strictly use ONLY these verified treatments, products, and numeric dosages. Do NOT add, alter, extrapolate, or invent different dosages or unverified chemicals. Translate directly into the farmer's language:\n"
-                        + "\n".join(rag_snippets)
-                    )
+                    if not is_dosage_req:
+                        # Conservative RAG compaction for general non-dosage farming questions (max 2 chunks, char-capped)
+                        rag_snippets = []
+                        total_rag_chars = 0
+                        for r in rag_results[:2]:
+                            text = r.chunk_text.strip()
+                            if len(text) > 650:
+                                text = text[:650] + "..."
+                            snippet = f"• Document: {r.document_title} (Crop: {r.crop or 'General'}, Source: {r.source}): {text}"
+                            if total_rag_chars + len(snippet) <= 1600:
+                                rag_snippets.append(snippet)
+                                total_rag_chars += len(snippet)
+                            else:
+                                break
+                    else:
+                        # Full verified Ground Truth for dosage-sensitive queries to preserve exact verified figures
+                        rag_snippets = [f"• Document: {r.document_title} (Crop: {r.crop or 'General'}, Source: {r.source}): {r.chunk_text}" for r in rag_results]
+
+                    if rag_snippets:
+                        rag_context_text = (
+                            "=== RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE (GROUND TRUTH) ===\n"
+                            "CRITICAL INSTRUCTION: The following knowledge is verified agronomic ground truth. You MUST strictly use ONLY these verified treatments, products, and numeric dosages. Do NOT add, alter, extrapolate, or invent different dosages or unverified chemicals. Translate directly into the farmer's language:\n"
+                            + "\n".join(rag_snippets)
+                        )
             except Exception as rag_err:
                 logger.warning(f"RAG knowledge retrieval warning: {rag_err}")
 
             # 3.8 HARD GROUNDING GATE: Block unverified numeric dosage generation
-            is_dosage_req = is_dosage_sensitive_query(request.message)
             has_grounding = has_relevant_dosage_ground_truth(request.message, rag_snippets)
 
             if is_dosage_req and not has_grounding:
