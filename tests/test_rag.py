@@ -216,9 +216,11 @@ def test_rag_query_grounded_answer(mock_rag_service):
     assert len(data["source_documents"]) == 1
 
 
-def test_rag_service_unit_chunking_and_similarity():
+def test_rag_service_unit_chunking_and_similarity(monkeypatch):
     """Unit test for Service text chunking and cosine similarity functions."""
     from src.rag.service import RAGService
+    import src.rag.service as rag_mod
+    monkeypatch.setattr(rag_mod, "get_settings", lambda: type("Settings", (), {"google_gemini_api_key": ""})())
     service = RAGService(repository=None)
 
     # 1. Chunking test

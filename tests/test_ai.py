@@ -374,3 +374,231 @@ async def test_gemini_timeout_ceiling_aborts_without_infinite_loop(monkeypatch):
     assert len(captured_attempts) == 2
     assert "Gemini API timed out" in str(exc_info.value)
 
+
+# -----------------------------------------------------------------------------
+# Hard Grounding Gate Tests (Fertilizer / Chemical Dosage Safety)
+# -----------------------------------------------------------------------------
+
+def test_is_dosage_sensitive_query_classification():
+    from src.ai.service import is_dosage_sensitive_query
+
+    # Exact dosage & quantity queries across languages (MUST BE BLOCKED WHEN UNGROUNDED)
+    assert is_dosage_sensitive_query("నాటిన 25 రోజుల పిలకల దశలో ఉన్న వరి పంటకు ఎరువు ఏది?") is True
+    assert is_dosage_sensitive_query("వరికి ఎంత యూరియా వేయాలి") is True
+    assert is_dosage_sensitive_query("వరి పంటకు ఎరువుల మోతాదు ఎంత?") is True
+    assert is_dosage_sensitive_query("వరిలో పిలకల దశలో ఎరువు ఏది వేయాలి?") is True
+    assert is_dosage_sensitive_query("How many kg urea per acre for paddy?") is True
+    assert is_dosage_sensitive_query("How much urea per acre for cotton?") is True
+    assert is_dosage_sensitive_query("What is the dosage of Chlorantraniliprole per litre?") is True
+    assert is_dosage_sensitive_query("spray dosage for stem borer in paddy") is True
+    assert is_dosage_sensitive_query("vari ki entha urea veyali") is True
+    assert is_dosage_sensitive_query("cotton ki entha fertilizer veyali") is True
+    assert is_dosage_sensitive_query("Urea fertilizer kitna daalna hai प्रति एकड़?") is True
+    assert is_dosage_sensitive_query("एकड़ में कितना यूरिया डालना है?") is True
+    assert is_dosage_sensitive_query("நெற்பயிருக்கு எவ்வளவு யூரியா போட வேண்டும்?") is True
+    assert is_dosage_sensitive_query("ಭತ್ತಕ್ಕೆ ಎಷ್ಟು ಯೂರಿಯಾ ಗೊಬ್ಬರ ಹಾಕಬೇಕು?") is True
+
+    # General education queries (ALLOWED THROUGH)
+    assert is_dosage_sensitive_query("Why is nitrogen important for paddy?") is False
+    assert is_dosage_sensitive_query("Why do crops need phosphorus?") is False
+    assert is_dosage_sensitive_query("What is the role of nitrogen in plant growth?") is False
+    assert is_dosage_sensitive_query("What is urea?") is False
+    assert is_dosage_sensitive_query("Benefits of vermicompost") is False
+    assert is_dosage_sensitive_query("నత్రజని ప్రాముఖ్యత ఏమిటి?") is False
+    assert is_dosage_sensitive_query("యూరియా అంటే ఏమిటి?") is False
+    assert is_dosage_sensitive_query("భాస్వరం ఎందుకు అవసరం?") is False
+
+    # Non-dosage general farming / weather / market queries (ALLOWED THROUGH)
+    assert is_dosage_sensitive_query("What is the market price of cotton in Warangal?") is False
+    assert is_dosage_sensitive_query("Will it rain tomorrow in Khammam?") is False
+    assert is_dosage_sensitive_query("PM Kisan scheme details") is False
+    assert is_dosage_sensitive_query("హలో నమస్తే") is False
+
+
+@pytest.mark.asyncio
+async def test_hard_gate_blocks_ungrounded_telugu_dosage_query(monkeypatch):
+    """
+    Verify production scenario: When farmer asks for tillering stage paddy fertilizer
+    and RAG has no verified ground truth, Gemini is NOT called and safe Telugu fallback is returned.
+    """
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = []
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="నాటిన 25 రోజుల పిలకల దశలో ఉన్న వరి పంటకు ఎరువు ఏది?"
+        )
+        response = await service.generate_ai_response(request)
+
+        # Gemini API must NOT be called
+        mock_gemini.assert_not_called()
+        assert response.provider_used == "hard_grounding_gate"
+        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
+        assert "30" not in response.response_text
+        assert "35" not in response.response_text
+        assert "kg" not in response.response_text
+
+
+@pytest.mark.asyncio
+async def test_hard_gate_blocks_ungrounded_english_dosage_query(monkeypatch):
+    """Verify ungrounded English dosage query returns safe English fallback with no Gemini call."""
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = []
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="How much urea per acre for cotton in vegetative stage?"
+        )
+        response = await service.generate_ai_response(request)
+
+        mock_gemini.assert_not_called()
+        assert response.provider_used == "hard_grounding_gate"
+        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["en"]
+        assert "Agriculture Extension Officer" in response.response_text
+
+
+@pytest.mark.asyncio
+async def test_hard_gate_blocks_ungrounded_tanglish_dosage_query(monkeypatch):
+    """Verify ungrounded Tanglish/Romanized dosage query returns safe fallback with no Gemini call."""
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = []
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="vari ki entha urea veyali"
+        )
+        response = await service.generate_ai_response(request)
+
+        mock_gemini.assert_not_called()
+        assert response.provider_used == "hard_grounding_gate"
+        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
+
+
+@pytest.mark.asyncio
+async def test_verified_rag_allows_grounded_gemini_generation(monkeypatch):
+    """Verify that when verified RAG chunks ARE available, Gemini is called with Ground Truth."""
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+    from src.rag.schemas import RAGSearchResult
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    mock_chunk = RAGSearchResult(
+        chunk_id=uuid4(),
+        document_id=uuid4(),
+        document_title="ICAR Cotton Guide",
+        source="ICAR-CICR",
+        category="Fertilizer Management",
+        language="en",
+        state="Telangana",
+        crop="Cotton",
+        page=1,
+        chunk_text="Apply 25 kg Urea per acre at 45 DAS.",
+        similarity_score=0.95,
+    )
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = [mock_chunk]
+        mock_gemini.return_value = "As per ICAR guidelines, apply 25 kg Urea per acre at 45 DAS."
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="What is the cotton urea dosage at 45 DAS?"
+        )
+        response = await service.generate_ai_response(request)
+
+        # Gemini API was called with Ground Truth
+        mock_gemini.assert_called_once()
+        assert response.provider_used == "gemini"
+        assert "25 kg Urea" in response.response_text
+
+
+@pytest.mark.asyncio
+async def test_general_education_allowed_through_without_blocking(monkeypatch):
+    """Verify general agronomic education (non-dosage) passes through to Gemini even with empty RAG."""
+    from unittest.mock import MagicMock, patch
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+
+    mock_session = AsyncMock()
+    mock_repo = MagicMock()
+    mock_repo.session = mock_session
+    mock_repo.get_farmer_profile = AsyncMock(return_value=None)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(repository=mock_repo)
+
+    with patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""), \
+         patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock) as mock_rag_search, \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+
+        mock_rag_search.return_value = []
+        mock_gemini.return_value = "Nitrogen is essential for chlorophyll formation and vegetative leaf growth in plants."
+
+        request = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="Why is nitrogen important for paddy?"
+        )
+        response = await service.generate_ai_response(request)
+
+        mock_gemini.assert_called_once()
+        assert response.provider_used == "gemini"
+        assert "chlorophyll" in response.response_text

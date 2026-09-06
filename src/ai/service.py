@@ -15,9 +15,96 @@ from src.ai.prompts import (
     BHOOMIMITRA_SYSTEM_PROMPT,
     build_farmer_context,
     get_fallback_response,
+    get_unverified_dosage_fallback_response,
 )
 from src.config import get_settings
 from src.ai.gemini_client import generate_response
+import re
+
+
+def is_dosage_sensitive_query(text: str) -> bool:
+    """
+    Deterministically detects whether a farmer query is asking for exact
+    fertilizer/pesticide/chemical quantities, application rates, or stage-specific
+    chemical recommendations that require verified Ground Truth figures.
+
+    Distinguishes these from pure educational/conceptual inquiries (e.g., 'why is nitrogen important?').
+    """
+    if not text:
+        return False
+
+    t = text.lower().strip()
+
+    # 1. Pure educational/conceptual inquiries (no exact rate/unit asked)
+    is_pure_educational_pattern = bool(re.search(
+        r'^(?:why\s+(?:is|are|do|does)|what\s+is\s+(?:the\s+role\s+of|the\s+function\s+of|nitrogen|phosphorus|potash|urea|dap|biofertilizer|vermicompost)|'
+        r'benefits\s+of|importance\s+of|types\s+of\s+fertilizers?|'
+        r'నత్రజని\s+ప్రాముఖ్యత|భాస్వరం\s+ప్రాముఖ్యత|ప్రాముఖ్యత\s+ఏమిటి|'
+        r'నైట్రోజన్\s+ఎందుకు|యూరియా\s+ఎందుకు|'
+        r'नाइट्रोजन\s+का\s+महत्व|यूरिया\s+क्या\s+है|खाद\s+क्यों|'
+        r'உரத்தின்\s+பயன்கள்|ಗೊಬ್ಬರದ\s+ಮಹತ್ವ)\b',
+        t
+    ))
+
+    # 2. Explicit dosage units or quantity phrases (ALWAYS dosage-sensitive)
+    has_explicit_dosage_unit = bool(re.search(
+        r'(?:kg\s*(?:per|\/)\s*acre|kg\s*(?:per|\/)\s*ha|kg\s*(?:per|\/)\s*hectare|'
+        r'grams?\s*(?:per|\/)\s*l(?:itre)?|gm\s*(?:per|\/)\s*l|g\s*\/\s*l|'
+        r'ml\s*(?:per|\/)\s*l(?:itre)?|ml\s*\/\s*l|ml\s*(?:per|\/)\s*acre|'
+        r'litres?\s*(?:per|\/)\s*acre|per\s+acre|per\s+hectare|per\s+litre|'
+        r'how\s+many\s+kg|how\s+much\s+(?:urea|dap|potash|npk|fertilizer|pesticide|chemical|spray|zinc|sulphate|chlorantraniliprole)|'
+        r'what\s+is\s+the\s+dose|what\s+is\s+the\s+dosage|spray\s+dosage|application\s+rate|dosage\s+rate|'
+        r'dose\s+of|dosage\s+of|quantity\s+of\s+fertilizer|'
+        r'ఎంత\s*(?:మోతాదు|ఎరువు|యూరియా|మందు|స్ప్రే|డిఎపి|పొటాష్|జింక్|కేజీలు|గ్రాములు)|'
+        r'(?:ఎకరాకి|ఎకరానికి|లీటరుకు|లీటరుకి|హెక్టారుకు)\s*ఎంత|మోతాదు\s*ఎంత|డోసేజ్|డోస్|'
+        r'దశలో\s*(?:ఉన్న\s*)?(?:వరి|పత్తి|మిర్చి|మొక్కజొన్న|పంటకు)\s*ఎరువు\s*ఏది|'
+        r'పిలకల\s*దశలో\s*ఎరువు|పూత\s*దశలో\s*ఎరువు|కాయ\s*దశలో\s*ఎరువు|'
+        r'పిలకల\s*దశలో\s*వరి|'
+        r'ఎరువు\s*ఏది|మందు\s*ఏది|స్ప్రే\s*ఏది|'
+        r'వరికి\s*ఏం\s*ఎరువు|వరికి\s*ఏమి\s*ఎరువు|'
+        r'పత్తికి\s*ఏం\s*ఎరువు|మిర్చికి\s*ఏం\s*ఎరువు|'
+        r'వరి\s*పంటకు\s*ఎరువు|వరికి\s*ఎరువు|'
+        r'వరిలో\s*ఎరువుల\s*యాజమాన్యం|వరి\s*ఎరువుల\s*మోతాదు|'
+        r'(?:कितना|कितनी|कितने)\s*(?:मात्रा|खाद|यूरिया|दवा|दवाइयां|स्प्रे|डोज़)|प्रति\s*एकड़|प्रति\s*लीटर|डोज़|'
+        r'एकड़\s*में\s*(?:कितना|कितनी|कितने)|लीटर\s*में\s*(?:कितना|कितनी|कितने)|'
+        r'धान\s*में\s*(?:खाद|यूरिया|दवा)|गेहूं\s*में\s*(?:खाद|यूरिया|दवा)|'
+        r'எவ்வளவு\s*(?:உரம்|மருந்து|அளவு|யூரியா|உரங்கள்|பூச்சிக்கொல்லி)|ஏக்கருக்கு\s*எவ்வளவு|'
+        r'ಎಷ್ಟು\s*(?:ಗೊಬ್ಬರ|ಪ್ರಮಾಣ|ಔಷಧ|ಯೂರಿಯಾ|ಔಷಧಿ)|ಎಕರೆಗೆ\s*ಎಷ್ಟು|'
+        r'എത്ര\s*(?:വളം|അളവ്|മരുന്ന്|യൂറിയ)|'
+        r'किती\s*(?:खत|मात्रा|औषध|युरिया|डोस)|'
+        r'কতটা\s*(?:সার|ওষুধ|ইউরিয়া|ডোজ)|কত\s*ডোজ|'
+        r'કેટલું\s*(?:ખાતર|દવા|યુરિયા|ડોઝ)|'
+        r'କେତେ\s*(?:ସାର|ଔଷଧ|ୟୁରିଆ|ଡୋଜ୍)|'
+        r'ਕਿੰਨੀ\s*(?:ਖਾਦ|ਦਵਾਈ|ਯੂਰੀਆ|ਡੋਜ਼)|'
+        r'কিমান\s*(?:সাৰ|ঔষধ|ইউৰিয়া|ড\'জ)|'
+        r'کتنی\s*(?:کھاد|دوا|یوریا|خوراک)|'
+        r'entha\s+(?:fertilizer|urea|eruvu|mandhu|dose|dosage|dap|potash|zinc)|'
+        r'(?:ekaraniki|ekaraki|per\s+acre)\s+entha|'
+        r'kitna\s+(?:fertilizer|urea|khad|dawa|dose|dosage)|'
+        r'kitni\s+(?:khad|dawa|matra)|'
+        r'eshtu\s+(?:fertilizer|gobbara|aushadha|dose)|'
+        r'evvalavu\s+(?:fertilizer|uram|marundhu)|'
+        r'(?:vari|cotton|chilli|mirchi|paddy)\s*ki\s*(?:em|yemi|entha)\s*(?:fertilizer|eruvu|mandhu|urea)|'
+        r'paddy\s*(?:fertilizer|urea)\s*dosage)',
+        t
+    ))
+
+    if has_explicit_dosage_unit:
+        return True
+
+    if is_pure_educational_pattern:
+        return False
+
+    # 3. General fertilizer dosage / application queries
+    has_general_dosage_intent = bool(re.search(
+        r'(?:fertilizer\s+schedule|fertilizer\s+recommendation|nutrient\s+dosage|pesticide\s+dosage|chemical\s+dosage|'
+        r'top\s+dressing|basal\s+dose|foliar\s+spray|'
+        r'యూరియా\s+మోతాదు|ఎరువుల\s+మోతాదు|పురుగుమందు\s+మోతాదు|'
+        r'యూరియా\s+ఎంత|ఎరువు\s+ఎంత|మందు\s+ఎంత)',
+        t
+    ))
+
+    return has_general_dosage_intent
 
 class AIService:
     def __init__(self, repository: AIRepository):
@@ -83,7 +170,11 @@ class AIService:
                     rag_query = f"{' '.join(recent_user_msgs)} {request.message}"
 
             # 3.5 Retrieve trusted agricultural RAG knowledge
+            rag_snippets = []
             rag_context_text = ""
+            from src.language.detector import detect_language
+            user_lang = detect_language(request.message, fallback=getattr(profile, "preferred_language", "te") or "te")
+
             try:
                 from src.rag.service import RAGService
                 from src.rag.repository import RAGRepository
@@ -99,11 +190,26 @@ class AIService:
                     rag_snippets = [f"• Document: {r.document_title} (Crop: {r.crop or 'General'}, Source: {r.source}): {r.chunk_text}" for r in rag_results]
                     rag_context_text = (
                         "=== RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE (GROUND TRUTH) ===\n"
-                        "CRITICAL INSTRUCTION: The following knowledge is verified agronomic ground truth. When the farmer asks about disease diagnosis, symptoms, management, or dosage, you MUST prioritize and use these verified treatments/dosages and translate them directly into the response in the farmer's language (Telugu or English):\n"
+                        "CRITICAL INSTRUCTION: The following knowledge is verified agronomic ground truth. You MUST strictly use ONLY these verified treatments, products, and numeric dosages. Do NOT add, alter, extrapolate, or invent different dosages or unverified chemicals. Translate directly into the farmer's language:\n"
                         + "\n".join(rag_snippets)
                     )
             except Exception as rag_err:
                 logger.warning(f"RAG knowledge retrieval warning: {rag_err}")
+
+            # 3.8 HARD GROUNDING GATE: Block unverified numeric dosage generation
+            is_dosage_req = is_dosage_sensitive_query(request.message)
+            if is_dosage_req and not rag_snippets:
+                logger.warning(
+                    f"[HARD GROUNDING GATE TRIGGERED] Dosage-sensitive query with empty RAG ground truth. "
+                    f"Farmer ID: {request.farmer_id}, Language: '{user_lang}', Query: '{request.message[:80]}...'"
+                )
+                safe_fallback = get_unverified_dosage_fallback_response(user_lang)
+                return AIGenerateResponse(
+                    response_text=safe_fallback,
+                    intent="dosage_unverified_fallback",
+                    confidence=1.0,
+                    provider_used="hard_grounding_gate",
+                )
 
             # 4. Build system prompt combining profile, memory engine, and RAG ground truth
             full_system_prompt = f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\n{farmer_context}\n\n{memory_context}"
@@ -126,6 +232,23 @@ class AIService:
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail="AI provider timed out or returned empty response."
                 )
+
+            # Defense-in-depth: If RAG was empty, ensure Gemini did not invent numeric dosage patterns
+            if not rag_snippets:
+                has_numeric_dosage = bool(re.search(
+                    r'\b\d+(?:[.,]\d+)?\s*(?:-\s*\d+(?:[.,]\d+)?)?\s*'
+                    r'(?:kg|kgs|g|gm|gms|grams?|ml|litres?|ltr|l|కేజీలు|కిలోలు|గ్రాములు|మి\.లీ|किलो|ग्राम|मिली)'
+                    r'(?:\s*(?:per|\/|ప్రతి|ఎకరాకి|ఎకరానికి|प्रति|లీటరుకు|लीटर)\s*(?:acre|hectare|ha|l(?:itre)?|లీటరు|एकड़)?)?'
+                    r'\s*(?:urea|dap|mop|zinc|sulphate|potash|fertilizer|యూరియా|ఎరువు|జింక్|यूरिया|खाद)?',
+                    ai_text,
+                    re.IGNORECASE
+                ))
+                if is_dosage_req or (has_numeric_dosage and any(term in request.message.lower() for term in ["fertilizer", "urea", "pesticide", "dose", "dosage", "spray", "ఎరువు", "మందు", "యూరియా"])):
+                    logger.warning(
+                        f"[DEFENSE-IN-DEPTH GATE TRIGGERED] Hallucinated dosage detected in ungrounded AI output for farmer {request.farmer_id}. "
+                        f"Replacing with safe fallback."
+                    )
+                    ai_text = get_unverified_dosage_fallback_response(user_lang)
 
             total_ai_time = time.time() - service_start_time
             logger.info(
