@@ -151,3 +151,22 @@ async def test_global_exception_sanitization():
             # Ensure raw stack trace is not exposed
             assert "Traceback" not in resp.text
             assert "socket connection timeout" not in resp.text
+
+
+def test_gunicorn_deployment_timeout_configured():
+    """Verify that deployment configs specify --timeout 90 to prevent Gunicorn worker timeout kills during Gemini fallback."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+
+    # 1. render.yaml
+    render_yaml = (root / "render.yaml").read_text(encoding="utf-8")
+    assert "startCommand:" in render_yaml
+    assert "--timeout 90" in render_yaml
+
+    # 2. Dockerfile
+    dockerfile = (root / "Dockerfile").read_text(encoding="utf-8")
+    assert "--timeout 90" in dockerfile
+
+    # 3. scripts/start_staging.sh
+    staging_script = (root / "scripts" / "start_staging.sh").read_text(encoding="utf-8")
+    assert "--timeout 90" in staging_script

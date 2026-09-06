@@ -37,4 +37,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:${PORT}/health || exit 1
 
 # Default command: run migrations and start gunicorn with uvicorn workers
-CMD ["sh", "-c", "alembic upgrade head && gunicorn -w 2 -k uvicorn.workers.UvicornWorker -b 0.0.0.0:${PORT} src.main:app"]
+CMD ["sh", "-c", "alembic upgrade head && gunicorn -w 2 -k uvicorn.workers.UvicornWorker --timeout 90 -b 0.0.0.0:${PORT} src.main:app"]
