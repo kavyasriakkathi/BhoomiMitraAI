@@ -341,65 +341,100 @@ class MarketPriceRepository:
         limit_days: int = 3,
     ) -> List[MarketPrice]:
         """
-        Return the most recent market price records for a commodity.
+        Return the most relevant market price records for a commodity using strict geographic hierarchy.
 
-        Priority:
-          1. Filter by district if provided
-          2. Fall back to state-level data if no district records found
-          3. Return any national data if still nothing found
-          4. If nothing within limit_days, fall back to latest available records without date cutoff
+        Priority Hierarchy:
+          1. Exact district records with current date cutoff (price_date >= cutoff).
+          2. Exact district records from latest available local DB date (no date cutoff).
+          3. Same-state records with current date cutoff (price_date >= cutoff).
+          4. Same-state records from latest available date (no date cutoff).
+          5. National records with current date cutoff (price_date >= cutoff).
+          6. Any national records from latest available date (no date cutoff).
         """
         cutoff = datetime.utcnow() - timedelta(days=limit_days)
+        base_commodity_filter = [MarketPrice.commodity.ilike(f"%{commodity}%")]
 
-        base_filters = [
-            MarketPrice.commodity.ilike(f"%{commodity}%"),
-            MarketPrice.price_date >= cutoff,
-        ]
-
-        # Try district-level first
+        # 1. Exact district records with current date cutoff
         if district:
-            district_results = await self._query_prices(
-                base_filters + [MarketPrice.district.ilike(f"%{district}%")]
+            district_recent = await self._query_prices(
+                base_commodity_filter + [
+                    MarketPrice.price_date >= cutoff,
+                    or_(
+                        MarketPrice.district.ilike(f"%{district}%"),
+                        MarketPrice.market_name.ilike(f"%{district}%"),
+                    ),
+                ]
             )
-            if district_results:
+            if district_recent:
                 logger.info(
-                    f"[MARKET REPO] Found {len(district_results)} district-level records "
+                    f"[MARKET REPO] Priority 1: Found {len(district_recent)} recent district-level records "
                     f"for '{commodity}' in '{district}'"
                 )
-                return district_results
+                return district_recent
 
-        # Fall back to state-level
-        if state:
-            state_results = await self._query_prices(
-                base_filters + [MarketPrice.state.ilike(f"%{state}%")]
+            # 2. Exact district records from latest available local DB date (all-time)
+            district_all = await self._query_prices(
+                base_commodity_filter + [
+                    or_(
+                        MarketPrice.district.ilike(f"%{district}%"),
+                        MarketPrice.market_name.ilike(f"%{district}%"),
+                    ),
+                ]
             )
-            if state_results:
+            if district_all:
                 logger.info(
-                    f"[MARKET REPO] Found {len(state_results)} state-level records "
-                    f"for '{commodity}' in '{state}' (no district match)"
+                    f"[MARKET REPO] Priority 2: Found {len(district_all)} district-level records (all-time) "
+                    f"for '{commodity}' in '{district}'"
                 )
-                return state_results
+                return district_all
 
-        # Fall back to any record for this commodity within the date range
-        any_results = await self._query_prices(base_filters)
-        if any_results:
+        # 3. Same-state records with current date cutoff
+        if state:
+            state_recent = await self._query_prices(
+                base_commodity_filter + [
+                    MarketPrice.price_date >= cutoff,
+                    MarketPrice.state.ilike(f"%{state}%"),
+                ]
+            )
+            if state_recent:
+                logger.info(
+                    f"[MARKET REPO] Priority 3: Found {len(state_recent)} recent state-level records "
+                    f"for '{commodity}' in '{state}'"
+                )
+                return state_recent
+
+            # 4. Same-state records from latest available date (all-time)
+            state_all = await self._query_prices(
+                base_commodity_filter + [
+                    MarketPrice.state.ilike(f"%{state}%"),
+                ]
+            )
+            if state_all:
+                logger.info(
+                    f"[MARKET REPO] Priority 4: Found {len(state_all)} state-level records (all-time) "
+                    f"for '{commodity}' in '{state}'"
+                )
+                return state_all
+
+        # 5. National records with current date cutoff
+        national_recent = await self._query_prices(
+            base_commodity_filter + [MarketPrice.price_date >= cutoff]
+        )
+        if national_recent:
             logger.info(
-                f"[MARKET REPO] Found {len(any_results)} national records "
+                f"[MARKET REPO] Priority 5: Found {len(national_recent)} recent national records "
                 f"for '{commodity}' (within {limit_days} days cutoff)"
             )
-            return any_results
+            return national_recent
 
-        # Final resilient fallback: latest records for commodity without date cutoff
-        fallback_filters = [MarketPrice.commodity.ilike(f"%{commodity}%")]
-        if district:
-            d_res = await self._query_prices(fallback_filters + [MarketPrice.district.ilike(f"%{district}%")])
-            if d_res:
-                return d_res
-        if state:
-            s_res = await self._query_prices(fallback_filters + [MarketPrice.state.ilike(f"%{state}%")])
-            if s_res:
-                return s_res
-        return await self._query_prices(fallback_filters)
+        # 6. Final fallback: Any national records from latest available date (all-time)
+        national_all = await self._query_prices(base_commodity_filter)
+        if national_all:
+            logger.info(
+                f"[MARKET REPO] Priority 6: Found {len(national_all)} all-time national records "
+                f"for '{commodity}'"
+            )
+        return national_all
 
     async def _query_prices(self, filters: list) -> List[MarketPrice]:
         """Execute a price query with the given filters, sorted newest-first."""

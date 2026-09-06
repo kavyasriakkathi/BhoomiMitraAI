@@ -220,10 +220,13 @@ class MarketService:
     # ------------------------------------------------------------------
 
     async def _upsert_api_records(self, api_records: List[dict], commodity: str) -> None:
-        """Convert raw API dicts to MarketPriceCreate and upsert."""
+        """Convert raw API dicts to MarketPriceCreate and upsert, preserving source market arrival dates."""
         creates = []
         for rec in api_records:
             try:
+                arrival_date = rec.get("arrival_date")
+                if not arrival_date or not isinstance(arrival_date, datetime):
+                    continue
                 creates.append(MarketPriceCreate(
                     commodity=rec.get("commodity") or commodity,
                     market_name=rec.get("market") or "Unknown Market",
@@ -233,7 +236,7 @@ class MarketService:
                     max_price=float(rec.get("max_price", 0)),
                     modal_price=float(rec.get("modal_price", 0)),
                     unit="Quintal",
-                    price_date=rec.get("arrival_date") or datetime.utcnow(),
+                    price_date=arrival_date,
                     source="agmarknet_api",
                 ))
             except Exception as exc:

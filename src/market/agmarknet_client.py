@@ -75,11 +75,57 @@ class AgmarknetClient:
         # Call the live API
         records = await self._call_api(commodity, state, district)
 
+        # Apply client-side priority and filtering if upstream returns broader records
+        if records:
+            records = self._prioritize_records(records, state=state, district=district)
+
         # Store in cache regardless of empty (avoids re-calling a dead API repeatedly)
         if records is not None:
             await self._set_in_cache(commodity, state, district, records)
 
         return records if records is not None else []
+
+    def _prioritize_records(
+        self,
+        records: List[dict],
+        state: Optional[str] = None,
+        district: Optional[str] = None,
+    ) -> List[dict]:
+        """
+        Safely prioritize and filter records when the external API returns broader results.
+        Preserves true state/market labels without mutating or inventing metadata.
+        """
+        if not records:
+            return []
+
+        state_clean = state.strip().lower() if state else None
+        district_clean = district.strip().lower() if district else None
+
+        if state_clean:
+            matching_state = [
+                r for r in records if state_clean in r.get("state", "").lower()
+            ]
+            if matching_state:
+                if district_clean:
+                    matching_district = [
+                        r for r in matching_state
+                        if district_clean in r.get("district", "").lower()
+                        or district_clean in r.get("market", "").lower()
+                    ]
+                    other_state = [r for r in matching_state if r not in matching_district]
+                    return matching_district + other_state
+                return matching_state
+
+        if district_clean:
+            matching_district = [
+                r for r in records
+                if district_clean in r.get("district", "").lower()
+                or district_clean in r.get("market", "").lower()
+            ]
+            other_records = [r for r in records if r not in matching_district]
+            return matching_district + other_records
+
+        return records
 
     # ------------------------------------------------------------------
     # Internal: API call
