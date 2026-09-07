@@ -35,6 +35,36 @@ def _ensure_initialized():
         logger.info("Gemini SDK initialized successfully with transport='rest'.")
 
 
+def _is_quota_exhausted_error(e: Exception) -> bool:
+    """
+    Deterministically detects confirmed Gemini HTTP 429 / ResourceExhausted quota errors.
+    Prevents pointless fallback attempts across models that share the same project API key quota.
+    """
+    if e is None:
+        return False
+    err_str = str(e).lower()
+    err_type = type(e).__name__.lower()
+
+    if "resourceexhausted" in err_type or "toomanyrequests" in err_type:
+        return True
+    if getattr(e, "code", None) == 429 or getattr(e, "status_code", None) == 429 or getattr(e, "http_status", None) == 429:
+        return True
+
+    quota_signals = (
+        "429",
+        "resourceexhausted",
+        "resource_exhausted",
+        "toomanyrequests",
+        "too many requests",
+        "quota exceeded",
+        "quota_exceeded",
+        "free_tier_requests",
+        "rate limit exceeded",
+        "rate_limit_exceeded",
+    )
+    return any(sig in err_str for sig in quota_signals)
+
+
 async def generate_response(
     system_prompt: str,
     conversation_history: List[Dict[str, str]],
@@ -144,11 +174,17 @@ async def generate_response(
 
         except Exception as e:
             elapsed = time.time() - req_start_time
+            last_error = e
+            if _is_quota_exhausted_error(e):
+                logger.warning(
+                    f"[GEMINI QUOTA EXHAUSTED] Model {model_name} failed with quota exhaustion after {elapsed:.2f}s: {type(e).__name__} - {e}. "
+                    "Aborting model fallback chain to prevent quota burn."
+                )
+                break
             logger.warning(
                 f"[GEMINI ERROR] Model {model_name} failed after {elapsed:.2f}s: {type(e).__name__} - {e}. "
                 f"Trying next model if available..."
             )
-            last_error = e
 
     total_elapsed = time.time() - total_start_time
     logger.exception(
@@ -251,11 +287,17 @@ async def generate_multimodal_response(
 
         except Exception as e:
             elapsed = time.time() - req_start_time
+            last_error = e
+            if _is_quota_exhausted_error(e):
+                logger.warning(
+                    f"[GEMINI MULTIMODAL QUOTA EXHAUSTED] Model {model_name} failed with quota exhaustion after {elapsed:.2f}s: {type(e).__name__} - {e}. "
+                    "Aborting model fallback chain to prevent quota burn."
+                )
+                break
             logger.warning(
                 f"[GEMINI MULTIMODAL ERROR] Model {model_name} failed after {elapsed:.2f}s: {type(e).__name__} - {e}. "
                 f"Trying next model if available..."
             )
-            last_error = e
 
     total_elapsed = time.time() - total_start_time
     logger.exception(

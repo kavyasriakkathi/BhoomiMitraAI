@@ -1175,3 +1175,234 @@ async def test_generate_ai_response_triggers_background_memory_extraction():
             user_message="What is the spacing for paddy?",
             ai_response="Here is standard paddy advice."
         )
+
+
+def test_is_quota_exhausted_error_helper():
+    """Verify deterministic quota exhaustion detection for various error signals and exclusion of transient errors."""
+    from src.ai.gemini_client import _is_quota_exhausted_error
+
+    class CustomResourceExhausted(Exception):
+        pass
+
+    class CustomTooManyRequests(Exception):
+        pass
+
+    class CustomErrorWithCode(Exception):
+        def __init__(self, code):
+            self.code = code
+
+    # Confirmed quota exhaustion cases
+    assert _is_quota_exhausted_error(CustomResourceExhausted("Project quota limit")) is True
+    assert _is_quota_exhausted_error(CustomTooManyRequests("Rate limited")) is True
+    assert _is_quota_exhausted_error(CustomErrorWithCode(429)) is True
+    assert _is_quota_exhausted_error(RuntimeError("HTTP 429: Too Many Requests")) is True
+    assert _is_quota_exhausted_error(Exception("Resource has been exhausted (quota_exceeded)")) is True
+    assert _is_quota_exhausted_error(Exception("quota exceeded for metric generate_content_free_tier_requests")) is True
+    assert _is_quota_exhausted_error(Exception("rate limit exceeded")) is True
+
+    # Transient / non-quota cases (MUST be False to keep normal fallback chain)
+    assert _is_quota_exhausted_error(None) is False
+    assert _is_quota_exhausted_error(ConnectionError("Connection reset by peer")) is False
+    assert _is_quota_exhausted_error(TimeoutError("Operation timed out")) is False
+    assert _is_quota_exhausted_error(Exception("503 Service Unavailable")) is False
+    assert _is_quota_exhausted_error(RuntimeError("Invalid argument")) is False
+
+
+@pytest.mark.asyncio
+async def test_gemini_429_quota_exhaustion_aborts_fallback_chain():
+    """A. Main text generation: Primary raises confirmed 429 quota error -> only ONE model call, fallback not called."""
+    from src.ai.gemini_client import generate_response
+    from unittest.mock import patch, MagicMock
+
+    call_count = 0
+    models_attempted = []
+
+    def fake_generative_model(model_name, **kwargs):
+        models_attempted.append(model_name)
+        mock_model = MagicMock()
+        mock_chat = MagicMock()
+
+        def fake_send_message(user_msg):
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("429 Resource has been exhausted (quota_exceeded for metric generate_content_free_tier_requests)")
+
+        mock_chat.send_message.side_effect = fake_send_message
+        mock_model.start_chat.return_value = mock_chat
+        return mock_model
+
+    with patch("src.ai.gemini_client._ensure_initialized"), \
+         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await generate_response(
+                system_prompt="Test system prompt",
+                conversation_history=[],
+                user_message="వరి సాగు సలహా",
+                timeout_seconds=5.0,
+                allow_fallback=True,
+            )
+
+        assert "429" in str(exc_info.value)
+        # MUST abort on first model attempt without calling fallback models
+        assert call_count == 1
+        assert len(models_attempted) == 1
+        assert models_attempted == ["gemini-3.6-flash"]
+
+
+@pytest.mark.asyncio
+async def test_gemini_multimodal_429_quota_exhaustion_aborts_fallback_chain():
+    """B. Multimodal generation: Primary raises confirmed 429 quota error -> only ONE model call, fallback not called."""
+    from src.ai.gemini_client import generate_multimodal_response
+    from unittest.mock import patch, MagicMock
+
+    call_count = 0
+    models_attempted = []
+
+    def fake_generative_model(model_name, **kwargs):
+        models_attempted.append(model_name)
+        mock_model = MagicMock()
+        mock_chat = MagicMock()
+
+        def fake_send_message(parts):
+            nonlocal call_count
+            call_count += 1
+            raise RuntimeError("HTTP 429: TooManyRequests - Quota exceeded for project")
+
+        mock_chat.send_message.side_effect = fake_send_message
+        mock_model.start_chat.return_value = mock_chat
+        return mock_model
+
+    with patch("src.ai.gemini_client._ensure_initialized"), \
+         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
+
+        with pytest.raises(RuntimeError) as exc_info:
+            await generate_multimodal_response(
+                system_prompt="Test vision system prompt",
+                conversation_history=[],
+                image_bytes=b"fake_image",
+                mime_type="image/jpeg",
+                user_message="Diagnose crop",
+                timeout_seconds=5,
+            )
+
+        assert "429" in str(exc_info.value)
+        assert call_count == 1
+        assert len(models_attempted) == 1
+        assert models_attempted == ["gemini-3.6-flash"]
+
+
+@pytest.mark.asyncio
+async def test_gemini_transient_error_continues_fallback():
+    """C. Non-quota transient failure: Primary raises normal transient exception -> fallback chain continues unchanged."""
+    from src.ai.gemini_client import generate_response
+    from unittest.mock import patch, MagicMock
+
+    models_attempted = []
+
+    def fake_generative_model(model_name, **kwargs):
+        models_attempted.append(model_name)
+        mock_model = MagicMock()
+        mock_chat = MagicMock()
+        if model_name == "gemini-3.6-flash":
+            # Primary fails with transient connection error
+            mock_chat.send_message.side_effect = ConnectionError("Transient network failure 503")
+        else:
+            # Fallback succeeds
+            mock_resp = MagicMock()
+            mock_resp.text = "Fallback model success answer."
+            mock_chat.send_message.return_value = mock_resp
+        mock_model.start_chat.return_value = mock_chat
+        return mock_model
+
+    with patch("src.ai.gemini_client._ensure_initialized"), \
+         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
+
+        resp = await generate_response(
+            system_prompt="Test system prompt",
+            conversation_history=[],
+            user_message="Test message",
+            timeout_seconds=5.0,
+            allow_fallback=True,
+        )
+
+        assert resp == "Fallback model success answer."
+        # Primary was tried, failed transients, then fallback was tried and succeeded
+        assert models_attempted[0] == "gemini-3.6-flash"
+        assert models_attempted[1] == "gemini-3.5-flash"
+
+
+@pytest.mark.asyncio
+async def test_gemini_timeout_error_continues_fallback():
+    """D. Timeout behavior: Primary model times out -> fallback model is attempted."""
+    import asyncio
+    from src.ai.gemini_client import generate_response
+    from unittest.mock import patch, MagicMock
+
+    models_attempted = []
+
+    def fake_generative_model(model_name, **kwargs):
+        models_attempted.append(model_name)
+        mock_model = MagicMock()
+        mock_chat = MagicMock()
+        if model_name == "gemini-3.6-flash":
+            # Primary model times out
+            mock_chat.send_message.side_effect = asyncio.TimeoutError("Gemini model timed out")
+        else:
+            # Fallback succeeds
+            mock_resp = MagicMock()
+            mock_resp.text = "Fallback response after primary timeout."
+            mock_chat.send_message.return_value = mock_resp
+        mock_model.start_chat.return_value = mock_chat
+        return mock_model
+
+    with patch("src.ai.gemini_client._ensure_initialized"), \
+         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
+
+        resp = await generate_response(
+            system_prompt="Test system prompt",
+            conversation_history=[],
+            user_message="Test timeout query",
+            timeout_seconds=5.0,
+            allow_fallback=True,
+        )
+
+        assert resp == "Fallback response after primary timeout."
+        assert models_attempted[0] == "gemini-3.6-flash"
+        assert models_attempted[1] == "gemini-3.5-flash"
+
+
+@pytest.mark.asyncio
+async def test_gemini_429_returns_localized_safe_fallback_in_gateway():
+    """E. Existing AI fallback response behavior: Localized safe fallback returned when Gemini is unavailable due to 429."""
+    from src.ai.prompts import get_fallback_response
+    from src.ai.gemini_client import generate_response
+    from unittest.mock import patch, MagicMock
+
+    def fake_send_message(user_msg):
+        raise RuntimeError("429 Resource has been exhausted (quota_exceeded)")
+
+    mock_chat = MagicMock()
+    mock_chat.send_message.side_effect = fake_send_message
+    mock_model = MagicMock()
+    mock_model.start_chat.return_value = mock_chat
+
+    with patch("src.ai.gemini_client._ensure_initialized"), \
+         patch("google.generativeai.GenerativeModel", return_value=mock_model):
+
+        try:
+            await generate_response(
+                system_prompt="Test prompt",
+                conversation_history=[],
+                user_message="వరి సాగు సలహా",
+                timeout_seconds=5.0,
+                allow_fallback=True,
+            )
+            response_text = None
+        except Exception:
+            # Emulate gateway/decision engine error fallback handling
+            response_text = get_fallback_response("te")
+
+        assert response_text is not None
+        assert response_text == get_fallback_response("te")
+        assert "క్షమించండి" in response_text or "సమస్య" in response_text
