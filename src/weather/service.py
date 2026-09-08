@@ -221,6 +221,165 @@ _EN_LABELS = {
     "ask_location": "📍 Please provide your district or area name (e.g., Warangal, Guntur) to get accurate weather forecast information for your crops.",
 }
 
+_LABELS_BY_LANG = {
+    "te": _TE_LABELS,
+    "en": _EN_LABELS,
+    "hi": {
+        "title": "🌡️ मौसम जानकारी ({location})",
+        "temp": "तापमान",
+        "feels_like": "महसूस",
+        "wind": "हवा की गति",
+        "humidity": "नमी (आर्द्रता)",
+        "condition": "मौसम",
+        "source_live": "ओपनवेदर (लाइव)",
+        "source_local": "स्थानीय मौसम डेटा",
+        "rain_alert": "🌧️ कल का पूर्वानुमान: आपके क्षेत्र में बारिश होने की संभावना है। कृपया अपनी फसलों की सुरक्षा के उपाय करें।",
+        "clear_alert": "☀️ कल का पूर्वानुमान: मौसम साफ/आंशिक बादल और शुष्क रहेगा।",
+        "no_data": "ℹ️ नोट: इस स्थान के लिए मौसम की जानकारी वर्तमान में उपलब्ध नहीं है।",
+        "ask_location": "📍 सटीक मौसम पूर्वानुमान के लिए कृपया अपने जिले या क्षेत्र का नाम बताएं।",
+    },
+    "ta": {
+        "title": "🌡️ வானிலை தகவல் ({location})",
+        "temp": "வெப்பநிலை",
+        "feels_like": "உணரப்படுவது",
+        "wind": "காற்றின் வேகம்",
+        "humidity": "ஈரப்பதம்",
+        "condition": "வானிலை",
+        "source_live": "ஓபன்வெதர் (நேரலை)",
+        "source_local": "உள்ளூர் வானிலை தரவு",
+        "rain_alert": "🌧️ நாளைய முன்னறிவிப்பு: உங்கள் பகுதியில் மழை பெய்ய வாய்ப்புள்ளது. பயிர்களை பாதுகாக்கவும்.",
+        "clear_alert": "☀️ நாளைய முன்னறிவிப்பு: வானிலை தெளிவாகவும் வறண்டதாகவும் இருக்கும்.",
+        "no_data": "ℹ️ குறிப்பு: இந்த இடத்திற்கான வானிலை தகவல் தற்போது கிடைக்கவில்லை.",
+        "ask_location": "📍 துல்லியமான வானிலை தகவலுக்கு உங்கள் மாவட்டத்தின் பெயரை தெரிவிக்கவும்.",
+    },
+    "kn": {
+        "title": "🌡️ ಹವಾಮಾನ ಮಾಹಿತಿ ({location})",
+        "temp": "ತಾಪಮಾನ",
+        "feels_like": "ಅನಿಸುವುದು",
+        "wind": "ಗಾಳಿಯ ವೇಗ",
+        "humidity": "ತೇವಾಂಶ",
+        "condition": "ಹವಾಮಾನ",
+        "source_live": "ಓಪನ್‌ವೆದರ್ (ಲೈವ್)",
+        "source_local": "ಸ್ಥಳೀಯ ಹವಾಮಾನ ಮಾಹಿತಿ",
+        "rain_alert": "🌧️ ನಾಳೆಯ ಮುನ್ಸೂಚನೆ: ನಿಮ್ಮ ಪ್ರದೇಶದಲ್ಲಿ ಮಳೆಯಾಗುವ ಸಾಧ್ಯತೆಯಿದೆ. ಬೆಳೆಗಳಿಗೆ ರಕ್ಷಣೆ ಒದಗಿಸಿ.",
+        "clear_alert": "☀️ ನಾಳೆಯ ಮುನ್ಸೂಚನೆ: ಹವಾಮಾನವು ಶುಷ್ಕ ಮತ್ತು ಸ್ಪಷ್ಟವಾಗಿರುತ್ತದೆ.",
+        "no_data": "ℹ️ ಈ ಸ್ಥಳಕ್ಕೆ ಹವಾಮಾನ ಮಾಹಿತಿ ಲಭ್ಯವಿಲ್ಲ.",
+        "ask_location": "📍 ನಿಖರವಾದ ಹವಾಮಾನ ಮುನ್ಸೂಚನೆಗಾಗಿ ನಿಮ್ಮ ಜಿಲ್ಲೆಯ ಹೆಸರನ್ನು ತಿಳಿಸಿ.",
+    },
+    "ml": {
+        "title": "🌡️ കാലാവസ്ഥാ വിവരം ({location})",
+        "temp": "താപനില",
+        "feels_like": "അനുഭവപ്പെടുന്നത്",
+        "wind": "കാറ്റിന്റെ വേഗത",
+        "humidity": "ഈർപ്പം",
+        "condition": "കാലാവസ്ഥ",
+        "source_live": "ഓപ്പൺവെതർ (തത്സമയം)",
+        "source_local": "പ്രാദേശിക കാലാവസ്ഥാ ഡാറ്റ",
+        "rain_alert": "🌧️ നാളത്തെ പ്രവചനം: നിങ്ങളുടെ പ്രദേശത്ത് മഴ പെയ്യാൻ സാധ്യതയുണ്ട്.",
+        "clear_alert": "☀️ നാളത്തെ പ്രവചനം: കാലാവസ്ഥ വ്യക്തമായിരിക്കും.",
+        "no_data": "ℹ️ നിലവിൽ കാലാവസ്ഥാ വിവരങ്ങൾ ലഭ്യമല്ല.",
+        "ask_location": "📍 കാലാവസ്ഥാ വിവരങ്ങൾക്ക് നിങ്ങളുടെ ജില്ലയുടെ പേര് നൽകുക.",
+    },
+    "mr": {
+        "title": "🌡️ हवामान माहिती ({location})",
+        "temp": "तापमान",
+        "feels_like": "जाणवणारे",
+        "wind": "वाऱ्याचा वेग",
+        "humidity": "आर्द्रता",
+        "condition": "हवामान",
+        "source_live": "ओपनवेदर (थेट)",
+        "source_local": "स्थानिक हवामान डेटा",
+        "rain_alert": "🌧️ उद्याचा अंदाज: आपल्या भागात पाऊस पडण्याची शक्यता आहे. पिकांची काळजी घ्या.",
+        "clear_alert": "☀️ उद्याचा अंदाज: हवामान कोरडे आणि निरभ्र राहील.",
+        "no_data": "ℹ️ या ठिकाणची हवामान माहिती सध्या उपलब्ध नाही.",
+        "ask_location": "📍 अचूक हवामान अंदाजासाठी आपल्या जिल्ह्याचे नाव सांगा.",
+    },
+    "bn": {
+        "title": "🌡️ আবহাওয়ার তথ্য ({location})",
+        "temp": "তাপমাত্রা",
+        "feels_like": "অনুভূত",
+        "wind": "বাতাসের গতি",
+        "humidity": "আর্দ্রতা",
+        "condition": "আবহাওয়া",
+        "source_live": "ওপেনওয়েদার (লাইভ)",
+        "source_local": "স্থানীয় আবহাওয়া তথ্য",
+        "rain_alert": "🌧️ আগামীকালের পূর্বাভাস: আপনার এলাকায় বৃষ্টির সম্ভাবনা রয়েছে।",
+        "clear_alert": "☀️ আগামীকালের পূর্বাভাস: আবহাওয়া পরিষ্কার ও শুষ্ক থাকবে।",
+        "no_data": "ℹ️ এই এলাকার আবহাওয়ার তথ্য উপলব্ধ নেই।",
+        "ask_location": "📍 সঠিক আবহাওয়া পূর্বাভাসের জন্য আপনার জেলার নাম দিন।",
+    },
+    "gu": {
+        "title": "🌡️ હવામાન માહિતી ({location})",
+        "temp": "તાપમાન",
+        "feels_like": "અનુભવાતું",
+        "wind": "પવનની ઝડપ",
+        "humidity": "ભેજ",
+        "condition": "હવામાન",
+        "source_live": "ઓપનવેધર (લાઈવ)",
+        "source_local": "સ્થાનિક હવામાન ડેટા",
+        "rain_alert": "🌧️ આવતીકાલની આગાહી: તમારા વિસ્તારમાં વરસાદની શક્યતા છે.",
+        "clear_alert": "☀️ આવતીકાલની આગાહી: હવામાન ચોખ્ખું અને સૂકું રહેશે.",
+        "no_data": "ℹ️ આ સ્થળ માટે હવામાન માહિતી ઉપલબ્ધ નથી.",
+        "ask_location": "📍 સચોટ હવામાન માહિતી માટે તમારા જિલ્લાનું નામ આપો.",
+    },
+    "or": {
+        "title": "🌡️ ପାଣିପାଗ ସୂଚନା ({location})",
+        "temp": "ତାପମାତ୍ରା",
+        "feels_like": "ଅନୁଭୂତ",
+        "wind": "ପବନର ବେଗ",
+        "humidity": "ଆର୍ଦ୍ରତା",
+        "condition": "ପାଣିପାଗ",
+        "source_live": "ଓପନୱେଦର (ଲାଇଭ୍)",
+        "source_local": "ସ୍ଥାନୀୟ ପାଣିପାଗ ତଥ୍ୟ",
+        "rain_alert": "🌧️ ଆସନ୍ତାକାଲିର ପୂର୍ବାନୁମାନ: ଆପଣଙ୍କ ଅଞ୍ଚଳରେ ବର୍ଷା ହେବାର ସମ୍ଭାବନା ଅଛି।",
+        "clear_alert": "☀️ ଆସନ୍ତାକାଲିର ପୂର୍ବାନୁମାନ: ପାଗ ଶୁଖିଲା ରହିବ।",
+        "no_data": "ℹ️ ବର୍ତ୍ତମାନ ପାଣିପାଗ ସୂଚନା ଉପଲବ୍ଧ ନାହିଁ।",
+        "ask_location": "📍 ସଠିକ୍ ପାଣିପାଗ ପାଇଁ ଆପଣଙ୍କ ଜିଲ୍ଲାର ନାମ ଦିଅନ୍ତୁ।",
+    },
+    "pa": {
+        "title": "🌡️ ਮੌਸਮ ਜਾਣਕਾਰੀ ({location})",
+        "temp": "ਤਾਪਮਾਨ",
+        "feels_like": "ਮਹਿਸੂਸ",
+        "wind": "ਹਵਾ ਦੀ ਰਫ਼ਤਾਰ",
+        "humidity": "ਨਮੀ",
+        "condition": "ਮੌਸਮ",
+        "source_live": "ਓਪਨਵੈਦਰ (ਲਾਈਵ)",
+        "source_local": "ਸਥਾਨਕ ਮੌਸਮ ਡੇਟਾ",
+        "rain_alert": "🌧️ ਕੱਲ੍ਹ ਦਾ ਪੂਰਵ-ਅਨੁਮਾਨ: ਤੁਹਾਡੇ ਇਲਾਕੇ ਵਿੱਚ ਮੀਂਹ ਪੈਣ ਦੀ ਸੰਭਾਵਨਾ ਹੈ।",
+        "clear_alert": "☀️ ਕੱਲ੍ਹ ਦਾ ਪੂਰਵ-ਅਨੁਮਾਨ: ਮੌਸਮ ਸਾਫ਼ ਅਤੇ ਖੁਸ਼ਕ ਰਹੇਗਾ।",
+        "no_data": "ℹ️ ਇਸ ਖੇਤਰ ਲਈ ਮੌਸਮ ਜਾਣਕਾਰੀ ਉਪਲਬਧ ਨਹੀਂ ਹੈ।",
+        "ask_location": "📍 ਸਹੀ ਮੌਸਮ ਜਾਣਕਾਰੀ ਲਈ ਆਪਣੇ ਜ਼ਿਲ੍ਹੇ ਦਾ ਨਾਮ ਦੱਸੋ।",
+    },
+    "as": {
+        "title": "🌡️ বতৰৰ তথ্য ({location})",
+        "temp": "তাপমাত্ৰা",
+        "feels_like": "অনুভৱ",
+        "wind": "বতাহৰ গতি",
+        "humidity": "আৰ্দ্ৰতা",
+        "condition": "বতৰ",
+        "source_live": "অ'পেনৱেদাৰ (লাইভ)",
+        "source_local": "স্থানীয় বতৰৰ তথ্য",
+        "rain_alert": "🌧️ কাইলৈৰ আগজাননী: আপোনাৰ অঞ্চলত বৰষুণৰ সম্ভাৱনা আছে।",
+        "clear_alert": "☀️ কাইলৈৰ আগজাননী: বতৰ পৰিষ্কাৰ থাকিব।",
+        "no_data": "ℹ️ বৰ্তমান বতৰৰ তথ্য উপলব্ধ নহয়।",
+        "ask_location": "📍 সঠিক বতৰৰ বাবে আপোনাৰ জিলাৰ নাম কওক।",
+    },
+    "ur": {
+        "title": "🌡️ موسم کی معلومات ({location})",
+        "temp": "درجہ حرارت",
+        "feels_like": "محسوس",
+        "wind": "ہوا کی رفتار",
+        "humidity": "نمی",
+        "condition": "موسم",
+        "source_live": "اوپن ویدر (لائیو)",
+        "source_local": "مقامی موسمی ڈیٹا",
+        "rain_alert": "🌧️ کل کی پیش گوئی: آپ کے علاقے میں بارش کا امکان ہے۔ فصلوں کی حفاظت کریں۔",
+        "clear_alert": "☀️ کل کی پیش گوئی: موسم صاف اور خشک رہے گا۔",
+        "no_data": "ℹ️ فی الوقت اس مقام کی موسمی معلومات دستیاب نہیں ہیں۔",
+        "ask_location": "📍 درست معلومات کے لیے اپنے ضلع کا نام بتائیں۔",
+    },
+}
+
 
 class WeatherService:
     def __init__(self, client: OpenWeatherClient):
@@ -298,12 +457,12 @@ class WeatherService:
 
     def format_whatsapp_reply(self, response: WeatherForecastResponse, language: str = "en") -> str:
         """Format the forecast response into a friendly WhatsApp text block."""
-        labels = _TE_LABELS if language == "te" else _EN_LABELS
+        labels = _LABELS_BY_LANG.get(language, _EN_LABELS if language == "en" else _TE_LABELS)
 
         if not response.data_available:
             return labels["no_data"]
 
-        # Translate weather condition description for Telugu
+        # Translate weather condition description for Telugu & other languages
         condition_desc = response.current.description
         if language == "te":
             condition_desc = self.translate_condition(response.current.condition_code, condition_desc)
@@ -378,11 +537,19 @@ async def enrich_response_with_weather(
     - Any unhandled error occurs
     """
     query_lower = query_text.lower()
-    language = getattr(farmer, "preferred_language", "en") or "en"
-    labels = _TE_LABELS if language == "te" else _EN_LABELS
+    from src.language.detector import detect_language
+    pref_lang = getattr(farmer, "preferred_language", "en") or "en"
+    language = detect_language(query_text, fallback=pref_lang)
+    labels = _LABELS_BY_LANG.get(language, _EN_LABELS if language == "en" else _TE_LABELS)
 
     # Step 1: Detect weather intent
-    has_weather_intent = any(kw in query_lower for kw in WEATHER_KEYWORDS_EN) or any(kw in query_text for kw in WEATHER_KEYWORDS_TE)
+    from src.ai.decision_engine import WEATHER_KEYWORDS_MULTILINGUAL, WEATHER_KEYWORDS_TANGLISH
+    has_weather_intent = (
+        any(kw in query_lower for kw in WEATHER_KEYWORDS_EN) or
+        any(kw in query_text for kw in WEATHER_KEYWORDS_TE) or
+        any(kw in query_text for kw in WEATHER_KEYWORDS_MULTILINGUAL) or
+        any(kw in query_lower for kw in WEATHER_KEYWORDS_TANGLISH)
+    )
 
     # Also detect if farmer just provided a district name as a follow-up to a previous weather question
     query_district = _extract_district_from_query(query_text)

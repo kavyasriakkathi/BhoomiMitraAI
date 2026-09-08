@@ -107,6 +107,17 @@ COMMODITY_MAP = {
     # Bengalgram / Chickpea
     "bengalgram": "Bengalgram", "chickpea": "Bengalgram", "gram": "Bengalgram",
     "శనగ": "Bengalgram",
+    # Hindi / Multilingual common crop names
+    "टमाटर": "Tomato", "धान": "Paddy", "चावल": "Paddy", "प्याज": "Onion",
+    "कपास": "Cotton", "मक्का": "Maize", "मिर्च": "Chilli", "मूंगफली": "Groundnut",
+    "सोयाबीन": "Soybean", "हल्दी": "Turmeric", "गन्ना": "Sugarcane", "केला": "Banana",
+    "गेहूं": "Wheat", "ज्वार": "Jowar", "चना": "Bengalgram",
+    # Tamil
+    "தக்காளி": "Tomato", "நெல்": "Paddy", "வெங்காயம்": "Onion", "பருத்தி": "Cotton",
+    "மக்காச்சோளம்": "Maize", "மிளகாய்": "Chilli", "வேர்க்கடலை": "Groundnut",
+    # Kannada
+    "ಟೊಮೆಟೊ": "Tomato", "ಭತ್ತ": "Paddy", "ಈರುಳ್ಳಿ": "Onion", "ಹತ್ತಿ": "Cotton",
+    "ಮೆಕ್ಕೆಜೋಳ": "Maize", "ಮೆಣಸಿನಕಾಯಿ": "Chilli", "ಕಡಲೆಕಾಯಿ": "Groundnut",
 }
 
 # Intent keywords — triggers market price enrichment
@@ -118,6 +129,9 @@ PRICE_INTENT_KEYWORDS_TE = {
     "ధర", "ధరలు", "మండి", "రేటు", "రేట్లు", "ఎంత", "నేటి ధర", "మార్కెట్ ధర",
     "మార్కెట్ ధరలు", "మండి ధర", "మండి ధరలు", "ఎంత ధర", "అమ్మకం ధర",
     "క్వింటాల్", "క్వింటాలు", "ఖరీదు", "మార్కెట్", "మార్కెట్లో", "ధర ఎంత",
+}
+PRICE_INTENT_KEYWORDS_MULTILINGUAL = {
+    "भाव", "मंडी", "बाजार भाव", "दर", "दाम", "रेट", "ਕੀਮਤ", "ਭਾਅ", "দাম", "দর", "ભાવ", "ଦର", "விலை", "மண்டி", "ಬೆಲೆ", "ದರ", "വില",
 }
 
 # Today-specific intent keywords — used to distinguish queries explicitly asking for today's price
@@ -222,7 +236,7 @@ def _clean_ai_response_for_market_enrichment(ai_response: str) -> str:
 
     return "\n\n".join(cleaned_paragraphs).strip()
 
-# Telugu labels for formatted reply
+# Multilingual labels for formatted reply across 13 languages
 _TE_LABELS = {
     "title": "📊 {commodity} మార్కెట్ ధరలు",
     "market": "మండి",
@@ -245,6 +259,132 @@ _EN_LABELS = {
     "source_live": "Agmarknet (Live)",
     "source_local": "Local Database",
     "unit_suffix": "per Quintal",
+}
+
+_LABELS_BY_LANG = {
+    "te": _TE_LABELS,
+    "en": _EN_LABELS,
+    "hi": {
+        "title": "📊 {commodity} मंडी भाव",
+        "market": "मंडी",
+        "modal": "औसत भाव",
+        "min": "न्यूनतम",
+        "max": "अधिकतम",
+        "date": "दिनांक",
+        "source_live": "एगमार्कनेट (लाइव)",
+        "source_local": "स्थानीय डेटाबेस",
+        "unit_suffix": "प्रति क्विंटल",
+    },
+    "ta": {
+        "title": "📊 {commodity} சந்தை விலைகள்",
+        "market": "சந்தை",
+        "modal": "சராசரி விலை",
+        "min": "குறைந்தபட்சம்",
+        "max": "அதிகபட்சம்",
+        "date": "தேதி",
+        "source_live": "அக்மார்க்நெட் (நேரலை)",
+        "source_local": "உள்ளூர் தரவுத்தளம்",
+        "unit_suffix": "குவிண்டால்",
+    },
+    "kn": {
+        "title": "📊 {commodity} ಮಾರುಕಟ್ಟೆ ದರಗಳು",
+        "market": "ಮಂಡಿ",
+        "modal": "ಮಾದರಿ ದರ",
+        "min": "ಕನಿಷ್ಠ",
+        "max": "ಗರಿಷ್ಠ",
+        "date": "ದಿನಾಂಕ",
+        "source_live": "ಅಗ್ಮಾರ್ಕ್‌ನೆಟ್ (ಲೈವ್)",
+        "source_local": "ಸ್ಥಳೀಯ ಡೇಟಾಬೇಸ್",
+        "unit_suffix": "ಪ್ರತಿ ಕ್ವಿಂಟಾಲ್",
+    },
+    "ml": {
+        "title": "📊 {commodity} വിപണി വിലകൾ",
+        "market": "വിപണി",
+        "modal": "ശരാശരി വില",
+        "min": "കുറഞ്ഞത്",
+        "max": "കൂടിയത്",
+        "date": "തീയതി",
+        "source_live": "ആഗ്മാർക്ക്നെറ്റ് (തത്സമയം)",
+        "source_local": "പ്രാദേശിക ഡാറ്റാബേസ്",
+        "unit_suffix": "ക്വിന്റലിന്",
+    },
+    "mr": {
+        "title": "📊 {commodity} बाजारभाव",
+        "market": "बाजार समिती",
+        "modal": "सरासरी भाव",
+        "min": "किमान",
+        "max": "कमाल",
+        "date": "दिनांक",
+        "source_live": "अॅगमार्कनेट (थेट)",
+        "source_local": "स्थानिक डेटाबेस",
+        "unit_suffix": "प्रति क्विंटल",
+    },
+    "bn": {
+        "title": "📊 {commodity} বাজার দর",
+        "market": "বাজার",
+        "modal": "গড় দর",
+        "min": "সর্বনিম্ন",
+        "max": "সর্বোচ্চ",
+        "date": "তারিখ",
+        "source_live": "অ্যাগমার্কনেট (লাইভ)",
+        "source_local": "স্থানীয় ডেটাবেস",
+        "unit_suffix": "প্রতি কুইন্টাল",
+    },
+    "gu": {
+        "title": "📊 {commodity} બજાર ભાવ",
+        "market": "માર્કેટ યાર્ડ",
+        "modal": "સરેરાશ ભાવ",
+        "min": "નીચામાં નીચો",
+        "max": "ઊંચામાં ઊંચો",
+        "date": "તારીખ",
+        "source_live": "એગમાર્કનેટ (લાઈવ)",
+        "source_local": "સ્થાનિક ડેટાબેઝ",
+        "unit_suffix": "પ્રતિ ક્વિન્ટલ",
+    },
+    "or": {
+        "title": "📊 {commodity} ବଜାର ଦର",
+        "market": "ମଣ୍ଡି",
+        "modal": "ହାରାହାରି ଦର",
+        "min": "ସର୍ବନିମ୍ନ",
+        "max": "ସର୍ବାଧିକ",
+        "date": "ତାରିଖ",
+        "source_live": "ଆଗମାର୍କନେଟ୍ (ଲାଇଭ୍)",
+        "source_local": "ସ୍ଥାନୀୟ ଡାଟାବେସ୍",
+        "unit_suffix": "କ୍ୱିଣ୍ଟାଲ ପିଛା",
+    },
+    "pa": {
+        "title": "📊 {commodity} ਮੰਡੀ ਭਾਅ",
+        "market": "ਮੰਡੀ",
+        "modal": "ਔਸਤ ਭਾਅ",
+        "min": "ਘੱਟੋ-ਘੱਟ",
+        "max": "ਵੱਧ ਤੋਂ ਵੱਧ",
+        "date": "ਮਿਤੀ",
+        "source_live": "ਐਗਮਾਰਕਨੈੱਟ (ਲਾਈਵ)",
+        "source_local": "ਸਥਾਨਕ ਡਾਟਾਬੇਸ",
+        "unit_suffix": "ਪ੍ਰਤੀ ਕੁਇੰਟਲ",
+    },
+    "as": {
+        "title": "📊 {commodity} বজাৰ দৰ",
+        "market": "বজাৰ",
+        "modal": "গড় দৰ",
+        "min": "সৰ্বনিম্ন",
+        "max": "সৰ্বোচ্চ",
+        "date": "তাৰিখ",
+        "source_live": "এগমাৰ্কনেট (লাইভ)",
+        "source_local": "স্থানীয় ডাটাবেছ",
+        "unit_suffix": "প্ৰতি কুইন্টল",
+    },
+    "ur": {
+        "title": "📊 {commodity} منڈی کے بھاؤ",
+        "market": "منڈی",
+        "modal": "اوسط بھاؤ",
+        "min": "کم از کم",
+        "max": "زیادہ سے زیادہ",
+        "date": "تاریخ",
+        "source_live": "ایگمارک نیٹ (لائیو)",
+        "source_local": "مقامی ڈیٹا بیس",
+        "unit_suffix": "فی کوئنٹل",
+    },
 }
 
 
@@ -496,11 +636,16 @@ class MarketService:
         - Price freshness notice (especially when today's price was requested but only older data exists)
         - Empty data fallback
         """
-        labels = _TE_LABELS if language == "te" else _EN_LABELS
+        labels = _LABELS_BY_LANG.get(language, _EN_LABELS if language == "en" else _TE_LABELS)
         commodity = query_response.commodity
 
         commodity_display = commodity
         if language == "te":
+            for kw, canon in COMMODITY_MAP.items():
+                if canon.lower() == commodity.lower() and any(ord(c) > 127 for c in kw):
+                    commodity_display = kw
+                    break
+        elif language in ["hi", "ta", "kn", "mr", "bn", "gu", "or", "pa", "as", "ur"]:
             for kw, canon in COMMODITY_MAP.items():
                 if canon.lower() == commodity.lower() and any(ord(c) > 127 for c in kw):
                     commodity_display = kw
@@ -513,10 +658,19 @@ class MarketService:
                     "దయచేసి మీ స్థానిక మండిని సంప్రదించండి లేదా "
                     "రైతు సేవ కేంద్రాన్ని (1800-425-1422) సంప్రదించండి."
                 )
-            return (
-                f"Sorry, I could not find current mandi prices for {commodity}.\n"
-                "Please check your local mandi or call the Rythu Seva Kendra (1800-425-1422)."
-            )
+            elif language == "hi":
+                return (
+                    f"क्षमा करें, वर्तमान में {commodity_display} के मंडी भाव उपलब्ध नहीं हैं।\n"
+                    "कृपया अपनी स्थानीय मंडी से संपर्क करें या किसान कॉल सेंटर (1800-180-1551) पर संपर्क करें।"
+                )
+            elif language == "en":
+                return (
+                    f"Sorry, I could not find current mandi prices for {commodity}.\n"
+                    "Please check your local mandi or call the Rythu Seva Kendra (1800-425-1422)."
+                )
+            else:
+                from src.ai.prompts import get_market_fallback_response
+                return get_market_fallback_response(language)
 
         # Use the most recent record per market
         seen_markets = set()
@@ -667,7 +821,9 @@ async def enrich_response_with_market_prices(
     # Step 1: Detect price intent
     has_price_intent = any(kw in query_lower for kw in PRICE_INTENT_KEYWORDS_EN)
     if not has_price_intent:
-        has_price_intent = any(kw in query_lower for kw in PRICE_INTENT_KEYWORDS_TE)
+        has_price_intent = any(kw in query_text for kw in PRICE_INTENT_KEYWORDS_TE)
+    if not has_price_intent:
+        has_price_intent = any(kw in query_text for kw in PRICE_INTENT_KEYWORDS_MULTILINGUAL)
 
     logger.info(
         f"[MARKET ENRICH] Diagnostic check -> query='{query_text}' | "
@@ -703,11 +859,9 @@ async def enrich_response_with_market_prices(
     # Step 3: Get farmer location and profile
     district = None
     state = None
-    language = getattr(farmer, "preferred_language", "te") or "te"
-
-    # Infer language from query text if Telugu characters present
-    if any(ord(c) > 127 for c in query_text):
-        language = "te"
+    from src.language.detector import detect_language
+    pref_lang = getattr(farmer, "preferred_language", "te") or "te"
+    language = detect_language(query_text, fallback=pref_lang)
 
     # Extract district from query text if explicitly mentioned (e.g. "వరంగల్లో", "Warangal", "Enumamula")
     try:

@@ -228,6 +228,154 @@ _EN_LABELS = {
     "unavailable": "Government schemes information is currently unavailable. Please check https://myscheme.gov.in or your local agriculture office.",
 }
 
+_LABELS_BY_LANG = {
+    "te": _TE_LABELS,
+    "en": _EN_LABELS,
+    "hi": {
+        "title":       "🏛️ आपके लिए उपलब्ध सरकारी योजनाएं ({count} योजनाएं)",
+        "benefits":    "💰 लाभ",
+        "eligibility": "✅ पात्रता",
+        "documents":   "📄 आवश्यक दस्तावेज",
+        "deadline":    "📅 आवेदन की अंतिम तिथि",
+        "portal":      "🔗 आधिकारिक पोर्टल",
+        "no_portal":   "निकटतम सीएससी / ग्राहक सेवा केंद्र से संपर्क करें",
+        "disclaimer":  "⚠️ नोट: कृपया आवेदन करने से पहले आधिकारिक पोर्टल पर विवरण की पुष्टि करें।",
+        "more":        "सभी योजनाओं के लिए देखें: /schemes",
+        "crop_note":   "(आपकी फसल: {crop})",
+        "unavailable": "सरकारी योजनाओं की जानकारी वर्तमान में उपलब्ध नहीं है।",
+    },
+    "ta": {
+        "title":       "🏛️ உங்களுக்கான அரசு திட்டங்கள் ({count} திட்டங்கள்)",
+        "benefits":    "💰 நன்மைகள்",
+        "eligibility": "✅ தகுதி",
+        "documents":   "📄 தேவையான ஆவணங்கள்",
+        "deadline":    "📅 விண்ணப்பிக்க கடைசி தேதி",
+        "portal":      "🔗 அதிகாரப்பூர்வ இணையதளம்",
+        "no_portal":   "அருகிலுள்ள இ-சேவை மையத்தை தொடர்பு கொள்ளவும்",
+        "disclaimer":  "⚠️ குறிப்பு: விண்ணப்பிக்கும் முன் அதிகாரப்பூர்வ தளத்தில் சரிபார்க்கவும்.",
+        "more":        "அனைத்து திட்டங்களுக்கும்: /schemes",
+        "crop_note":   "(பயிர்: {crop})",
+        "unavailable": "அரசு திட்டங்கள் தகவல் தற்போது கிடைக்கவில்லை.",
+    },
+    "kn": {
+        "title":       "🏛️ ನಿಮಗಾಗಿ ಲಭ್ಯವಿರುವ ಸರ್ಕಾರಿ ಯೋಜನೆಗಳು ({count} ಯೋಜನೆಗಳು)",
+        "benefits":    "💰 ಪ್ರಯೋಜನಗಳು",
+        "eligibility": "✅ ಅರ್ಹತೆ",
+        "documents":   "📄 ಅಗತ್ಯ ದಾಖಲೆಗಳು",
+        "deadline":    "📅 ಅರ್ಜಿ ಸಲ್ಲಿಸಲು ಕೊನೆಯ ದಿನಾಂಕ",
+        "portal":      "🔗 ಅಧಿಕೃತ ಪೋರ್ಟಲ್",
+        "no_portal":   "ಹತ್ತಿರದ ಸಿಎಸ್‌ಸಿ ಕೇಂದ್ರವನ್ನು ಸಂಪರ್ಕಿಸಿ",
+        "disclaimer":  "⚠️ ಗಮನಿಸಿ: ಅರ್ಜಿ ಸಲ್ಲಿಸುವ ಮೊದಲು ಅಧಿಕೃತ ಪೋರ್ಟಲ್‌ನಲ್ಲಿ ಪರಿಶೀಲಿಸಿ.",
+        "more":        "ಹೆಚ್ಚಿನ ಯೋಜನೆಗಳಿಗಾಗಿ: /schemes",
+        "crop_note":   "(ಬೆಳೆ: {crop})",
+        "unavailable": "ಸರ್ಕಾರಿ ಯೋಜನೆಗಳ ಮಾಹಿತಿ ಪ್ರಸ್ತುತ ಲಭ್ಯವಿಲ್ಲ.",
+    },
+    "ml": {
+        "title":       "🏛️ ലഭ്യമായ സർക്കാർ പദ്ധതികൾ ({count} എണ്ണം)",
+        "benefits":    "💰 ആനുകൂല്യങ്ങൾ",
+        "eligibility": "✅ യോഗ്യത",
+        "documents":   "📄 ആവശ്യമായ രേഖകൾ",
+        "deadline":    "📅 അവസാന തീയതി",
+        "portal":      "🔗 ഔദ്യോഗിക പോർട്ടൽ",
+        "no_portal":   "അക്ഷയ കേന്ദ്രവുമായി ബന്ധപ്പെടുക",
+        "disclaimer":  "⚠️ ശ്രദ്ധിക്കുക: അപേക്ഷിക്കുന്നതിന് മുമ്പ് ഔദ്യോഗിക പോർട്ടലിൽ പരിശോധിക്കുക.",
+        "more":        "കൂടുതൽ പദ്ധതികൾക്ക്: /schemes",
+        "crop_note":   "(വിള: {crop})",
+        "unavailable": "പദ്ധതി വിവരങ്ങൾ ലഭ്യമല്ല.",
+    },
+    "mr": {
+        "title":       "🏛️ आपल्यासाठी उपलब्ध शासकीय योजना ({count} योजना)",
+        "benefits":    "💰 फायदे",
+        "eligibility": "✅ पात्रता",
+        "documents":   "📄 आवश्यक कागदपत्रे",
+        "deadline":    "📅 अर्जाची अंतिम मुदत",
+        "portal":      "🔗 अधिकृत पोर्टल",
+        "no_portal":   "जवळच्या सीएससी केंद्राशी संपर्क साधा",
+        "disclaimer":  "⚠️ टीप: अर्ज करण्यापूर्वी अधिकृत पोर्टलवर माहिती तपासा.",
+        "more":        "सर्व योजनांसाठी: /schemes",
+        "crop_note":   "(पीक: {crop})",
+        "unavailable": "शासकीय योजनांची माहिती सध्या उपलब्ध नाही.",
+    },
+    "bn": {
+        "title":       "🏛️ আপনার জন্য সরকারি প্রকল্পসমূহ ({count} টি প্রকল্প)",
+        "benefits":    "💰 সুবিধাসমূহ",
+        "eligibility": "✅ যোগ্যতা",
+        "documents":   "📄 প্রয়োজনীয় নথিপত্র",
+        "deadline":    "📅 আবেদনের শেষ তারিখ",
+        "portal":      "🔗 অফিসিয়াল পোর্টাল",
+        "no_portal":   "নিকটবর্তী সিএসসি সেন্টারে যোগাযোগ করুন",
+        "disclaimer":  "⚠️ দ্রষ্টব্য: আবেদনের পূর্বে অফিসিয়াল পোর্টালে যাচাই করুন।",
+        "more":        "সকল প্রকল্পের জন্য: /schemes",
+        "crop_note":   "(ফসল: {crop})",
+        "unavailable": "সরকারি প্রকল্পের তথ্য বর্তমানে উপলব্ধ নেই।",
+    },
+    "gu": {
+        "title":       "🏛️ તમારા માટે ઉપલબ્ધ સરકારી યોજનાઓ ({count} યોજનાઓ)",
+        "benefits":    "💰 લાભો",
+        "eligibility": "✅ પાત્રતા",
+        "documents":   "📄 જરૂરી દસ્તાવેજો",
+        "deadline":    "📅 અરજીની છેલ્લી તારીખ",
+        "portal":      "🔗 સત્તાવાર પોર્ટલ",
+        "no_portal":   "નજીકના સીએસસી કેન્દ્રનો સંપર્ક કરો",
+        "disclaimer":  "⚠️ નોંધ: અરજી કરતા પહેલા સત્તાવાર પોર્ટલ પર ચકાસણી કરો.",
+        "more":        "બધી યોજનાઓ માટે: /schemes",
+        "crop_note":   "(પાક: {crop})",
+        "unavailable": "સરકારી યોજનાઓની માહિતી ઉપલબ્ધ નથી.",
+    },
+    "or": {
+        "title":       "🏛️ ଆପଣଙ୍କ ପାଇଁ ସରକାରୀ ଯୋଜନା ({count} ଟି ଯୋଜନା)",
+        "benefits":    "💰 ଲାଭ",
+        "eligibility": "✅ ଯୋଗ୍ୟତା",
+        "documents":   "📄 ଆବଶ୍ୟକୀୟ କାଗଜପତ୍ର",
+        "deadline":    "📅 ଆବେଦନର ଶେଷ ତାରିଖ",
+        "portal":      "🔗 ସରକାରୀ ପୋର୍ଟାଲ",
+        "no_portal":   "ନିକଟସ୍ଥ ଜନସେବା କେନ୍ଦ୍ର ସହ ଯୋଗାଯୋଗ କରନ୍ତୁ",
+        "disclaimer":  "⚠️ ସୂଚନା: ଆବେଦନ ପୂର୍ବରୁ ସରକାରୀ ପୋର୍ଟାଲରେ ଯାଞ୍ଚ କରନ୍ତୁ।",
+        "more":        "ସମସ୍ତ ଯୋଜନା ପାଇଁ: /schemes",
+        "crop_note":   "(ଫସଲ: {crop})",
+        "unavailable": "ସରକାରୀ ଯୋଜନା ସୂଚନା ଉପଲବ୍ଧ ନାହିଁ।",
+    },
+    "pa": {
+        "title":       "🏛️ ਤੁਹਾਡੇ ਲਈ ਉਪਲਬਧ ਸਰਕਾਰੀ ਸਕੀਮਾਂ ({count} ਸਕੀਮਾਂ)",
+        "benefits":    "💰 ਲਾਭ",
+        "eligibility": "✅ ਯੋਗਤਾ",
+        "documents":   "📄 ਲੋੜੀਂਦੇ ਦਸਤਾਵੇਜ਼",
+        "deadline":    "📅 ਅਰਜ਼ੀ ਦੀ ਆਖਰੀ ਮਿਤੀ",
+        "portal":      "🔗 ਅਧਿਕਾਰਤ ਪੋਰਟਲ",
+        "no_portal":   "ਨੇੜਲੇ ਸੀਐਸਸੀ ਕੇਂਦਰ ਨਾਲ ਸੰਪਰਕ ਕਰੋ",
+        "disclaimer":  "⚠️ ਨੋਟ: ਅਰਜ਼ੀ ਦੇਣ ਤੋਂ ਪਹਿਲਾਂ ਅਧਿਕਾਰਤ ਪੋਰਟਲ 'ਤੇ ਪੜਤਾਲ ਕਰੋ।",
+        "more":        "ਸਾਰੀਆਂ ਸਕੀਮਾਂ ਲਈ: /schemes",
+        "crop_note":   "(ਫਸਲ: {crop})",
+        "unavailable": "ਸਰਕਾਰੀ ਸਕੀਮਾਂ ਦੀ ਜਾਣਕਾਰੀ ਉਪਲਬਧ ਨਹੀਂ ਹੈ।",
+    },
+    "as": {
+        "title":       "🏛️ আপোনাৰ বাবে চৰকাৰী আঁচনিসমূহ ({count} খন আঁচনি)",
+        "benefits":    "💰 সুবিধাসমূহ",
+        "eligibility": "✅ যোগ্যতা",
+        "documents":   "📄 প্ৰয়োজনীয় নথিপত্ৰ",
+        "deadline":    "📅 আবেদনৰ অন্তিম তাৰিখ",
+        "portal":      "🔗 চৰকাৰী পৰ্টেল",
+        "no_portal":   "ওচৰৰ চিএছচি কেন্দ্ৰৰ সৈতে যোগাযোগ কৰক",
+        "disclaimer":  "⚠️ মন কৰিব: আবেদন কৰাৰ পূৰ্বে পৰ্টেলত পৰীক্ষা কৰক।",
+        "more":        "সকলো আঁচনিৰ বাবে: /schemes",
+        "crop_note":   "(শস্য: {crop})",
+        "unavailable": "চৰকাৰী আঁচনিৰ তথ্য উপলব্ধ নহয়।",
+    },
+    "ur": {
+        "title":       "🏛️ آپ کے لیے دستیاب سرکاری اسکیمیں ({count} اسکیمیں)",
+        "benefits":    "💰 فوائد",
+        "eligibility": "✅ اہلیت",
+        "documents":   "📄 مطلوبہ دستاویزات",
+        "deadline":    "📅 درخواست کی آخری تاریخ",
+        "portal":      "🔗 سرکاری پورٹل",
+        "no_portal":   "قریبی خدمت مرکز سے رابطہ کریں",
+        "disclaimer":  "⚠️ نوٹ: درخواست دینے سے پہلے سرکاری پورٹل پر تصدیق کریں۔",
+        "more":        "تمام اسکیموں کے لیے: /schemes",
+        "crop_note":   "(فصل: {crop})",
+        "unavailable": "سرکاری اسکیموں کی معلومات دستیاب نہیں ہیں۔",
+    },
+}
+
 
 def _detect_scheme_intent(query_lower: str) -> bool:
     """Return True if the query contains a government-scheme keyword."""
@@ -334,11 +482,13 @@ async def enrich_response_with_schemes(
 
     query_lower = query_text.lower()
 
-    # Step 1: Detect intent (English keywords or Telugu keywords)
+    # Step 1: Detect intent
+    from src.ai.decision_engine import SCHEMES_KEYWORDS_MULTILINGUAL, SCHEMES_KEYWORDS_TANGLISH
     has_intent = _detect_scheme_intent(query_lower)
     if not has_intent:
-        # Check Telugu keywords against original (non-lowercased) text
         has_intent = any(kw in query_text for kw in _SCHEME_KEYWORDS_TE)
+    if not has_intent:
+        has_intent = any(kw in query_text for kw in SCHEMES_KEYWORDS_MULTILINGUAL) or any(kw in query_lower for kw in SCHEMES_KEYWORDS_TANGLISH)
     if not has_intent:
         return ai_response
 
@@ -347,7 +497,10 @@ async def enrich_response_with_schemes(
 
     # Step 3: Resolve farmer location for state filtering
     farmer_state: Optional[str] = None
-    language = getattr(farmer, "preferred_language", "en") or "en"
+    from src.language.detector import detect_language
+    pref_lang = getattr(farmer, "preferred_language", "en") or "en"
+    language = detect_language(query_text, fallback=pref_lang)
+    labels = _LABELS_BY_LANG.get(language, _EN_LABELS if language == "en" else _TE_LABELS)
 
     try:
         import inspect

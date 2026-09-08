@@ -372,6 +372,85 @@ _TE_LABELS = {
     "more":              "మరిన్ని దుకాణాల కోసం: /shops",
 }
 
+_HI_LABELS = {
+    "title":             "🏬 नजदीकी कृषि दुकानें एवं उपलब्धता:",
+    "product":           "📦 उत्पाद",
+    "price":             "💰 कीमत",
+    "stock_in":          "स्टॉक उपलब्ध है",
+    "stock_low":         "कम स्टॉक",
+    "stock_out":         "स्टॉक समाप्त",
+    "contact":           "📞 संपर्क",
+    "status_open":       "खुला है",
+    "status_closed":     "बंद है",
+    "delivery_avail":    "उपलब्ध है",
+    "delivery_none":     "उपलब्ध नहीं",
+    "delivery":          "🚚 डिलीवरी",
+    "dist_fmt":          "{dist} किमी दूर",
+    "dist_generic":      "नजदीक",
+    "no_local_dealers":  "🏬 नजदीकी कृषि दुकानें एवं उपलब्धता:\nℹ️ आपके ब्लॉक/जिले में इस उत्पाद के लिए कोई पंजीकृत डीलर उपलब्ध नहीं है।",
+    "all_out_of_stock":  "⚠️ नोट: यह उत्पाद वर्तमान में नजदीकी दुकानों में आउट ऑफ स्टॉक है। कृपया पुनः स्टॉक की तारीखों के लिए डीलरों से संपर्क करें।",
+    "footer_disclaimer": "ℹ️ नोट: कीमतें और स्टॉक स्तर स्थानीय डीलर पुष्टि के अधीन हैं।",
+    "more":              "सभी दुकानें देखें: /shops",
+}
+
+_TA_LABELS = {
+    "title":             "🏬 அருகிலுள்ள விவசாயக் கடைகள் மற்றும் இருப்பு:",
+    "product":           "📦 பொருள்",
+    "price":             "💰 விலை",
+    "stock_in":          "இருப்பு உள்ளது",
+    "stock_low":         "குறைந்த இருப்பு",
+    "stock_out":         "இருப்பு இல்லை",
+    "contact":           "📞 தொடர்பு",
+    "status_open":       "திறந்துள்ளது",
+    "status_closed":     "மூடப்பட்டுள்ளது",
+    "delivery_avail":    "உள்ளது",
+    "delivery_none":     "இல்லை",
+    "delivery":          "🚚 டெலிவரி",
+    "dist_fmt":          "{dist} கி.மீ தொலைவில்",
+    "dist_generic":      "அருகில்",
+    "no_local_dealers":  "🏬 அருகிலுள்ள விவசாயக் கடைகள்:\nℹ️ உங்கள் பகுதியில் இந்த பொருளுக்கு பதிவு செய்யப்பட்ட டீலர்கள் இல்லை.",
+    "all_out_of_stock":  "⚠️ குறிப்பு: இந்த பொருள் தற்போது அருகிலுள்ள கடைகளில் கையிருப்பில் இல்லை.",
+    "footer_disclaimer": "ℹ️ குறிப்பு: விலைகள் மற்றும் இருப்பு உள்ளூர் டீலர் உறுதிப்படுத்தலுக்கு உட்பட்டது.",
+    "more":              "அனைத்து கடைகளும்: /shops",
+}
+
+_KN_LABELS = {
+    "title":             "🏬 ಸಮೀಪದ ಕೃಷಿ ಅಂಗಡಿಗಳು ಮತ್ತು ಲಭ್ಯತೆ:",
+    "product":           "📦 ಉತ್ಪನ್ನ",
+    "price":             "💰 ಬೆಲೆ",
+    "stock_in":          "ಸ್ಟಾಕ್ ಲಭ್ಯವಿದೆ",
+    "stock_low":         "ಕಡಿಮೆ ಸ್ಟಾಕ್",
+    "stock_out":         "ಸ್ಟಾಕ್ ಇಲ್ಲ",
+    "contact":           "📞 ಸಂಪರ್ಕಿಸಿ",
+    "status_open":       "ತೆರೆದಿದೆ",
+    "status_closed":     "ಮುಚ್ಚಲಾಗಿದೆ",
+    "delivery_avail":    "ಲಭ್ಯವಿದೆ",
+    "delivery_none":     "ಲಭ್ಯವಿಲ್ಲ",
+    "delivery":          "🚚 ಡೆಲಿವರಿ",
+    "dist_fmt":          "{dist} ಕಿ.ಮೀ ದೂರ",
+    "dist_generic":      "ಹತ್ತಿರದಲ್ಲಿ",
+    "no_local_dealers":  "🏬 ಸಮೀಪದ ಕೃಷಿ ಅಂಗಡಿಗಳು:\nℹ️ ನಿಮ್ಮ ತಾಲೂಕು/ಜಿಲ್ಲೆಯಲ್ಲಿ ಈ ಉತ್ಪನ್ನಕ್ಕೆ ನೋಂದಾಯಿತ ವಿತರಕರು ಲಭ್ಯವಿಲ್ಲ.",
+    "all_out_of_stock":  "⚠️ ಸೂಚನೆ: ಈ ಉತ್ಪನ್ನವು ಪ್ರಸ್ತುತ ಹತ್ತಿರದ ಅಂಗಡಿಗಳಲ್ಲಿ ಸ್ಟಾಕ್ ಮುಗಿದಿದೆ.",
+    "footer_disclaimer": "ℹ️ ಸೂಚನೆ: ಬೆಲೆಗಳು ಮತ್ತು ಸ್ಟಾಕ್ ಸ್ಥಳೀಯ ವಿತರಕರ ದೃಢೀಕರಣಕ್ಕೆ ಒಳಪಟ್ಟಿರುತ್ತವೆ.",
+    "more":              "ಎಲ್ಲಾ ಅಂಗಡಿಗಳು: /shops",
+}
+
+_LABELS_BY_LANG = {
+    "en": _EN_LABELS,
+    "te": _TE_LABELS,
+    "hi": _HI_LABELS,
+    "ta": _TA_LABELS,
+    "kn": _KN_LABELS,
+    "ml": _EN_LABELS,
+    "mr": _HI_LABELS,
+    "bn": _EN_LABELS,
+    "gu": _HI_LABELS,
+    "or": _EN_LABELS,
+    "pa": _HI_LABELS,
+    "as": _EN_LABELS,
+    "ur": _HI_LABELS,
+}
+
 
 def _detect_shop_intent(query_lower: str, query_text: str) -> bool:
     """Detect if the query has shop or input purchase intent in English or Telugu."""
@@ -519,8 +598,10 @@ async def enrich_response_with_shops(
     else:
         latitude, longitude, district, state = loc_res
 
-    language = getattr(farmer, "preferred_language", "en") or "en"
-    labels = _TE_LABELS if language == "te" else _EN_LABELS
+    from src.language.detector import detect_language
+    pref_lang = getattr(farmer, "preferred_language", "en") or "en"
+    language = detect_language(query_text, fallback=pref_lang)
+    labels = _LABELS_BY_LANG.get(language, _EN_LABELS if language == "en" else _TE_LABELS)
 
     # Step 4: Fetch matching shops from DB (auto-seed defaults if empty)
     try:

@@ -1222,7 +1222,7 @@ async def test_gemini_429_quota_exhaustion_aborts_fallback_chain():
         mock_model = MagicMock()
         mock_chat = MagicMock()
 
-        def fake_send_message(user_msg):
+        def fake_send_message(user_msg, *args, **kwargs):
             nonlocal call_count
             call_count += 1
             raise RuntimeError("429 Resource has been exhausted (quota_exceeded for metric generate_content_free_tier_requests)")
@@ -1264,7 +1264,7 @@ async def test_gemini_multimodal_429_quota_exhaustion_aborts_fallback_chain():
         mock_model = MagicMock()
         mock_chat = MagicMock()
 
-        def fake_send_message(parts):
+        def fake_send_message(parts, *args, **kwargs):
             nonlocal call_count
             call_count += 1
             raise RuntimeError("HTTP 429: TooManyRequests - Quota exceeded for project")
@@ -1379,7 +1379,7 @@ async def test_gemini_429_returns_localized_safe_fallback_in_gateway():
     from src.ai.gemini_client import generate_response
     from unittest.mock import patch, MagicMock
 
-    def fake_send_message(user_msg):
+    def fake_send_message(user_msg, *args, **kwargs):
         raise RuntimeError("429 Resource has been exhausted (quota_exceeded)")
 
     mock_chat = MagicMock()
@@ -1406,3 +1406,86 @@ async def test_gemini_429_returns_localized_safe_fallback_in_gateway():
         assert response_text is not None
         assert response_text == get_fallback_response("te")
         assert "క్షమించండి" in response_text or "సమస్య" in response_text
+
+
+@pytest.mark.asyncio
+async def test_gemini_sdk_request_options_timeout_primary_and_fallback():
+    """Verify that chat.send_message receives SDK-level request_options with 15.0s on primary and 10.0s on fallback."""
+    from src.ai.gemini_client import generate_response
+    from unittest.mock import patch, MagicMock
+
+    captured_timeouts = {}
+
+    def fake_generative_model(model_name, **kwargs):
+        mock_model = MagicMock()
+        mock_chat = MagicMock()
+
+        def fake_send_message(user_msg, **inner_kwargs):
+            req_opt = inner_kwargs.get("request_options")
+            captured_timeouts[model_name] = req_opt.get("timeout") if isinstance(req_opt, dict) else getattr(req_opt, "timeout", None)
+            if model_name == "gemini-3.6-flash":
+                raise ConnectionError("Primary network error to trigger fallback")
+            mock_resp = MagicMock()
+            mock_resp.text = "Fallback success response"
+            return mock_resp
+
+        mock_chat.send_message.side_effect = fake_send_message
+        mock_model.start_chat.return_value = mock_chat
+        return mock_model
+
+    with patch("src.ai.gemini_client._ensure_initialized"), \
+         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
+
+        resp = await generate_response(
+            system_prompt="Test prompt",
+            conversation_history=[],
+            user_message="వరి పంట సలహా",
+            timeout_seconds=15.0,
+            allow_fallback=True,
+        )
+
+        assert resp == "Fallback success response"
+        # Primary gets 15.0s timeout
+        assert captured_timeouts["gemini-3.6-flash"] == 15.0
+        # Fallback gets 10.0s capped timeout
+        assert captured_timeouts["gemini-3.5-flash"] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_gemini_multimodal_sdk_request_options_timeout():
+    """Verify that multimodal chat.send_message receives SDK-level request_options with expected timeout."""
+    from src.ai.gemini_client import generate_multimodal_response
+    from unittest.mock import patch, MagicMock
+
+    captured_timeout = None
+
+    def fake_generative_model(model_name, **kwargs):
+        mock_model = MagicMock()
+        mock_chat = MagicMock()
+
+        def fake_send_message(parts, **inner_kwargs):
+            nonlocal captured_timeout
+            req_opt = inner_kwargs.get("request_options")
+            captured_timeout = req_opt.get("timeout") if isinstance(req_opt, dict) else getattr(req_opt, "timeout", None)
+            mock_resp = MagicMock()
+            mock_resp.text = '{"disease": "healthy"}'
+            return mock_resp
+
+        mock_chat.send_message.side_effect = fake_send_message
+        mock_model.start_chat.return_value = mock_chat
+        return mock_model
+
+    with patch("src.ai.gemini_client._ensure_initialized"), \
+         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
+
+        resp = await generate_multimodal_response(
+            system_prompt="Vision prompt",
+            conversation_history=[],
+            image_bytes=b"image_bytes",
+            mime_type="image/jpeg",
+            user_message="Diagnose crop",
+            timeout_seconds=15,
+        )
+
+        assert '{"disease": "healthy"}' in resp
+        assert captured_timeout == 15.0
