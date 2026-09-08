@@ -136,8 +136,7 @@ async def generate_response(
             chat = model.start_chat(history=history)
 
             response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    chat.send_message,
+                chat.send_message_async(
                     user_message,
                     request_options={"timeout": float(current_timeout)},
                 ),
@@ -258,8 +257,7 @@ async def generate_multimodal_response(
                 message_parts.append(user_message)
 
             response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    chat.send_message,
+                chat.send_message_async(
                     message_parts,
                     request_options={"timeout": float(timeout_seconds)},
                 ),

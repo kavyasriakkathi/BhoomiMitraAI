@@ -1241,6 +1241,7 @@ async def test_whatsapp_reply_uses_gemini_36_flash_as_primary(monkeypatch):
         mock_chat = MagicMock()
         mock_resp = MagicMock()
         mock_resp.text = "పత్తి పంటలో పురుగుల నివారణకు సరైన పురుగుమందు పిచికారీ చేయాలి."
+        mock_chat.send_message_async = AsyncMock(return_value=mock_resp)
         mock_chat.send_message.return_value = mock_resp
         mock_instance.start_chat.return_value = mock_chat
         return mock_instance
