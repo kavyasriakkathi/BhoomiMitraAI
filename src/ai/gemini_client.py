@@ -9,6 +9,8 @@ import asyncio
 import time
 from typing import List, Dict, Optional
 import google.generativeai as genai
+import google.api_core.exceptions
+import requests.exceptions
 from src.config import get_settings
 from src.core.logging import logger
 
@@ -65,6 +67,23 @@ def _is_quota_exhausted_error(e: Exception) -> bool:
     return any(sig in err_str for sig in quota_signals)
 
 
+def _is_timeout_error(e: Exception) -> bool:
+    """
+    Deterministically detects whether an exception is an HTTP, socket, requests,
+    or asyncio timeout error (e.g. requests.exceptions.ReadTimeout, requests.exceptions.ConnectTimeout,
+    asyncio.TimeoutError, TimeoutError, google.api_core.exceptions.DeadlineExceeded).
+    """
+    if e is None:
+        return False
+    if isinstance(e, (asyncio.TimeoutError, TimeoutError, requests.exceptions.Timeout, google.api_core.exceptions.DeadlineExceeded)):
+        return True
+    err_type = type(e).__name__.lower()
+    if any(t in err_type for t in ("timeout", "deadlineexceeded")):
+        return True
+    err_str = str(e).lower()
+    return "timed out" in err_str or "timeout" in err_str or "deadline exceeded" in err_str
+
+
 async def generate_response(
     system_prompt: str,
     conversation_history: List[Dict[str, str]],
@@ -82,7 +101,7 @@ async def generate_response(
         conversation_history: List of {"role": "user"|"model", "parts": "..."} dicts
                               representing the recent conversation context.
         user_message: The farmer's current message.
-        timeout_seconds: Max time to wait for API response (default: from settings or 5.0s).
+        timeout_seconds: Max time to wait for API response (default: from settings or 15.0s).
         model_override: Optional model name to use instead of default.
         allow_fallback: Whether to attempt fallback models on failure (default: True).
 
@@ -135,12 +154,16 @@ async def generate_response(
 
             chat = model.start_chat(history=history)
 
+            # In google-generativeai with transport='rest', HTTP calls execute synchronously via `requests`.
+            # We offload the blocking call to a thread pool to protect the asyncio event loop while enforcing
+            # socket-level timeouts via `request_options={"timeout": ...}` and asyncio-level timeouts via `wait_for`.
             response = await asyncio.wait_for(
-                chat.send_message_async(
+                asyncio.to_thread(
+                    chat.send_message,
                     user_message,
                     request_options={"timeout": float(current_timeout)},
                 ),
-                timeout=current_timeout,
+                timeout=float(current_timeout),
             )
 
             elapsed = time.time() - req_start_time
@@ -163,18 +186,6 @@ async def generate_response(
             )
             return ai_text
 
-        except asyncio.TimeoutError as e:
-            elapsed = time.time() - req_start_time
-            timeout_count += 1
-            logger.warning(
-                f"[GEMINI TIMEOUT] Model {model_name} timed out after {elapsed:.2f}s "
-                f"(limit={current_timeout}s). Trying next model if available..."
-            )
-            last_error = e
-            if timeout_count >= 2:
-                logger.warning(f"[GEMINI TIMEOUT CEILING] {timeout_count} models timed out. Aborting model fallback to yield fast response.")
-                break
-
         except Exception as e:
             elapsed = time.time() - req_start_time
             last_error = e
@@ -184,17 +195,27 @@ async def generate_response(
                     "Aborting model fallback chain to prevent quota burn."
                 )
                 break
-            logger.warning(
-                f"[GEMINI ERROR] Model {model_name} failed after {elapsed:.2f}s: {type(e).__name__} - {e}. "
-                f"Trying next model if available..."
-            )
+            if _is_timeout_error(e):
+                timeout_count += 1
+                logger.warning(
+                    f"[GEMINI TIMEOUT] Model {model_name} timed out after {elapsed:.2f}s "
+                    f"(limit={current_timeout}s): {type(e).__name__} - {e}. Trying next model if available..."
+                )
+                if timeout_count >= 2:
+                    logger.warning(f"[GEMINI TIMEOUT CEILING] {timeout_count} models timed out. Aborting model fallback to yield fast response.")
+                    break
+            else:
+                logger.warning(
+                    f"[GEMINI ERROR] Model {model_name} failed after {elapsed:.2f}s: {type(e).__name__} - {e}. "
+                    f"Trying next model if available..."
+                )
 
     total_elapsed = time.time() - total_start_time
     logger.exception(
         f"[GEMINI ALL MODELS EXHAUSTED] All {len(candidate_models)} models failed after {total_elapsed:.2f}s. "
         f"Last error: {last_error}"
     )
-    if isinstance(last_error, asyncio.TimeoutError):
+    if _is_timeout_error(last_error):
         raise TimeoutError(f"Gemini API timed out after {total_elapsed:.1f}s across attempts") from last_error
     raise RuntimeError(f"Gemini SDK Error: {str(last_error)}") from last_error
 
@@ -226,6 +247,7 @@ async def generate_multimodal_response(
 
     total_start_time = time.time()
     last_error = None
+    timeout_count = 0
 
     for attempt_idx, model_name in enumerate(candidate_models):
         req_start_time = time.time()
@@ -257,11 +279,12 @@ async def generate_multimodal_response(
                 message_parts.append(user_message)
 
             response = await asyncio.wait_for(
-                chat.send_message_async(
+                asyncio.to_thread(
+                    chat.send_message,
                     message_parts,
                     request_options={"timeout": float(timeout_seconds)},
                 ),
-                timeout=timeout_seconds,
+                timeout=float(timeout_seconds),
             )
 
             elapsed = time.time() - req_start_time
@@ -283,14 +306,6 @@ async def generate_multimodal_response(
             )
             return ai_text
 
-        except asyncio.TimeoutError as e:
-            elapsed = time.time() - req_start_time
-            logger.warning(
-                f"[GEMINI MULTIMODAL TIMEOUT] Model {model_name} timed out after {elapsed:.2f}s. "
-                f"Trying next model if available..."
-            )
-            last_error = e
-
         except Exception as e:
             elapsed = time.time() - req_start_time
             last_error = e
@@ -300,16 +315,26 @@ async def generate_multimodal_response(
                     "Aborting model fallback chain to prevent quota burn."
                 )
                 break
-            logger.warning(
-                f"[GEMINI MULTIMODAL ERROR] Model {model_name} failed after {elapsed:.2f}s: {type(e).__name__} - {e}. "
-                f"Trying next model if available..."
-            )
+            if _is_timeout_error(e):
+                timeout_count += 1
+                logger.warning(
+                    f"[GEMINI MULTIMODAL TIMEOUT] Model {model_name} timed out after {elapsed:.2f}s (limit={timeout_seconds}s): {type(e).__name__} - {e}. "
+                    f"Trying next model if available..."
+                )
+                if timeout_count >= 2:
+                    logger.warning(f"[GEMINI MULTIMODAL TIMEOUT CEILING] {timeout_count} models timed out. Aborting fallback.")
+                    break
+            else:
+                logger.warning(
+                    f"[GEMINI MULTIMODAL ERROR] Model {model_name} failed after {elapsed:.2f}s: {type(e).__name__} - {e}. "
+                    f"Trying next model if available..."
+                )
 
     total_elapsed = time.time() - total_start_time
     logger.exception(
         f"[GEMINI MULTIMODAL ALL MODELS EXHAUSTED] All {len(candidate_models)} models failed after {total_elapsed:.2f}s. "
         f"Last error: {last_error}"
     )
-    if isinstance(last_error, asyncio.TimeoutError):
+    if _is_timeout_error(last_error):
         raise TimeoutError(f"Gemini Multimodal API timed out after {timeout_seconds}s across all attempts") from last_error
     raise RuntimeError(f"Gemini SDK Error: {str(last_error)}") from last_error
