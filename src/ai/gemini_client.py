@@ -19,8 +19,7 @@ _initialized = False
 
 # Resilient fallback chain of supported models
 FALLBACK_MODELS = [
-    "gemini-3.5-flash",
-    "gemini-flash-latest",
+    "gemini-3.6-flash",
 ]
 
 
@@ -112,7 +111,7 @@ async def generate_response(
     settings = get_settings()
     if timeout_seconds is None:
         timeout_seconds = float(getattr(settings, "gemini_api_timeout_seconds", 15.0))
-    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.6-flash"
+    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.5-flash"
 
     # Build candidates list starting with primary model
     candidate_models = [primary_model]
@@ -234,7 +233,7 @@ async def generate_multimodal_response(
     """
     _ensure_initialized()
     settings = get_settings()
-    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.6-flash"
+    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.5-flash"
 
     candidate_models = [primary_model]
     for fallback in FALLBACK_MODELS:

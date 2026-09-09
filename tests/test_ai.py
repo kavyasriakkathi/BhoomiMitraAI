@@ -85,14 +85,13 @@ def test_generate_ai_response_provider_unavailable(mock_ai_service):
 def test_gemini_model_configuration():
     from src.config import Settings
     s = Settings()
-    assert s.gemini_model == "gemini-3.6-flash"
+    assert s.gemini_model == "gemini-3.5-flash"
 
 
 def test_gemini_fallback_models_order():
     from src.ai.gemini_client import FALLBACK_MODELS
     assert FALLBACK_MODELS == [
-        "gemini-3.5-flash",
-        "gemini-flash-latest",
+        "gemini-3.6-flash",
     ]
 
 
@@ -111,7 +110,7 @@ def test_gemini_initialization_configures_rest_transport(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_gemini_generate_response_primary_model_is_gemini_36_flash(monkeypatch):
+async def test_gemini_generate_response_primary_model_is_gemini_35_flash(monkeypatch):
     from unittest.mock import MagicMock
     import src.ai.gemini_client as gemini_module
 
@@ -124,7 +123,7 @@ async def test_gemini_generate_response_primary_model_is_gemini_36_flash(monkeyp
         mock_instance = MagicMock()
         mock_chat = MagicMock()
         mock_resp = MagicMock()
-        mock_resp.text = "Gemini 3.6 Flash natural language response"
+        mock_resp.text = "Gemini 3.5 Flash natural language response"
         mock_chat.send_message_async = AsyncMock(return_value=mock_resp)
         mock_chat.send_message.return_value = mock_resp
         mock_instance.start_chat.return_value = mock_chat
@@ -139,8 +138,8 @@ async def test_gemini_generate_response_primary_model_is_gemini_36_flash(monkeyp
         timeout_seconds=5,
     )
 
-    assert response == "Gemini 3.6 Flash natural language response"
-    assert attempts[0] == "gemini-3.6-flash"
+    assert response == "Gemini 3.5 Flash natural language response"
+    assert attempts[0] == "gemini-3.5-flash"
 
 
 @pytest.mark.asyncio
@@ -156,7 +155,7 @@ async def test_gemini_generate_response_fallback_on_error(monkeypatch):
         attempts.append(model_name)
         mock_instance = MagicMock()
         mock_chat = MagicMock()
-        if model_name == "gemini-3.6-flash":
+        if model_name == "gemini-3.5-flash":
             # Primary attempt fails
             mock_chat.send_message_async = AsyncMock(side_effect=Exception("Service Unavailable 503"))
             mock_chat.send_message.side_effect = Exception("Service Unavailable 503")
@@ -179,8 +178,8 @@ async def test_gemini_generate_response_fallback_on_error(monkeypatch):
     )
 
     assert response == "Fallback model response"
-    assert attempts[0] == "gemini-3.6-flash"
-    assert "gemini-3.5-flash" in attempts
+    assert attempts[0] == "gemini-3.5-flash"
+    assert "gemini-3.6-flash" in attempts
 
 
 @pytest.mark.asyncio
@@ -1255,7 +1254,7 @@ async def test_gemini_429_quota_exhaustion_aborts_fallback_chain():
         # MUST abort on first model attempt without calling fallback models
         assert call_count == 1
         assert len(models_attempted) == 1
-        assert models_attempted == ["gemini-3.6-flash"]
+        assert models_attempted == ["gemini-3.5-flash"]
 
 
 @pytest.mark.asyncio
@@ -1297,7 +1296,7 @@ async def test_gemini_multimodal_429_quota_exhaustion_aborts_fallback_chain():
         assert "429" in str(exc_info.value)
         assert call_count == 1
         assert len(models_attempted) == 1
-        assert models_attempted == ["gemini-3.6-flash"]
+        assert models_attempted == ["gemini-3.5-flash"]
 
 
 @pytest.mark.asyncio
@@ -1312,7 +1311,7 @@ async def test_gemini_transient_error_continues_fallback():
         models_attempted.append(model_name)
         mock_model = MagicMock()
         mock_chat = MagicMock()
-        if model_name == "gemini-3.6-flash":
+        if model_name == "gemini-3.5-flash":
             # Primary fails with transient connection error
             mock_chat.send_message = MagicMock(side_effect=ConnectionError("Transient network failure 503"))
         else:
@@ -1336,8 +1335,8 @@ async def test_gemini_transient_error_continues_fallback():
 
         assert resp == "Fallback model success answer."
         # Primary was tried, failed transients, then fallback was tried and succeeded
-        assert models_attempted[0] == "gemini-3.6-flash"
-        assert models_attempted[1] == "gemini-3.5-flash"
+        assert models_attempted[0] == "gemini-3.5-flash"
+        assert models_attempted[1] == "gemini-3.6-flash"
 
 
 @pytest.mark.asyncio
@@ -1353,7 +1352,7 @@ async def test_gemini_timeout_error_continues_fallback():
         models_attempted.append(model_name)
         mock_model = MagicMock()
         mock_chat = MagicMock()
-        if model_name == "gemini-3.6-flash":
+        if model_name == "gemini-3.5-flash":
             # Primary model times out
             mock_chat.send_message = MagicMock(side_effect=asyncio.TimeoutError("Gemini model timed out"))
         else:
@@ -1376,8 +1375,8 @@ async def test_gemini_timeout_error_continues_fallback():
         )
 
         assert resp == "Fallback response after primary timeout."
-        assert models_attempted[0] == "gemini-3.6-flash"
-        assert models_attempted[1] == "gemini-3.5-flash"
+        assert models_attempted[0] == "gemini-3.5-flash"
+        assert models_attempted[1] == "gemini-3.6-flash"
 
 
 @pytest.mark.asyncio
@@ -1415,7 +1414,7 @@ async def test_gemini_requests_read_timeout_triggers_model_fallback_and_ceiling(
         assert "Gemini API timed out" in str(exc_info.value)
         # Should stop after exactly 2 attempts due to timeout ceiling
         assert len(models_attempted) == 2
-        assert models_attempted == ["gemini-3.6-flash", "gemini-3.5-flash"]
+        assert models_attempted == ["gemini-3.5-flash", "gemini-3.6-flash"]
 
 
 @pytest.mark.asyncio
@@ -1469,7 +1468,7 @@ async def test_gemini_sdk_request_options_timeout_primary_and_fallback():
         def fake_send_message(user_msg, **inner_kwargs):
             req_opt = inner_kwargs.get("request_options")
             captured_timeouts[model_name] = req_opt.get("timeout") if isinstance(req_opt, dict) else getattr(req_opt, "timeout", None)
-            if model_name == "gemini-3.6-flash":
+            if model_name == "gemini-3.5-flash":
                 raise ConnectionError("Primary network error to trigger fallback")
             mock_resp = MagicMock()
             mock_resp.text = "Fallback success response"
@@ -1492,9 +1491,9 @@ async def test_gemini_sdk_request_options_timeout_primary_and_fallback():
 
         assert resp == "Fallback success response"
         # Primary gets 15.0s timeout
-        assert captured_timeouts["gemini-3.6-flash"] == 15.0
+        assert captured_timeouts["gemini-3.5-flash"] == 15.0
         # Fallback gets 10.0s capped timeout
-        assert captured_timeouts["gemini-3.5-flash"] == 10.0
+        assert captured_timeouts["gemini-3.6-flash"] == 10.0
 
 
 @pytest.mark.asyncio
