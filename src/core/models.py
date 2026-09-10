@@ -28,6 +28,7 @@ class Farmer(Base):
     advisories = relationship("Advisory", back_populates="farmer", cascade="all, delete-orphan")
     order_requests = relationship("OrderRequest", back_populates="farmer", cascade="all, delete-orphan")
     scheme_applications = relationship("SchemeApplication", back_populates="farmer", cascade="all, delete-orphan")
+    stock_alerts = relationship("StockAlert", back_populates="farmer", cascade="all, delete-orphan")
 
 
 class FarmerProfile(Base):
@@ -359,3 +360,28 @@ class MarketPrice(Base):
 
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class StockAlert(Base):
+    """Farmer Product Stock Alert Subscription"""
+    __tablename__ = "stock_alerts"
+    __table_args__ = (
+        Index("idx_stock_alerts_lookup", "farmer_id", "product_name", "district", "is_active"),
+        Index("idx_stock_alerts_trigger", "product_name", "district", "is_active"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    farmer_id = Column(UUID(as_uuid=True), ForeignKey("farmers.id", ondelete="CASCADE"), index=True, nullable=False)
+
+    product_name = Column(String(100), nullable=False, index=True)  # Normalized (e.g. "urea", "dap")
+    district = Column(String(100), nullable=False, index=True)
+    state = Column(String(100), nullable=True, default="Telangana")
+
+    is_active = Column(Boolean, default=True, index=True, nullable=False)
+    notified_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # Relationships
+    farmer = relationship("Farmer", back_populates="stock_alerts")

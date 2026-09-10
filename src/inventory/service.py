@@ -20,6 +20,22 @@ class InventoryService:
     async def add_product(self, data: InventoryCreate) -> InventoryResponse:
         item = await self.repository.create(data)
         logger.info(f"Added new product '{item.product_name}' ({item.id}) to shop '{item.shop_id}'")
+        if item.quantity_in_stock > 0 and item.available:
+            try:
+                import asyncio
+                from src.shops.stock_alerts import trigger_stock_alert_notifications
+                asyncio.create_task(
+                    trigger_stock_alert_notifications(
+                        inventory_item_id=item.id,
+                        shop_id=item.shop_id,
+                        product_name=item.product_name,
+                        new_quantity=item.quantity_in_stock,
+                        unit=item.unit,
+                        brand=item.brand,
+                    )
+                )
+            except Exception as alert_err:
+                logger.warning(f"Stock alert background dispatch error: {alert_err}")
         return InventoryResponse.model_validate(item)
 
     async def get_product_by_id(self, item_id: UUID) -> InventoryResponse:
@@ -32,6 +48,15 @@ class InventoryService:
         return InventoryResponse.model_validate(item)
 
     async def update_product(self, item_id: UUID, data: InventoryUpdate) -> InventoryResponse:
+        existing = await self.repository.get_by_id(item_id)
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Inventory product with ID '{item_id}' not found."
+            )
+        prev_qty = existing.quantity_in_stock
+        prev_avail = existing.available
+
         item = await self.repository.update(item_id, data)
         if not item:
             raise HTTPException(
@@ -39,9 +64,37 @@ class InventoryService:
                 detail=f"Inventory product with ID '{item_id}' not found."
             )
         logger.info(f"Updated product '{item.product_name}' ({item_id})")
+
+        # Check restock transition
+        if (prev_qty <= 0 or not prev_avail) and item.quantity_in_stock > 0 and item.available:
+            try:
+                import asyncio
+                from src.shops.stock_alerts import trigger_stock_alert_notifications
+                asyncio.create_task(
+                    trigger_stock_alert_notifications(
+                        inventory_item_id=item.id,
+                        shop_id=item.shop_id,
+                        product_name=item.product_name,
+                        new_quantity=item.quantity_in_stock,
+                        unit=item.unit,
+                        brand=item.brand,
+                    )
+                )
+            except Exception as alert_err:
+                logger.warning(f"Stock alert background dispatch error: {alert_err}")
+
         return InventoryResponse.model_validate(item)
 
     async def update_stock(self, item_id: UUID, data: StockUpdatePayload) -> InventoryResponse:
+        existing = await self.repository.get_by_id(item_id)
+        if not existing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Inventory product with ID '{item_id}' not found."
+            )
+        prev_qty = existing.quantity_in_stock
+        prev_avail = existing.available
+
         item = await self.repository.update_stock(item_id, data)
         if not item:
             raise HTTPException(
@@ -49,6 +102,25 @@ class InventoryService:
                 detail=f"Inventory product with ID '{item_id}' not found."
             )
         logger.info(f"Updated stock for product '{item.product_name}' ({item_id}) to {item.quantity_in_stock}")
+
+        # Transition: previous quantity <= 0 or unavailable -> new quantity > 0 and available
+        if (prev_qty <= 0 or not prev_avail) and item.quantity_in_stock > 0 and item.available:
+            try:
+                import asyncio
+                from src.shops.stock_alerts import trigger_stock_alert_notifications
+                asyncio.create_task(
+                    trigger_stock_alert_notifications(
+                        inventory_item_id=item.id,
+                        shop_id=item.shop_id,
+                        product_name=item.product_name,
+                        new_quantity=item.quantity_in_stock,
+                        unit=item.unit,
+                        brand=item.brand,
+                    )
+                )
+            except Exception as alert_err:
+                logger.warning(f"Stock alert background dispatch error: {alert_err}")
+
         return InventoryResponse.model_validate(item)
 
     async def delete_product(self, item_id: UUID) -> None:

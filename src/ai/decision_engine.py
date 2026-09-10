@@ -40,6 +40,7 @@ class FarmerIntent(str, Enum):
     SOWING = "sowing"
     HARVESTING = "harvesting"
     REMINDERS = "reminders"
+    STOCK_ALERT = "stock_alert"
     IMAGE_DIAGNOSIS = "image_diagnosis"
     GENERAL_FARMING = "general_farming"
     UNKNOWN = "unsupported_unknown"
@@ -342,7 +343,7 @@ FERTILIZER_KEYWORDS_EN = [
 FERTILIZER_KEYWORDS_TE = [
     "ఎరువు", "ఎరువులు", "ఏ ఎరువు వేయాలి", "ఎరువుల యాజమాన్యం", "పోషకాలు", "నత్రజని",
     "భాస్వరం", "పొటాష్", "సూక్ష్మ పోషకాలు", "ఎరువుల మోతాదు", "జింక్ లోపం", "ఎరువు వాడాలి",
-    "బాస్వరం", "యూరియా మోతాదు",
+    "బాస్వరం", "యూరియా మోతాదు", "ఎంత వేయాలి", "యూరియా ఎంత",
 ]
 
 FERTILIZER_KEYWORDS_MULTILINGUAL = [
@@ -464,6 +465,38 @@ REMINDERS_KEYWORDS_TANGLISH = [
     "yaad dilana", "reminder set karo",
 ]
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 11. Stock Alert Keywords (Proactive Input Restock Notifications)
+# ─────────────────────────────────────────────────────────────────────────────
+
+STOCK_ALERT_KEYWORDS_EN = [
+    "alert me when", "notify me when", "tell me when", "when in stock", "comes in stock",
+    "when urea", "stock alert", "set a urea stock alert", "set stock alert",
+    "stop urea alert", "cancel urea stock alert", "cancel stock alert", "stop alert", "cancel alert",
+    "my stock alerts", "show my alerts", "active alerts", "what alerts do i have",
+    "my alerts", "list my alerts", "turn off alert", "disable alert",
+]
+
+STOCK_ALERT_KEYWORDS_TE = [
+    "స్టాక్లోకి వస్తే", "స్టాక్ వస్తే", "దొరికితే నాకు చెప్పండి", "అలర్ట్ పెట్టండి",
+    "అందుబాటులోకి వస్తే చెప్పండి", "స్టాక్ అలర్ట్", "నోటిఫికేషన్ పెట్టండి",
+    "అలర్ట్ ఆపండి", "అలర్ట్స్ ఆపండి", "స్టాక్ అలర్ట్ రద్దు", "నోటిఫికేషన్ ఆపండి",
+    "అలర్ట్ వద్దు", "అలర్ట్ క్యాన్సిల్", "స్టాక్ అలర్ట్ ఆపండి",
+    "నా అలర్ట్స్", "నా స్టాక్ అలర్ట్స్", "యాక్టివ్ అలర్ట్స్", "ఏ అలర్ట్స్ ఉన్నాయి",
+    "నా అలర్ట్ లు", "అలర్ట్స్ లిస్ట్",
+]
+
+STOCK_ALERT_KEYWORDS_MULTILINGUAL = [
+    "स्टॉक में आए तो बताना", "स्टॉक अलर्ट", "उपलब्ध होने पर बताएं",
+    "अलर्ट बंद करें", "मेरे अलर्ट", "ஸ்டாக் வந்தால் சொல்லுங்கள்", "அலர்ட் வைக்கவும்",
+]
+
+STOCK_ALERT_KEYWORDS_TANGLISH = [
+    "stock vasthe cheppandi", "stock vachaka cheppandi", "dorikithe cheppandi",
+    "alert pettandi", "urea alert", "stock alert", "alert aapandi", "alert apandi",
+    "alert vaddu", "alert cancel cheyandi", "naa alerts", "na alerts", "my alerts enti",
+]
+
 
 class AIDecisionEngine:
     """
@@ -505,7 +538,8 @@ class AIDecisionEngine:
             SHOPS_KEYWORDS_EN + SHOPS_KEYWORDS_TE + SHOPS_KEYWORDS_MULTILINGUAL + SHOPS_KEYWORDS_TANGLISH +
             CROP_HEALTH_KEYWORDS_EN + CROP_HEALTH_KEYWORDS_TE + CROP_HEALTH_KEYWORDS_MULTILINGUAL + CROP_HEALTH_KEYWORDS_TANGLISH +
             FERTILIZER_KEYWORDS_EN + FERTILIZER_KEYWORDS_TE + FERTILIZER_KEYWORDS_MULTILINGUAL + FERTILIZER_KEYWORDS_TANGLISH +
-            IRRIGATION_KEYWORDS_EN + IRRIGATION_KEYWORDS_TE + IRRIGATION_KEYWORDS_MULTILINGUAL + IRRIGATION_KEYWORDS_TANGLISH
+            IRRIGATION_KEYWORDS_EN + IRRIGATION_KEYWORDS_TE + IRRIGATION_KEYWORDS_MULTILINGUAL + IRRIGATION_KEYWORDS_TANGLISH +
+            STOCK_ALERT_KEYWORDS_EN + STOCK_ALERT_KEYWORDS_TE + STOCK_ALERT_KEYWORDS_MULTILINGUAL + STOCK_ALERT_KEYWORDS_TANGLISH
         )
 
         for kw in domain_keywords:
@@ -537,7 +571,14 @@ class AIDecisionEngine:
 
         detected: List[FarmerIntent] = []
 
-        # 0. Reminders (prioritized if user asks to be reminded)
+        # 0. Stock Alerts (prioritized if user asks for stock availability alert/cancellation/listing)
+        if (any(kw in msg for kw in STOCK_ALERT_KEYWORDS_EN) or
+            any(kw in msg_original for kw in STOCK_ALERT_KEYWORDS_TE) or
+            any(kw in msg_original for kw in STOCK_ALERT_KEYWORDS_MULTILINGUAL) or
+            any(kw in msg for kw in STOCK_ALERT_KEYWORDS_TANGLISH)):
+            detected.append(FarmerIntent.STOCK_ALERT)
+
+        # 0.1. Reminders (prioritized if user asks to be reminded)
         if (any(kw in msg for kw in REMINDERS_KEYWORDS_EN) or
             any(kw in msg_original for kw in REMINDERS_KEYWORDS_TE) or
             any(kw in msg_original for kw in REMINDERS_KEYWORDS_MULTILINGUAL) or
@@ -674,6 +715,7 @@ class AIDecisionEngine:
         has_weather = FarmerIntent.WEATHER in intents
         has_schemes = FarmerIntent.GOVERNMENT_SCHEMES in intents
         has_shops = FarmerIntent.SHOPS in intents
+        has_stock_alert = FarmerIntent.STOCK_ALERT in intents
         has_crop_advice = any(i in intents for i in [
             FarmerIntent.CROP_ADVICE,
             FarmerIntent.CROP_HEALTH,
@@ -682,6 +724,7 @@ class AIDecisionEngine:
             FarmerIntent.SOWING,
             FarmerIntent.HARVESTING,
             FarmerIntent.REMINDERS,
+            FarmerIntent.STOCK_ALERT,
             FarmerIntent.GENERAL_FARMING,
             FarmerIntent.UNKNOWN,
         ])
@@ -709,8 +752,19 @@ class AIDecisionEngine:
             ai_response_text = ""
 
         # 4. Authoritative Module Routing (Only call enrichments when intent is relevant)
+        # A.0. Stock Availability Alerts
+        if has_stock_alert:
+            try:
+                from src.shops.stock_alerts import handle_stock_alert_query
+                logger.info("[DECISION ENGINE] Routing to stock alerts service")
+                ai_response_text = await handle_stock_alert_query(
+                    db, user_message, ai_response_text, farmer, language=language
+                )
+            except Exception as alert_err:
+                logger.warning(f"Stock alert handling warning: {alert_err}")
+
         # A. Shops / Input Availability
-        if has_shops:
+        if has_shops and not has_stock_alert:
             try:
                 from src.shops.service import enrich_response_with_shops
                 logger.info("[DECISION ENGINE] Routing to shops service")
@@ -786,6 +840,8 @@ class AIDecisionEngine:
                 ai_response_text = get_weather_fallback_response(language)
             elif primary_intent == FarmerIntent.SHOPS and "🏬" not in ai_response_text:
                 ai_response_text = get_shops_fallback_response(language)
+            elif primary_intent == FarmerIntent.STOCK_ALERT and not any(s in ai_response_text for s in ["🔔", "🏬", "✅", "ℹ️"]):
+                ai_response_text = "🔔 యూరియా స్టాక్ అలర్ట్ యాక్టివ్ అయింది." if language == "te" else "🔔 Stock alert has been registered."
             elif not ai_response_text:
                 ai_response_text = get_fallback_response(language)
         elif not ai_response_text:
