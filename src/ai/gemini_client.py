@@ -19,7 +19,7 @@ _initialized = False
 
 # Resilient fallback chain of supported models
 FALLBACK_MODELS = [
-    "gemini-3.6-flash",
+    "gemini-3.5-flash",
 ]
 
 
@@ -34,6 +34,34 @@ def _ensure_initialized():
         genai.configure(api_key=settings.google_gemini_api_key, transport="rest")
         _initialized = True
         logger.info("Gemini SDK initialized successfully with transport='rest'.")
+
+
+def _is_auth_error(e: Exception) -> bool:
+    """
+    Deterministically detects authentication, permission, or invalid API key errors.
+    Prevents pointless fallback attempts that share the same invalid credentials.
+    """
+    if e is None:
+        return False
+    err_str = str(e).lower()
+    err_type = type(e).__name__.lower()
+
+    if "permissiondenied" in err_type or "unauthenticated" in err_type:
+        return True
+    if getattr(e, "code", None) in (401, 403) or getattr(e, "status_code", None) in (401, 403) or getattr(e, "http_status", None) in (401, 403):
+        return True
+
+    auth_signals = (
+        "api_key_invalid",
+        "api key not valid",
+        "invalid api key",
+        "permission_denied",
+        "permissiondenied",
+        "unauthenticated",
+        "unauthorized",
+        "forbidden",
+    )
+    return any(sig in err_str for sig in auth_signals)
 
 
 def _is_quota_exhausted_error(e: Exception) -> bool:
@@ -111,7 +139,7 @@ async def generate_response(
     settings = get_settings()
     if timeout_seconds is None:
         timeout_seconds = float(getattr(settings, "gemini_api_timeout_seconds", 15.0))
-    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.5-flash"
+    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.6-flash"
 
     # Build candidates list starting with primary model
     candidate_models = [primary_model]
@@ -194,6 +222,12 @@ async def generate_response(
                     "Aborting model fallback chain to prevent quota burn."
                 )
                 break
+            if _is_auth_error(e):
+                logger.error(
+                    f"[GEMINI AUTH ERROR] Model {model_name} failed with authentication error after {elapsed:.2f}s: {type(e).__name__} - {e}. "
+                    "Aborting model fallback chain because credentials are invalid."
+                )
+                break
             if _is_timeout_error(e):
                 timeout_count += 1
                 logger.warning(
@@ -233,7 +267,7 @@ async def generate_multimodal_response(
     """
     _ensure_initialized()
     settings = get_settings()
-    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.5-flash"
+    primary_model = model_override or getattr(settings, "gemini_model", None) or "gemini-3.6-flash"
 
     candidate_models = [primary_model]
     for fallback in FALLBACK_MODELS:
@@ -312,6 +346,12 @@ async def generate_multimodal_response(
                 logger.warning(
                     f"[GEMINI MULTIMODAL QUOTA EXHAUSTED] Model {model_name} failed with quota exhaustion after {elapsed:.2f}s: {type(e).__name__} - {e}. "
                     "Aborting model fallback chain to prevent quota burn."
+                )
+                break
+            if _is_auth_error(e):
+                logger.error(
+                    f"[GEMINI MULTIMODAL AUTH ERROR] Model {model_name} failed with authentication error after {elapsed:.2f}s: {type(e).__name__} - {e}. "
+                    "Aborting model fallback chain because credentials are invalid."
                 )
                 break
             if _is_timeout_error(e):
