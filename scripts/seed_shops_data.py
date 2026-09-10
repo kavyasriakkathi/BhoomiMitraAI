@@ -5,13 +5,73 @@ import sys
 # Ensure project root is in sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import secrets
+from typing import Optional, Tuple
+
 from sqlalchemy import select, delete
+from src.auth.constants import UserRole
+from src.auth.security import hash_password
 from src.core.database import AsyncSessionLocal
-from src.core.models import Shop, Inventory
+from src.core.models import Shop, Inventory, UserAccount
+
+DEMO_SHOP_OWNER_EMAIL = "demo.shopowner@bhoomimitra.ai"
+
+
+def get_or_generate_temp_password() -> Tuple[str, bool]:
+    """
+    Returns (password, is_generated).
+    Reads DEMO_SHOP_OWNER_PASSWORD from environment if present.
+    Otherwise generates a cryptographically secure temporary password.
+    No plaintext passwords are ever hardcoded in source code.
+    """
+    env_pw = os.getenv("DEMO_SHOP_OWNER_PASSWORD", "").strip()
+    if env_pw:
+        return env_pw, False
+    alphabet = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+    random_part = "".join(secrets.choice(alphabet) for _ in range(12))
+    return f"BmDemo#{random_part}", True
+
+
+async def seed_demo_shop_owner(db, shop: Shop) -> Tuple[UserAccount, str]:
+    """Seed or update clearly identifiable demo Agri Shop Owner account for testing."""
+    print(f"[SEED] Ensuring demo Agri Shop Owner account '{DEMO_SHOP_OWNER_EMAIL}'...")
+    temp_password, _ = get_or_generate_temp_password()
+    hashed_pw = hash_password(temp_password)
+
+    user_res = await db.execute(
+        select(UserAccount).where(
+            (UserAccount.email == DEMO_SHOP_OWNER_EMAIL) | (UserAccount.shop_id == shop.id)
+        )
+    )
+    existing_user = user_res.scalar_one_or_none()
+
+    if not existing_user:
+        demo_user = UserAccount(
+            email=DEMO_SHOP_OWNER_EMAIL,
+            password_hash=hashed_pw,
+            role=UserRole.SHOP_OWNER.value,
+            shop_id=shop.id,
+            is_active=True,
+        )
+        db.add(demo_user)
+        await db.flush()
+        print(f"[CREATED] Demo Shop Owner account created: {DEMO_SHOP_OWNER_EMAIL} ({demo_user.id})")
+    else:
+        demo_user = existing_user
+        demo_user.email = DEMO_SHOP_OWNER_EMAIL
+        demo_user.role = UserRole.SHOP_OWNER.value
+        demo_user.shop_id = shop.id
+        demo_user.is_active = True
+        demo_user.password_hash = hashed_pw
+        db.add(demo_user)
+        await db.flush()
+        print(f"[UPDATED] Demo Shop Owner account updated: {DEMO_SHOP_OWNER_EMAIL} ({demo_user.id})")
+
+    return demo_user, temp_password
 
 
 async def seed_data():
-    """Seed real Agri Shop 'Mallanna Fertilizer Seeds and Pesticides' and Inventory into database."""
+    """Seed real Agri Shop 'Mallanna Fertilizer Seeds and Pesticides', Inventory, and Demo Shop Owner."""
     async with AsyncSessionLocal() as db:
         print("[SEED] Cleaning old sample shop data...")
 
@@ -152,8 +212,27 @@ async def seed_data():
                 db.add(existing_item)
                 print(f"  -> Updated Product: {item_data['product_name']} - RS {item_data['price']}")
 
+        # Seed or update Demo Agri Shop Owner account
+        demo_user, temp_password = await seed_demo_shop_owner(db, shop)
+
         await db.commit()
-        print("[SUCCESS] Real shop seeding completed successfully!")
+        print("[SUCCESS] Real shop and demo shop owner seeding completed successfully!")
+        print("=" * 65)
+        print("BHOOMIMITRA AI — DEMO AGRI SHOP OWNER TEST CREDENTIALS")
+        print("=" * 65)
+        print(f"  Email:              {demo_user.email}")
+        print(f"  Temporary Password: {temp_password}")
+        print(f"  Role:               {demo_user.role}")
+        print(f"  Linked Shop:        {shop.shop_name} ({shop.id})")
+        print("=" * 65)
+        return {
+            "shop_id": str(shop.id),
+            "shop_name": shop.shop_name,
+            "user_id": str(demo_user.id),
+            "email": demo_user.email,
+            "role": demo_user.role,
+            "temporary_password": temp_password,
+        }
 
 
 if __name__ == "__main__":

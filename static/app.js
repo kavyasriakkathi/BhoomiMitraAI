@@ -202,6 +202,20 @@ function hideAuthAlert() {
   if (banner) banner.style.display = 'none';
 }
 
+function formatAuthError(data, defaultMsg) {
+  if (!data) return defaultMsg;
+  const raw = (data.error && data.error.message) || data.detail || data.message;
+  if (!raw) return defaultMsg;
+  if (typeof raw === 'string') return raw;
+  if (Array.isArray(raw)) {
+    return raw.map(e => (typeof e === 'object' && e ? (e.msg || JSON.stringify(e)) : String(e))).join('; ');
+  }
+  if (typeof raw === 'object') {
+    return raw.msg || raw.message || JSON.stringify(raw);
+  }
+  return String(raw);
+}
+
 async function handleAuthLogin(e) {
   e.preventDefault();
   hideAuthAlert();
@@ -240,7 +254,7 @@ async function handleAuthLogin(e) {
 
       voiceEngine.speakText(`Welcome back, ${currentUser.email.split('@')[0]}!`, currentLanguage);
     } else {
-      const errMsg = (data && data.error && data.error.message) || data.detail || "Authentication failed. Please check credentials.";
+      const errMsg = formatAuthError(data, "Authentication failed. Please check credentials.");
       showAuthAlert(`⚠️ ${errMsg}`, true);
     }
   } catch (err) {
@@ -289,7 +303,7 @@ async function handleAuthRegister(e) {
         if (loginEmailInput) loginEmailInput.value = email;
       }, 1200);
     } else {
-      const errMsg = (data && data.error && data.error.message) || data.detail || "Registration failed.";
+      const errMsg = formatAuthError(data, "Registration failed.");
       showAuthAlert(`⚠️ ${errMsg}`, true);
     }
   } catch (err) {
