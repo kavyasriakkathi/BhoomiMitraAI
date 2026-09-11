@@ -461,12 +461,55 @@ def _detect_shop_intent(query_lower: str, query_text: str) -> bool:
     return False
 
 
-def _extract_district_from_query(query_text: str) -> Optional[str]:
+def _extract_district_from_query(query_text: Optional[str]) -> Optional[str]:
     """Extract known district or city from farmer query in English or Telugu."""
+    if not query_text or not isinstance(query_text, str):
+        return None
     q = query_text.lower()
     for kw, dist_name in _KNOWN_DISTRICTS.items():
         if kw in q:
             return dist_name
+    return None
+
+
+def resolve_shop_district(
+    district: Optional[str] = None,
+    address: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Safely resolves canonical district for a shop using the curated whitelist.
+    Handles:
+    - Shop with district populated (direct match or canonical extraction, e.g. 'Main Bazar, Warangal' -> 'Warangal')
+    - Shop with NULL/empty district and valid address (e.g. None, 'Main Bazar, Warangal' -> 'Warangal')
+    - Bilingual district representation (Telugu 'వరంగల్' or English 'Warangal' -> 'Warangal')
+    - Invalid address/district with no curated match safely returns None.
+    Does NOT use broad arbitrary address substring matching.
+    """
+    # 1. Try district field first if present
+    if district and str(district).strip():
+        cleaned_dist = str(district).strip()
+        lower_dist = cleaned_dist.lower()
+        if lower_dist in _KNOWN_DISTRICTS:
+            return _KNOWN_DISTRICTS[lower_dist]
+        if cleaned_dist in _KNOWN_DISTRICTS:
+            return _KNOWN_DISTRICTS[cleaned_dist]
+        extracted = _extract_district_from_query(cleaned_dist)
+        if extracted:
+            return extracted
+
+    # 2. Fallback to address field if district is missing, empty, or unresolvable
+    if address and str(address).strip():
+        cleaned_addr = str(address).strip()
+        lower_addr = cleaned_addr.lower()
+        if lower_addr in _KNOWN_DISTRICTS:
+            return _KNOWN_DISTRICTS[lower_addr]
+        if cleaned_addr in _KNOWN_DISTRICTS:
+            return _KNOWN_DISTRICTS[cleaned_addr]
+        extracted = _extract_district_from_query(cleaned_addr)
+        if extracted:
+            return extracted
+
+    # 3. Safe fallback: no curated district could be resolved
     return None
 
 
@@ -631,10 +674,13 @@ async def enrich_response_with_shops(
         ):
             dist = haversine_distance(latitude, longitude, shop.latitude, shop.longitude)
 
+        shop_dist = resolve_shop_district(shop.district, shop.address)
+        farmer_dist_canon = resolve_shop_district(district) if district else None
+
         district_match = (
-            district is not None
-            and shop.district is not None
-            and district.lower() in shop.district.lower()
+            farmer_dist_canon is not None
+            and shop_dist is not None
+            and farmer_dist_canon.lower() == shop_dist.lower()
         )
 
         # Production Guard: If farmer location is known (GPS or District):
@@ -648,7 +694,7 @@ async def enrich_response_with_shops(
             elif district_match:
                 is_valid_local = True
                 rank = 2
-            elif shop.latitude is None and shop.district is None:
+            elif shop.latitude is None and shop.district is None and shop_dist is None:
                 is_valid_local = True
                 rank = 3
             else:

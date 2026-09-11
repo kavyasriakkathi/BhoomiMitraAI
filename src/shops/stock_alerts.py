@@ -20,6 +20,7 @@ from src.shops.service import (
     _PRODUCT_MAPPING,
     _KNOWN_DISTRICTS,
     _extract_district_from_query,
+    resolve_shop_district,
     _resolve_farmer_location,
     _detect_product_from_query,
     enrich_response_with_shops,
@@ -440,15 +441,12 @@ async def trigger_stock_alert_notifications(
             return 0
 
         # Safe district resolution: shop.district or safe whitelist fallback from shop.address
-        shop_district = (shop.district or "").strip()
-        if not shop_district and shop.address:
-            extracted_from_addr = _extract_district_from_query(shop.address)
-            if extracted_from_addr:
-                shop_district = extracted_from_addr
-                logger.info(
-                    f"[STOCK ALERT TRIGGER] Shop {shop_id} district is empty; "
-                    f"resolved '{shop_district}' from shop address '{shop.address}'."
-                )
+        shop_district = resolve_shop_district(shop.district, shop.address)
+        if not (shop.district or "").strip() and shop_district and shop.address:
+            logger.info(
+                f"[STOCK ALERT TRIGGER] Shop {shop_id} district is empty; "
+                f"resolved '{shop_district}' from shop address '{shop.address}'."
+            )
 
         if not shop_district:
             logger.warning(

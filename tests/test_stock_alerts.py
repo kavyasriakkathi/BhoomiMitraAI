@@ -14,6 +14,7 @@ from src.shops.stock_alerts import (
     list_farmer_alerts,
     handle_stock_alert_query,
     trigger_stock_alert_notifications,
+    resolve_shop_district,
     _normalize_product_name,
     _canonicalize_district,
     _get_district_match_variants,
@@ -551,6 +552,20 @@ def test_bilingual_district_canonicalization_and_variants():
     assert _canonicalize_district(None) is None
     assert _canonicalize_district("") is None
 
+    # resolve_shop_district resolution logic
+    assert resolve_shop_district(None, "Main Bazar, Warangal") == "Warangal"
+    assert resolve_shop_district("", "Main Bazar, Warangal") == "Warangal"
+    assert resolve_shop_district("Main Bazar, Warangal", None) == "Warangal"
+    assert resolve_shop_district("Warangal", None) == "Warangal"
+    assert resolve_shop_district("వరంగల్", None) == "Warangal"
+    assert resolve_shop_district(None, "వరంగల్, మెయిన్ బజార్") == "Warangal"
+    assert resolve_shop_district("Unknown Area 123", "Main Bazar, Warangal") == "Warangal"
+    # Unrelated or invalid address safely returns None
+    assert resolve_shop_district(None, "Plot 42, Sector 9, Industrial Estate") is None
+    assert resolve_shop_district("Unknown Area 123", "Plot 42") is None
+    assert resolve_shop_district(None, None) is None
+    assert resolve_shop_district("", "") is None
+
     # Matching variants
     w_variants = _get_district_match_variants("Warangal")
     assert "Warangal" in w_variants
@@ -561,6 +576,7 @@ def test_bilingual_district_canonicalization_and_variants():
     assert "Warangal" in te_variants
     assert "warangal" in te_variants
     assert "వరంగల్" in te_variants
+    assert set(w_variants) == set(te_variants)
 
 
 @pytest.mark.asyncio
@@ -956,3 +972,98 @@ async def test_bilingual_cancel_alert(db_session):
     cancelled = await cancel_alert(db_session, farmer, product_name="urea", district="Warangal")
     assert cancelled == 1
     assert len(await list_farmer_alerts(db_session, farmer)) == 0
+
+
+@pytest.mark.asyncio
+async def test_stock_siren_district_resolution_regression(db_session):
+    """
+    Regression test for Stock Siren district resolution:
+    - Shop with address 'Main Bazar, Warangal' and district=None must resolve to Warangal.
+    - Matches Telugu active StockAlert for 'వరంగల్'.
+    - Urgent WhatsApp notification sent with verified quantity, shop, location, timestamp, and sell-out warning.
+    - Alert deactivated and notified_at recorded.
+    - Re-triggering does not send duplicate notifications.
+    """
+    farmer = Farmer(phone_number="919876543310", preferred_language="te")
+    db_session.add(farmer)
+    await db_session.commit()
+
+    alert, is_new = await create_or_reactivate_alert(
+        db_session, farmer, "urea", "వరంగల్"
+    )
+    assert is_new is True
+    assert alert.is_active is True
+
+    # Shop with district=None, but address containing 'Main Bazar, Warangal'
+    shop = Shop(
+        id=uuid4(),
+        shop_name="Rythu Mitra Fertilizers",
+        owner_name="Srinivas Rao",
+        phone_number="9876510010",
+        address="Main Bazar, Warangal",
+        district=None,
+        state="Telangana",
+        status="active",
+    )
+    db_session.add(shop)
+    await db_session.commit()
+
+    # Verify resolve_shop_district correctly resolves
+    assert resolve_shop_district(shop.district, shop.address) == "Warangal"
+
+    inv = Inventory(
+        id=uuid4(),
+        shop_id=shop.id,
+        product_name="Urea Fertilizer 45kg",
+        category="Fertilizers",
+        brand="IFFCO",
+        unit="bag",
+        price=268.0,
+        quantity_in_stock=0,
+        available=False,
+    )
+    db_session.add(inv)
+    await db_session.commit()
+
+    with patch("src.gateway.whatsapp_client.send_text_message", new_callable=AsyncMock) as mock_send:
+        mock_send.return_value = "wamid.siren.test01"
+
+        notified_count = await trigger_stock_alert_notifications(
+            inventory_item_id=inv.id,
+            shop_id=shop.id,
+            product_name="Urea Fertilizer 45kg",
+            new_quantity=50,
+            unit="bag",
+            brand="IFFCO",
+            db_session=db_session,
+        )
+
+        assert notified_count == 1
+        assert mock_send.call_count == 1
+        msg = mock_send.call_args[1]["message_text"]
+        assert "Rythu Mitra Fertilizers" in msg
+        assert "Warangal" in msg or "వరంగల్" in msg
+        assert "Main Bazar, Warangal" in msg
+        assert "50 bag" in msg
+        assert "హెచ్చరిక" in msg or "Warning" in msg
+        assert "UTC" in msg
+
+    # Alert must now be inactive and notified_at must be populated
+    alerts = await list_farmer_alerts(db_session, farmer)
+    assert len(alerts) == 0  # list_farmer_alerts returns only active alerts
+    assert alert.is_active is False
+    assert alert.notified_at is not None
+
+    # Re-triggering must NOT duplicate notification
+    with patch("src.gateway.whatsapp_client.send_text_message", new_callable=AsyncMock) as mock_send2:
+        second_notified = await trigger_stock_alert_notifications(
+            inventory_item_id=inv.id,
+            shop_id=shop.id,
+            product_name="Urea Fertilizer 45kg",
+            new_quantity=50,
+            unit="bag",
+            brand="IFFCO",
+            db_session=db_session,
+        )
+        assert second_notified == 0
+        assert mock_send2.call_count == 0
