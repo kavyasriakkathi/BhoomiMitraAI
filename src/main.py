@@ -104,6 +104,7 @@ async def lifespan(app: FastAPI):
         logger.info("Database connection validated and tables created successfully.")
 
         # Environment-controlled one-time demo seed (active only when DEMO_SHOP_OWNER_SEED=true)
+        settings = get_settings()
         if settings.demo_shop_owner_seed:
             from src.core.database import AsyncSessionLocal
             from src.auth.demo_seed import ensure_demo_shop_owner_seeded
