@@ -417,7 +417,12 @@ async def trigger_stock_alert_notifications(
         Number of farmers successfully notified.
     """
     from src.core.database import AsyncSessionLocal
-    from src.gateway.whatsapp_client import send_text_message
+    from src.gateway.whatsapp_client import (
+        send_text_message,
+        upload_media_bytes,
+        send_audio_message,
+    )
+    from src.language.service import synthesize_speech
     from src.config import get_settings
 
     norm_product = _normalize_product_name(product_name)
@@ -487,6 +492,28 @@ async def trigger_stock_alert_notifications(
                 logger.debug(f"Redis client initialization error: {r_conn_err}")
                 redis_client = None
 
+        # Prepare Stock Siren voice notification once per batch (batch-level caching)
+        batch_media_id: Optional[str] = None
+        try:
+            prod_te_voice = "యూరియా" if norm_product == "urea" else product_name
+            # Short, urgent Telugu voice script
+            voice_script = (
+                f"రైతు సోదరులారా, అత్యవసర స్టాక్ సమాచారం. "
+                f"{shop_district} లోని {shop.shop_name} వద్ద {prod_te_voice} స్టాక్ అందుబాటులోకి వచ్చింది. "
+                f"ప్రస్తుతం {new_quantity} {unit}ల స్టాక్ ఉంది. "
+                f"స్టాక్ త్వరగా అయిపోయే అవకాశం ఉంది, వెంటనే దుకాణాన్ని సంప్రదించండి."
+            )
+            audio_bytes = await synthesize_speech(voice_script, language_code="te-IN")
+            if audio_bytes:
+                batch_media_id = await upload_media_bytes(
+                    file_bytes=audio_bytes,
+                    mime_type="audio/ogg",
+                    filename="stock_siren_alert.ogg",
+                )
+        except Exception as audio_prep_err:
+            logger.warning(f"[STOCK SIREN] Voice alert synthesis/upload skipped: {audio_prep_err}")
+            batch_media_id = None
+
         notified_count = 0
 
         for alert, farmer in matching_subscribers:
@@ -502,44 +529,47 @@ async def trigger_stock_alert_notifications(
                     logger.debug(f"Redis lock check error: {r_err}")
 
             lang = farmer.preferred_language or "te"
+            updated_time_str = datetime.utcnow().strftime("%I:%M %p").lstrip("0")
 
-            # Format restock notification message
+            # Format Stock Siren restock notification message
             if lang == "te":
                 prod_te = "యూరియా" if norm_product == "urea" else product_name
                 brand_str = brand if brand else "ప్రామాణిక బ్రాండ్"
                 phone_str = shop.phone_number if shop.phone_number else "లభ్యత లేదు"
                 notification_text = (
-                    f"🔔 {prod_te} స్టాక్ అలర్ట్\n\n"
-                    f"మీ ప్రాంతంలో ({shop_district}) {prod_te} ప్రస్తుతం స్టాక్లో ఉంది.\n\n"
+                    f"🚨🔔 అత్యవసర స్టాక్ అలర్ట్ (Stock Siren)!\n\n"
+                    f"{prod_te} ప్రస్తుతం మీ ప్రాంతంలో ({shop_district}) స్టాక్ అందుబాటులోకి వచ్చింది.\n\n"
                     f"🏪 దుకాణం: {shop.shop_name}\n"
-                    f"📍 చిరునామా: {shop.address}\n"
-                    f"📦 స్టాక్: {new_quantity} {unit}s\n"
+                    f"📍 జిల్లా / చిరునామా: {shop_district}, {shop.address}\n"
+                    f"📦 ధృవీకరించిన ప్రస్తుత స్టాక్: {new_quantity} {unit}s\n"
                     f"🏷️ బ్రాండ్: {brand_str}\n"
+                    f"🕒 స్టాక్ అప్‌డేట్ సమయం: {updated_time_str} UTC\n"
                     f"📞 ఫోన్: {phone_str}\n\n"
-                    f"⚠️ గమనిక: వెళ్లే ముందు దుకాణానికి ఫోన్ చేసి స్టాక్ను నిర్ధారించుకోండి."
+                    f"⚠️ హెచ్చరిక: స్టాక్ త్వరగా అయిపోయే అవకాశం ఉంది! వెళ్లే ముందు వెంటనే దుకాణానికి ఫోన్ చేసి నిర్ధారించుకోండి."
                 )
             else:
                 brand_str = brand if brand else "Standard Brand"
                 phone_str = shop.phone_number if shop.phone_number else "N/A"
                 notification_text = (
-                    f"🔔 {norm_product.title()} Stock Alert\n\n"
-                    f"{norm_product.title()} is now in stock in your area ({shop_district}).\n\n"
+                    f"🚨🔔 Urgent Stock Siren!\n\n"
+                    f"{norm_product.title()} is now back IN STOCK in your area ({shop_district}).\n\n"
                     f"🏪 Shop: {shop.shop_name}\n"
-                    f"📍 Address: {shop.address}\n"
-                    f"📦 Stock: {new_quantity} {unit}s\n"
+                    f"📍 District / Address: {shop_district}, {shop.address}\n"
+                    f"📦 Verified Stock: {new_quantity} {unit}s\n"
                     f"🏷️ Brand: {brand_str}\n"
+                    f"🕒 Updated: {updated_time_str} UTC\n"
                     f"📞 Phone: {phone_str}\n\n"
-                    f"⚠️ Note: Please call the shop to confirm availability before visiting."
+                    f"⚠️ Warning: High demand product, stock may sell out quickly! Please call the shop immediately to reserve or confirm."
                 )
 
-            # Send WhatsApp message
+            # Send WhatsApp text message
             wa_msg_id = await send_text_message(
                 to_phone=farmer.phone_number,
                 message_text=notification_text,
             )
 
             if wa_msg_id:
-                # Successfully sent -> Deactivate alert and stamp notification time
+                # Successfully sent text -> Deactivate alert and stamp notification time
                 alert.is_active = False
                 alert.notified_at = datetime.utcnow()
                 alert.updated_at = datetime.utcnow()
@@ -549,6 +579,18 @@ async def trigger_stock_alert_notifications(
                     f"[STOCK ALERT TRIGGER] Successfully notified farmer {farmer.phone_number} "
                     f"(Alert ID {alert.id}, WA ID {wa_msg_id})."
                 )
+
+                # Send Stock Siren Voice Audio (Fail-soft)
+                if batch_media_id:
+                    try:
+                        await send_audio_message(
+                            to_phone=farmer.phone_number,
+                            media_id=batch_media_id,
+                        )
+                    except Exception as wa_audio_err:
+                        logger.warning(
+                            f"[STOCK SIREN] Audio dispatch to {farmer.phone_number} failed soft: {wa_audio_err}"
+                        )
             else:
                 logger.error(
                     f"[STOCK ALERT TRIGGER] Failed to deliver WhatsApp message to {farmer.phone_number}. "

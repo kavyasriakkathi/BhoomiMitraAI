@@ -2,7 +2,7 @@ import os
 import asyncio
 import inspect
 from typing import Optional
-from google.cloud import speech
+from google.cloud import speech, texttospeech
 
 from src.config import get_settings
 from src.core.logging import logger
@@ -18,12 +18,19 @@ class LanguageService:
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = self.settings.google_application_credentials
             
         self._google_client: Optional[speech.SpeechAsyncClient] = None
+        self._google_tts_client: Optional[texttospeech.TextToSpeechAsyncClient] = None
 
     @property
     def google_client(self) -> speech.SpeechAsyncClient:
         if not self._google_client:
             self._google_client = speech.SpeechAsyncClient()
         return self._google_client
+
+    @property
+    def google_tts_client(self) -> texttospeech.TextToSpeechAsyncClient:
+        if not self._google_tts_client:
+            self._google_tts_client = texttospeech.TextToSpeechAsyncClient()
+        return self._google_tts_client
 
     async def transcribe_audio(self, audio_bytes: bytes, mime_type: str) -> TranscriptionResponse:
         """
@@ -139,3 +146,80 @@ class LanguageService:
             confidence=0.95,
             provider_used="whisper"
         )
+
+    async def synthesize_speech(
+        self,
+        text: str,
+        language_code: str = "te-IN",
+        voice_name: Optional[str] = None,
+        ssml_gender: Optional[str] = None,
+    ) -> Optional[bytes]:
+        """
+        Synthesizes text into speech audio bytes using Google Cloud Text-to-Speech.
+        Returns OGG_OPUS encoded audio bytes (native format for WhatsApp voice notes).
+        Fails soft by returning None on error so caller can proceed.
+        """
+        if not text or not str(text).strip():
+            logger.warning("[TTS] Received empty text for speech synthesis.")
+            return None
+
+        clean_text = str(text).strip()
+        logger.info(f"[TTS] Synthesizing speech (Length: {len(clean_text)} chars, Lang: {language_code})")
+
+        try:
+            synthesis_input = texttospeech.SynthesisInput(text=clean_text)
+
+            voice_params = {"language_code": language_code}
+            if voice_name:
+                voice_params["name"] = voice_name
+            if ssml_gender:
+                gender_enum = getattr(texttospeech.SsmlVoiceGender, ssml_gender.upper(), None)
+                if gender_enum:
+                    voice_params["ssml_gender"] = gender_enum
+
+            voice = texttospeech.VoiceSelectionParams(**voice_params)
+
+            audio_config = texttospeech.AudioConfig(
+                audio_encoding=texttospeech.AudioEncoding.OGG_OPUS
+            )
+
+            tts_timeout = float(getattr(self.settings, "tts_api_timeout_seconds", 10.0))
+            call_res = self.google_tts_client.synthesize_speech(
+                input=synthesis_input,
+                voice=voice,
+                audio_config=audio_config,
+            )
+            if inspect.isawaitable(call_res):
+                response = await asyncio.wait_for(call_res, timeout=tts_timeout)
+            else:
+                response = call_res
+
+            if response and response.audio_content:
+                logger.info(f"[TTS] Successfully synthesized speech ({len(response.audio_content)} bytes)")
+                return response.audio_content
+
+            logger.warning("[TTS] Empty audio content returned from Google TTS.")
+            return None
+
+        except (asyncio.TimeoutError, TimeoutError) as te:
+            logger.warning(f"[TTS] Google TTS API timed out: {te}")
+            return None
+        except Exception as e:
+            logger.exception(f"[TTS] Google TTS synthesis failed: {e}")
+            return None
+
+
+async def synthesize_speech(
+    text: str,
+    language_code: str = "te-IN",
+    voice_name: Optional[str] = None,
+    ssml_gender: Optional[str] = None,
+) -> Optional[bytes]:
+    """Convenience module function for speech synthesis."""
+    service = LanguageService()
+    return await service.synthesize_speech(
+        text=text,
+        language_code=language_code,
+        voice_name=voice_name,
+        ssml_gender=ssml_gender,
+    )

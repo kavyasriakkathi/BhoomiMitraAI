@@ -329,3 +329,149 @@ async def download_media_bytes(media_id: str) -> Optional[tuple[bytes, str]]:
 
     logger.error(f"Failed to download media bytes for {media_id} after {MAX_RETRIES} attempts.")
     return None
+
+
+async def upload_media_bytes(
+    file_bytes: bytes,
+    mime_type: str = "audio/ogg",
+    filename: str = "stock_alert.ogg",
+) -> Optional[str]:
+    """
+    Uploads media binary data to Meta Cloud API and returns the media_id.
+    """
+    if not file_bytes:
+        logger.warning("[WHATSAPP MEDIA UPLOAD] Received empty file bytes.")
+        return None
+
+    settings = get_settings()
+    if not settings.whatsapp_api_token or not settings.whatsapp_phone_number_id:
+        logger.error("[WHATSAPP MEDIA UPLOAD] Credentials not configured.")
+        return None
+
+    url = f"{META_BASE_URL}/{settings.whatsapp_phone_number_id}/media"
+    headers = {
+        "Authorization": f"Bearer {settings.whatsapp_api_token}",
+    }
+    files = {
+        "file": (filename, file_bytes, mime_type),
+    }
+    data = {
+        "messaging_product": "whatsapp",
+        "type": mime_type,
+    }
+
+    wa_timeout = float(getattr(settings, "whatsapp_api_timeout_seconds", 15.0))
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=wa_timeout) as client:
+                response = await client.post(url, headers=headers, files=files, data=data)
+
+            if response.status_code == 200:
+                res_data = response.json()
+                media_id = res_data.get("id")
+                logger.info(f"[WHATSAPP MEDIA UPLOAD SUCCESS] Uploaded media ({len(file_bytes)} bytes, media_id={media_id})")
+                return media_id
+
+            if response.status_code == 429:
+                import asyncio
+                await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+                continue
+
+            logger.error(
+                f"[WHATSAPP MEDIA UPLOAD ERROR] HTTP {response.status_code} — {response.text}"
+            )
+            return None
+
+        except httpx.TimeoutException:
+            if attempt < MAX_RETRIES:
+                import asyncio
+                await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+                continue
+            return None
+        except Exception as e:
+            logger.exception(f"[WHATSAPP MEDIA UPLOAD UNEXPECTED ERROR]: {e}")
+            return None
+
+    return None
+
+
+async def send_audio_message(
+    to_phone: str,
+    media_id: Optional[str] = None,
+    audio_url: Optional[str] = None,
+) -> Optional[str]:
+    """
+    Send an audio/voice message to a farmer via WhatsApp Cloud API.
+    Can accept either a Meta media_id (recommended) or a public HTTPS audio_url.
+    Returns the Meta message ID on success, or None on failure.
+    """
+    if not to_phone or not str(to_phone).strip():
+        logger.error("[WHATSAPP AUDIO OUTBOUND] Recipient phone number missing.")
+        return None
+    if not media_id and not audio_url:
+        logger.error("[WHATSAPP AUDIO OUTBOUND] Neither media_id nor audio_url provided.")
+        return None
+
+    to_phone = str(to_phone).strip()
+    settings = get_settings()
+    if not settings.whatsapp_api_token or not settings.whatsapp_phone_number_id:
+        logger.error("[WHATSAPP AUDIO OUTBOUND] Credentials not configured.")
+        return None
+
+    url = f"{META_BASE_URL}/{settings.whatsapp_phone_number_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {settings.whatsapp_api_token}",
+        "Content-Type": "application/json",
+    }
+
+    audio_payload = {}
+    if media_id:
+        audio_payload["id"] = media_id
+    elif audio_url:
+        audio_payload["link"] = audio_url
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_phone,
+        "type": "audio",
+        "audio": audio_payload,
+    }
+
+    masked_phone = to_phone[:4] + "****" + to_phone[-4:] if len(to_phone) >= 7 else "***"
+    wa_timeout = float(getattr(settings, "whatsapp_api_timeout_seconds", 15.0))
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            async with httpx.AsyncClient(timeout=wa_timeout) as client:
+                response = await client.post(url, headers=headers, json=payload)
+
+            if response.status_code == 200:
+                data = response.json()
+                wa_message_id = data.get("messages", [{}])[0].get("id")
+                logger.info(
+                    f"[WHATSAPP AUDIO OUTBOUND SUCCESS] Audio delivered to {masked_phone} (wa_id={wa_message_id})"
+                )
+                return wa_message_id
+
+            if response.status_code == 429:
+                import asyncio
+                await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+                continue
+
+            logger.error(
+                f"[WHATSAPP AUDIO OUTBOUND ERROR] HTTP {response.status_code} sending audio to {masked_phone}: {response.text}"
+            )
+            return None
+
+        except httpx.TimeoutException:
+            if attempt < MAX_RETRIES:
+                import asyncio
+                await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+                continue
+            return None
+        except Exception as e:
+            logger.exception(f"[WHATSAPP AUDIO OUTBOUND ERROR] Exception sending to {masked_phone}: {e}")
+            return None
+
+    return None
