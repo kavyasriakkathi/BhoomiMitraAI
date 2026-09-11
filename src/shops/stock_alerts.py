@@ -18,6 +18,8 @@ from src.core.logging import logger
 from src.core.models import StockAlert, Farmer, Shop, Inventory
 from src.shops.service import (
     _PRODUCT_MAPPING,
+    _KNOWN_DISTRICTS,
+    _extract_district_from_query,
     _resolve_farmer_location,
     _detect_product_from_query,
     enrich_response_with_shops,
@@ -33,6 +35,46 @@ def _normalize_product_name(query_or_product: str) -> str:
         if kw in q_lower or kw in query_or_product:
             return norm
     return q_lower
+
+
+def _canonicalize_district(district_text: Optional[str]) -> Optional[str]:
+    """
+    Normalizes district names across English, Telugu, and casing/whitespace.
+    Uses curated _KNOWN_DISTRICTS mapping (e.g. 'వరంగల్' -> 'Warangal', ' warangal ' -> 'Warangal').
+    Returns canonical district name if recognized, or cleaned original string if unknown.
+    Does not invent districts.
+    """
+    if not district_text or not str(district_text).strip():
+        return None
+    cleaned = str(district_text).strip()
+    lower = cleaned.lower()
+    if lower in _KNOWN_DISTRICTS:
+        return _KNOWN_DISTRICTS[lower]
+    if cleaned in _KNOWN_DISTRICTS:
+        return _KNOWN_DISTRICTS[cleaned]
+    # Check substring match against known districts (e.g. from address string)
+    extracted = _extract_district_from_query(cleaned)
+    if extracted:
+        return extracted
+    return cleaned
+
+
+def _get_district_match_variants(district_text: Optional[str]) -> List[str]:
+    """
+    Returns all recognized bilingual variants for a district.
+    E.g., for 'Warangal' or 'వరంగల్', returns:
+    ['Warangal', 'warangal', 'వరంగల్', 'hanamkonda', 'హనుమకొండ', ...]
+    """
+    if not district_text or not str(district_text).strip():
+        return []
+    cleaned = str(district_text).strip()
+    canon = _canonicalize_district(cleaned) or cleaned
+    variants = {canon, canon.lower(), cleaned, cleaned.lower()}
+    for kw, target_canon in _KNOWN_DISTRICTS.items():
+        if target_canon.lower() == canon.lower():
+            variants.add(kw)
+            variants.add(target_canon)
+    return list(variants)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -113,12 +155,13 @@ async def create_or_reactivate_alert(
     norm_product = _normalize_product_name(product_name)
     clean_dist = district.strip()
     clean_state = state.strip() if state else "Telangana"
+    dist_variants = _get_district_match_variants(clean_dist)
 
-    # Check for existing alert for this farmer + product + district
+    # Check for existing alert for this farmer + product + district (bilingual matching)
     stmt = select(StockAlert).where(
         StockAlert.farmer_id == farmer.id,
         StockAlert.product_name == norm_product,
-        StockAlert.district.ilike(clean_dist),
+        or_(*[StockAlert.district.ilike(v) for v in dist_variants]) if dist_variants else StockAlert.district.ilike(clean_dist),
     )
     result = await db.execute(stmt)
     existing_alert = result.scalar_one_or_none()
@@ -175,7 +218,11 @@ async def cancel_alert(
         norm_prod = _normalize_product_name(product_name)
         conditions.append(StockAlert.product_name == norm_prod)
     if district:
-        conditions.append(StockAlert.district.ilike(district.strip()))
+        dist_variants = _get_district_match_variants(district)
+        if dist_variants:
+            conditions.append(or_(*[StockAlert.district.ilike(v) for v in dist_variants]))
+        else:
+            conditions.append(StockAlert.district.ilike(district.strip()))
 
     stmt = select(StockAlert).where(and_(*conditions))
     result = await db.execute(stmt)
@@ -283,6 +330,9 @@ async def handle_stock_alert_query(
 
     # Step A: IMMEDIATE AVAILABILITY CHECK
     # Check if this product is ALREADY in stock in this district
+    dist_variants = _get_district_match_variants(district)
+    shop_district_filters = [Shop.district.ilike(v) for v in dist_variants]
+
     stmt_check = (
         select(Inventory, Shop)
         .join(Shop, Inventory.shop_id == Shop.id)
@@ -290,7 +340,7 @@ async def handle_stock_alert_query(
             Inventory.available == True,
             Inventory.quantity_in_stock > 0,
             Shop.status == "active",
-            Shop.district.ilike(district.strip()),
+            or_(*shop_district_filters) if shop_district_filters else Shop.district.ilike(district.strip()),
             or_(
                 Inventory.product_name.ilike(f"%{norm_product}%"),
                 Inventory.category.ilike(f"%{norm_product}%"),
@@ -380,20 +430,37 @@ async def trigger_stock_alert_notifications(
         # 1. Fetch Shop details
         shop_res = await db.execute(select(Shop).where(Shop.id == shop_id))
         shop = shop_res.scalar_one_or_none()
-        if not shop or not shop.district:
-            logger.warning(f"[STOCK ALERT TRIGGER] Shop {shop_id} not found or missing district.")
+        if not shop:
+            logger.warning(f"[STOCK ALERT TRIGGER] Shop {shop_id} not found.")
             return 0
 
-        shop_district = shop.district.strip()
+        # Safe district resolution: shop.district or safe whitelist fallback from shop.address
+        shop_district = (shop.district or "").strip()
+        if not shop_district and shop.address:
+            extracted_from_addr = _extract_district_from_query(shop.address)
+            if extracted_from_addr:
+                shop_district = extracted_from_addr
+                logger.info(
+                    f"[STOCK ALERT TRIGGER] Shop {shop_id} district is empty; "
+                    f"resolved '{shop_district}' from shop address '{shop.address}'."
+                )
 
-        # 2. Query active matching alerts
+        if not shop_district:
+            logger.warning(
+                f"[STOCK ALERT TRIGGER] Shop {shop_id} has no resolvable district from district or address."
+            )
+            return 0
+
+        district_variants = _get_district_match_variants(shop_district)
+
+        # 2. Query active matching alerts across bilingual variants
         stmt = (
             select(StockAlert, Farmer)
             .join(Farmer, StockAlert.farmer_id == Farmer.id)
             .where(
                 StockAlert.is_active == True,
                 StockAlert.product_name == norm_product,
-                StockAlert.district.ilike(shop_district),
+                or_(*[StockAlert.district.ilike(v) for v in district_variants]) if district_variants else StockAlert.district.ilike(shop_district),
             )
         )
         res = await db.execute(stmt)
