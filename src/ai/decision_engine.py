@@ -11,6 +11,7 @@ Responsible for:
 6. Guarding greetings against unnecessary expensive enrichments.
 """
 import re
+import unicodedata
 from enum import Enum
 from typing import List, Dict, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -478,8 +479,9 @@ STOCK_ALERT_KEYWORDS_EN = [
 ]
 
 STOCK_ALERT_KEYWORDS_TE = [
-    "స్టాక్లోకి వస్తే", "స్టాక్ వస్తే", "దొరికితే నాకు చెప్పండి", "అలర్ట్ పెట్టండి",
+    "స్టాక్లోకి వస్తే", "స్టాక్ లోకి వస్తే", "స్టాక్ వస్తే", "దొరికితే నాకు చెప్పండి", "అలర్ట్ పెట్టండి",
     "అందుబాటులోకి వస్తే చెప్పండి", "స్టాక్ అలర్ట్", "నోటిఫికేషన్ పెట్టండి",
+    "స్టాక్లోకి", "స్టాక్ లోకి",
     "అలర్ట్ ఆపండి", "అలర్ట్స్ ఆపండి", "స్టాక్ అలర్ట్ రద్దు", "నోటిఫికేషన్ ఆపండి",
     "అలర్ట్ వద్దు", "అలర్ట్ క్యాన్సిల్", "స్టాక్ అలర్ట్ ఆపండి",
     "నా అలర్ట్స్", "నా స్టాక్ అలర్ట్స్", "యాక్టివ్ అలర్ట్స్", "ఏ అలర్ట్స్ ఉన్నాయి",
@@ -498,6 +500,21 @@ STOCK_ALERT_KEYWORDS_TANGLISH = [
 ]
 
 
+def _normalize_query_text(text: str) -> str:
+    """
+    Normalizes incoming queries for robust Indic and multilingual matching:
+    1. Composes Unicode characters (NFC canonical composition).
+    2. Strips invisible zero-width formatting codepoints (ZWNJ \u200c, ZWJ \u200d, BOM \ufeff).
+    3. Collapses multiple whitespace to single space.
+    """
+    if not text:
+        return ""
+    cleaned = unicodedata.normalize("NFC", text)
+    cleaned = re.sub(r"[\u200b-\u200d\ufeff]", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
 class AIDecisionEngine:
     """
     Orchestration layer determining intents, data dependencies, and routing.
@@ -512,7 +529,11 @@ class AIDecisionEngine:
         if not user_message or not user_message.strip():
             return False
 
-        msg = user_message.strip().lower()
+        cleaned = _normalize_query_text(user_message)
+        if not cleaned:
+            return False
+
+        msg = cleaned.lower()
 
         # Check against pure greeting patterns
         is_greeting_match = any(re.search(pat, msg, re.IGNORECASE) for pat in GREETING_PATTERNS)
@@ -562,8 +583,12 @@ class AIDecisionEngine:
         if not user_message or not user_message.strip():
             return [FarmerIntent.UNKNOWN]
 
-        msg = user_message.strip().lower()
-        msg_original = user_message.strip()
+        cleaned_query = _normalize_query_text(user_message)
+        if not cleaned_query:
+            return [FarmerIntent.UNKNOWN]
+
+        msg = cleaned_query.lower()
+        msg_original = cleaned_query
 
         # Pure greeting check
         if cls.is_greeting_only(msg_original):

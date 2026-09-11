@@ -49,7 +49,18 @@ async def db_session():
 def test_telugu_stock_alert_detection():
     engine = AIDecisionEngine()
     queries = [
+        # Exact production string
         "యూరియా స్టాక్లోకి వస్తే నాకు చెప్పండి",
+        # Mobile keyboard variant with invisible ZWNJ (\u200c)
+        "యూరియా స్టాక్\u200cలోకి వస్తే నాకు చెప్పండి",
+        # Mobile keyboard variant with ZWJ (\u200d)
+        "యూరియా స్టాక్\u200dలోకి వస్తే నాకు చెప్పండి",
+        # Space-separated variant
+        "యూరియా స్టాక్ లోకి వస్తే నాకు చెప్పండి",
+        # Space-separated with ZWNJ variant
+        "యూరియా స్టాక్\u200c లోకి వస్తే నాకు చెప్పండి",
+        # Whitespace variant
+        "యూరియా  స్టాక్లోకి   వస్తే  నాకు  చెప్పండి",
         "యూరియా స్టాక్ వస్తే చెప్పండి",
         "యూరియా దొరికితే నాకు చెప్పండి",
         "యూరియాకు అలర్ట్ పెట్టండి",
