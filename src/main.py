@@ -45,6 +45,7 @@ def audit_environment_variables():
     logger.info(f"OPENWEATHER_API_KEY       : {_status(settings.openweather_api_key)} (Mock fallback enabled)")
     logger.info(f"DATA_GOV_API_KEY          : {_status(settings.data_gov_api_key)} (DB fallback enabled)")
     logger.info(f"REDIS_URL                 : {_status(settings.redis_url)}")
+    logger.info(f"DEMO_SHOP_OWNER_SEED      : {settings.demo_shop_owner_seed}")
     logger.info("--- TIMEOUT SETTINGS ---")
     logger.info(f"GEMINI_TIMEOUT            : {settings.gemini_api_timeout_seconds}s")
     logger.info(f"STT_TIMEOUT               : {settings.stt_api_timeout_seconds}s")
@@ -101,6 +102,13 @@ async def lifespan(app: FastAPI):
             await conn.execute(text("SELECT 1"))
             await conn.run_sync(Base.metadata.create_all)
         logger.info("Database connection validated and tables created successfully.")
+
+        # Environment-controlled one-time demo seed (active only when DEMO_SHOP_OWNER_SEED=true)
+        if settings.demo_shop_owner_seed:
+            from src.core.database import AsyncSessionLocal
+            from src.auth.demo_seed import ensure_demo_shop_owner_seeded
+            async with AsyncSessionLocal() as session:
+                await ensure_demo_shop_owner_seeded(session)
     except Exception as e:
         logger.error(f"Failed to connect to the database or start application: {e}")
         raise e

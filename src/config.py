@@ -82,6 +82,8 @@ class Settings(BaseSettings):
     auth_cookie_secure: bool = Field(default=False)
     auth_cookie_samesite: str = Field(default="lax")
     admin_registration_key: str = Field(default="")
+    demo_shop_owner_seed: bool = Field(default=False)
+    demo_shop_owner_password: str = Field(default="")
 
     # Payment Gateway (Razorpay)
     razorpay_key_id: str = Field(default="rzp_test_bhoomimitra_mock_key")

@@ -519,3 +519,399 @@ async def test_seed_demo_shop_owner_idempotent(mallanna_shop_id: UUID):
     assert updated_user.role == UserRole.SHOP_OWNER.value
     assert updated_user.shop_id == mallanna_shop_id
     assert verify_password(pw2, updated_user.password_hash) is True
+
+
+# =====================================================================
+# =====================================================================
+# 7. Environment-Controlled One-Time Seed Tests (DEMO_SHOP_OWNER_SEED)
+# =====================================================================
+
+@pytest.mark.asyncio
+async def test_demo_seed_disabled_by_default(monkeypatch):
+    """When DEMO_SHOP_OWNER_SEED is False, seed mechanism must not run."""
+    from src.auth.demo_seed import ensure_demo_shop_owner_seeded
+    from src.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "demo_shop_owner_seed", False)
+
+    mock_db = AsyncMock()
+    result = await ensure_demo_shop_owner_seeded(mock_db)
+    assert result is None
+    mock_db.execute.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_demo_seed_missing_shop_safe_failure(monkeypatch):
+    """When the expected demo shop does not exist, fail safely without creating fake shop data."""
+    from unittest.mock import MagicMock
+    from src.auth.demo_seed import ensure_demo_shop_owner_seeded
+    from src.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "demo_shop_owner_seed", True)
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+
+    # Shop query returns None (shop missing)
+    shop_res = MagicMock()
+    shop_res.scalar_one_or_none.return_value = None
+    mock_db.execute.return_value = shop_res
+
+    result = await ensure_demo_shop_owner_seeded(mock_db)
+    assert result is None
+    # Verify no fake shop or user was added or committed
+    mock_db.add.assert_not_called()
+    mock_db.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_demo_seed_creates_new_user_custom_password(monkeypatch, mallanna_shop_id: UUID):
+    """When DEMO_SHOP_OWNER_SEED=True and user is missing, creates demo account with custom password."""
+    from unittest.mock import MagicMock
+    from src.auth.demo_seed import ensure_demo_shop_owner_seeded
+    from src.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "demo_shop_owner_seed", True)
+    monkeypatch.setattr(settings, "demo_shop_owner_password", "MyCustomSecretPass123!")
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_shop = Shop(id=mallanna_shop_id, shop_name="Mallanna Fertilizer Seeds and Pesticides")
+
+    # 1. Shop lookup returns mock_shop
+    shop_res = MagicMock()
+    shop_res.scalar_one_or_none.return_value = mock_shop
+
+    # 2. User lookup by email returns None
+    user_res = MagicMock()
+    user_res.scalar_one_or_none.return_value = None
+
+    # 3. Shop association check returns None
+    shop_user_res = MagicMock()
+    shop_user_res.scalar_one_or_none.return_value = None
+
+    mock_db.execute.side_effect = [shop_res, user_res, shop_user_res]
+
+    user = await ensure_demo_shop_owner_seeded(mock_db)
+    assert user is not None
+    assert user.email == "demo.shopowner@bhoomimitra.ai"
+    assert user.role == UserRole.SHOP_OWNER.value
+    assert user.shop_id == mallanna_shop_id
+    assert user.is_active is True
+    assert verify_password("MyCustomSecretPass123!", user.password_hash) is True
+    mock_db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_demo_seed_creates_new_user_random_password(monkeypatch, mallanna_shop_id: UUID):
+    """When DEMO_SHOP_OWNER_SEED=True and password not supplied, generates secure random password."""
+    from unittest.mock import MagicMock
+    from src.auth.demo_seed import ensure_demo_shop_owner_seeded
+    from src.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "demo_shop_owner_seed", True)
+    monkeypatch.setattr(settings, "demo_shop_owner_password", "")
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_shop = Shop(id=mallanna_shop_id, shop_name="Mallanna Fertilizer Seeds and Pesticides")
+
+    shop_res = MagicMock()
+    shop_res.scalar_one_or_none.return_value = mock_shop
+
+    user_res = MagicMock()
+    user_res.scalar_one_or_none.return_value = None
+
+    shop_user_res = MagicMock()
+    shop_user_res.scalar_one_or_none.return_value = None
+
+    mock_db.execute.side_effect = [shop_res, user_res, shop_user_res]
+
+    user = await ensure_demo_shop_owner_seeded(mock_db)
+    assert user is not None
+    assert user.email == "demo.shopowner@bhoomimitra.ai"
+    assert user.role == UserRole.SHOP_OWNER.value
+    assert user.shop_id == mallanna_shop_id
+    assert user.is_active is True
+    assert user.password_hash.startswith("$argon2id$")
+    mock_db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_demo_seed_existing_account_preserves_password(monkeypatch, mallanna_shop_id: UUID):
+    """When demo user exists and no new password supplied, existing password hash is preserved."""
+    from unittest.mock import MagicMock
+    from src.auth.demo_seed import ensure_demo_shop_owner_seeded
+    from src.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "demo_shop_owner_seed", True)
+    monkeypatch.setattr(settings, "demo_shop_owner_password", "")
+
+    original_hash = hash_password("OriginalPassword123!")
+    existing_user = UserAccount(
+        id=uuid4(),
+        email="demo.shopowner@bhoomimitra.ai",
+        password_hash=original_hash,
+        role=UserRole.SHOP_OWNER.value,
+        shop_id=mallanna_shop_id,
+        is_active=True,
+    )
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_shop = Shop(id=mallanna_shop_id, shop_name="Mallanna Fertilizer Seeds and Pesticides")
+
+    shop_res = MagicMock()
+    shop_res.scalar_one_or_none.return_value = mock_shop
+
+    user_res = MagicMock()
+    user_res.scalar_one_or_none.return_value = existing_user
+
+    mock_db.execute.side_effect = [shop_res, user_res]
+
+    user = await ensure_demo_shop_owner_seeded(mock_db)
+    assert user is not None
+    assert user.password_hash == original_hash
+    mock_db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_demo_seed_existing_account_explicit_password_override(monkeypatch, mallanna_shop_id: UUID):
+    """When demo user exists and DEMO_SHOP_OWNER_PASSWORD is provided, password hash is updated."""
+    from unittest.mock import MagicMock
+    from src.auth.demo_seed import ensure_demo_shop_owner_seeded
+    from src.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "demo_shop_owner_seed", True)
+    monkeypatch.setattr(settings, "demo_shop_owner_password", "ExplicitOverridePass999!")
+
+    original_hash = hash_password("OldPassword123!")
+    existing_user = UserAccount(
+        id=uuid4(),
+        email="demo.shopowner@bhoomimitra.ai",
+        password_hash=original_hash,
+        role=UserRole.SHOP_OWNER.value,
+        shop_id=mallanna_shop_id,
+        is_active=True,
+    )
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_shop = Shop(id=mallanna_shop_id, shop_name="Mallanna Fertilizer Seeds and Pesticides")
+
+    shop_res = MagicMock()
+    shop_res.scalar_one_or_none.return_value = mock_shop
+
+    user_res = MagicMock()
+    user_res.scalar_one_or_none.return_value = existing_user
+
+    mock_db.execute.side_effect = [shop_res, user_res]
+
+    user = await ensure_demo_shop_owner_seeded(mock_db)
+    assert user is not None
+    assert user.password_hash != original_hash
+    assert verify_password("ExplicitOverridePass999!", user.password_hash) is True
+    mock_db.commit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_demo_seed_conflicting_email_role_safe_failure(monkeypatch, mallanna_shop_id: UUID):
+    """If email exists but belongs to a different role (e.g. admin), abort without modifying."""
+    from unittest.mock import MagicMock
+    from src.auth.demo_seed import ensure_demo_shop_owner_seeded
+    from src.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "demo_shop_owner_seed", True)
+
+    original_hash = hash_password("AdminSecurePassword123!")
+    existing_user = UserAccount(
+        id=uuid4(),
+        email="demo.shopowner@bhoomimitra.ai",
+        password_hash=original_hash,
+        role=UserRole.ADMIN.value,
+        shop_id=mallanna_shop_id,
+        is_active=True,
+    )
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_shop = Shop(id=mallanna_shop_id, shop_name="Mallanna Fertilizer Seeds and Pesticides")
+
+    shop_res = MagicMock()
+    shop_res.scalar_one_or_none.return_value = mock_shop
+
+    user_res = MagicMock()
+    user_res.scalar_one_or_none.return_value = existing_user
+
+    mock_db.execute.side_effect = [shop_res, user_res]
+
+    result = await ensure_demo_shop_owner_seeded(mock_db)
+    assert result is None
+    assert existing_user.role == UserRole.ADMIN.value
+    assert existing_user.password_hash == original_hash
+    mock_db.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_demo_seed_conflicting_shop_safe_failure(monkeypatch, mallanna_shop_id: UUID, other_shop_id: UUID):
+    """If email exists but is associated with a different shop, abort without modifying."""
+    from unittest.mock import MagicMock
+    from src.auth.demo_seed import ensure_demo_shop_owner_seeded
+    from src.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "demo_shop_owner_seed", True)
+
+    original_hash = hash_password("OriginalPassword123!")
+    existing_user = UserAccount(
+        id=uuid4(),
+        email="demo.shopowner@bhoomimitra.ai",
+        password_hash=original_hash,
+        role=UserRole.SHOP_OWNER.value,
+        shop_id=other_shop_id,
+        is_active=True,
+    )
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_shop = Shop(id=mallanna_shop_id, shop_name="Mallanna Fertilizer Seeds and Pesticides")
+
+    shop_res = MagicMock()
+    shop_res.scalar_one_or_none.return_value = mock_shop
+
+    user_res = MagicMock()
+    user_res.scalar_one_or_none.return_value = existing_user
+
+    mock_db.execute.side_effect = [shop_res, user_res]
+
+    result = await ensure_demo_shop_owner_seeded(mock_db)
+    assert result is None
+    assert existing_user.shop_id == other_shop_id
+    mock_db.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_demo_seed_shop_occupied_by_other_user_safe_failure(monkeypatch, mallanna_shop_id: UUID):
+    """If demo email does not exist, but shop is already associated with another user, abort without takeover."""
+    from unittest.mock import MagicMock
+    from src.auth.demo_seed import ensure_demo_shop_owner_seeded
+    from src.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "demo_shop_owner_seed", True)
+
+    other_user = UserAccount(
+        id=uuid4(),
+        email="real.owner@mallanna.com",
+        password_hash=hash_password("RealOwnerPass123!"),
+        role=UserRole.SHOP_OWNER.value,
+        shop_id=mallanna_shop_id,
+        is_active=True,
+    )
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_shop = Shop(id=mallanna_shop_id, shop_name="Mallanna Fertilizer Seeds and Pesticides")
+
+    shop_res = MagicMock()
+    shop_res.scalar_one_or_none.return_value = mock_shop
+
+    # Demo email does not exist
+    user_res = MagicMock()
+    user_res.scalar_one_or_none.return_value = None
+
+    # But shop is occupied by other_user
+    shop_user_res = MagicMock()
+    shop_user_res.scalar_one_or_none.return_value = other_user
+
+    mock_db.execute.side_effect = [shop_res, user_res, shop_user_res]
+
+    result = await ensure_demo_shop_owner_seeded(mock_db)
+    assert result is None
+    mock_db.add.assert_not_called()
+    mock_db.commit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_demo_seed_idempotent_repeated_execution(monkeypatch, mallanna_shop_id: UUID):
+    """Running seed multiple times creates user on first run and safely preserves on subsequent runs."""
+    from unittest.mock import MagicMock
+    from src.auth.demo_seed import ensure_demo_shop_owner_seeded
+    from src.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "demo_shop_owner_seed", True)
+    monkeypatch.setattr(settings, "demo_shop_owner_password", "IdempotentPass123!")
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_shop = Shop(id=mallanna_shop_id, shop_name="Mallanna Fertilizer Seeds and Pesticides")
+
+    # Run 1: user doesn't exist -> creates user
+    shop_res1 = MagicMock()
+    shop_res1.scalar_one_or_none.return_value = mock_shop
+    user_res1 = MagicMock()
+    user_res1.scalar_one_or_none.return_value = None
+    shop_user_res1 = MagicMock()
+    shop_user_res1.scalar_one_or_none.return_value = None
+
+    mock_db.execute.side_effect = [shop_res1, user_res1, shop_user_res1]
+
+    user1 = await ensure_demo_shop_owner_seeded(mock_db)
+    assert user1 is not None
+    saved_hash = user1.password_hash
+
+    # Run 2: user already exists, no password override -> preserves user
+    monkeypatch.setattr(settings, "demo_shop_owner_password", "")
+    shop_res2 = MagicMock()
+    shop_res2.scalar_one_or_none.return_value = mock_shop
+    user_res2 = MagicMock()
+    user_res2.scalar_one_or_none.return_value = user1
+
+    mock_db.execute.side_effect = [shop_res2, user_res2]
+
+    user2 = await ensure_demo_shop_owner_seeded(mock_db)
+    assert user2 is not None
+    assert user2.id == user1.id
+    assert user2.password_hash == saved_hash
+
+
+@pytest.mark.asyncio
+async def test_demo_seed_never_logs_plaintext_password(monkeypatch, mallanna_shop_id: UUID, caplog):
+    """Verify that plaintext password is never exposed in application logs during seeding."""
+    import logging
+    from unittest.mock import MagicMock
+    from src.auth.demo_seed import ensure_demo_shop_owner_seeded
+    from src.config import get_settings
+
+    settings = get_settings()
+    secret_pass = "TopSecretPasswordDoNotLog!#99"
+    monkeypatch.setattr(settings, "demo_shop_owner_seed", True)
+    monkeypatch.setattr(settings, "demo_shop_owner_password", secret_pass)
+
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_shop = Shop(id=mallanna_shop_id, shop_name="Mallanna Fertilizer Seeds and Pesticides")
+
+    shop_res = MagicMock()
+    shop_res.scalar_one_or_none.return_value = mock_shop
+    user_res = MagicMock()
+    user_res.scalar_one_or_none.return_value = None
+    shop_user_res = MagicMock()
+    shop_user_res.scalar_one_or_none.return_value = None
+
+    mock_db.execute.side_effect = [shop_res, user_res, shop_user_res]
+
+    with caplog.at_level(logging.DEBUG):
+        user = await ensure_demo_shop_owner_seeded(mock_db)
+
+    assert user is not None
+    # Crucial assertion: plaintext password must NEVER appear in captured logs
+    assert secret_pass not in caplog.text
