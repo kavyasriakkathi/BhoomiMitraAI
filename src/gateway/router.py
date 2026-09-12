@@ -197,6 +197,11 @@ async def receive_message(
                     status_type = status_item.get("status", "unknown")
                     recipient_id = status_item.get("recipient_id", "unknown")
                     logger.info(f"[STATUS RECEIPT] Message {msg_id} to {mask_phone_number(recipient_id)} status updated to: '{status_type}'")
+                    try:
+                        from src.shops.stock_alerts import handle_stock_alert_status_update
+                        background_tasks.add_task(handle_stock_alert_status_update, status_item=status_item)
+                    except Exception as s_err:
+                        logger.debug(f"Failed to queue stock alert status handler: {s_err}")
 
             if not value.messages:
                 logger.info("Webhook change event contained no incoming 'messages' array (likely a status/read receipt update).")

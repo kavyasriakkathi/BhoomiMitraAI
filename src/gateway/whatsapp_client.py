@@ -21,9 +21,18 @@ MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 1
 
 
+class WhatsApp24HourWindowExceeded(Exception):
+    """Raised when Meta returns error 131047 (more than 24 hours passed since customer last replied)."""
+    def __init__(self, message: str = "", details: Optional[dict] = None):
+        super().__init__(message)
+        self.code = 131047
+        self.details = details or {}
+
+
 async def send_text_message(
     to_phone: str,
     message_text: str,
+    raise_on_24h_window: bool = False,
 ) -> Optional[str]:
     """
     Send a text message to a farmer via WhatsApp Cloud API.
@@ -148,6 +157,24 @@ async def send_text_message(
                 return None
 
             if response.status_code == 400:
+                try:
+                    res_json = response.json()
+                    err_obj = res_json.get("error", {})
+                    if err_obj.get("code") == 131047:
+                        logger.warning(
+                            f"[WHATSAPP OUTBOUND 24H WINDOW] Meta reported error 131047 for {masked_phone}: "
+                            f"More than 24 hours have passed since the customer last replied."
+                        )
+                        if raise_on_24h_window:
+                            raise WhatsApp24HourWindowExceeded(
+                                message=err_obj.get("message", "24-hour window expired"),
+                                details=err_obj,
+                            )
+                except WhatsApp24HourWindowExceeded:
+                    raise
+                except Exception:
+                    pass
+
                 logger.error(
                     f"[WHATSAPP OUTBOUND ERROR] HTTP 400 Bad Request for {masked_phone} — "
                     f"Meta Response: {response.text}"
@@ -190,6 +217,154 @@ async def send_text_message(
 
     total_duration = time.time() - total_wa_start
     logger.error(f"[WHATSAPP OUTBOUND EXHAUSTED] All {MAX_RETRIES} retries exhausted for {masked_phone} after {total_duration:.2f}s.")
+    return None
+
+
+async def send_template_message(
+    to_phone: str,
+    template_name: Optional[str] = None,
+    language_code: Optional[str] = None,
+    parameters: Optional[list[str]] = None,
+) -> Optional[str]:
+    """
+    Send an approved WhatsApp template message to a farmer via Meta's WhatsApp Cloud API.
+    Used for proactive alerts outside the 24-hour customer service window.
+
+    Args:
+        to_phone: Farmer's phone number with country code (e.g. "919876543210").
+        template_name: Approved Meta template name (defaults to WHATSAPP_STOCK_ALERT_TEMPLATE).
+        language_code: Template language code (defaults to WHATSAPP_STOCK_ALERT_TEMPLATE_LANGUAGE).
+        parameters: List of text parameter values for the body component
+                    (strictly verified database/event values only).
+
+    Returns:
+        The Meta message ID on success, or None on failure.
+    """
+    if not to_phone or not str(to_phone).strip():
+        logger.error("[WHATSAPP TEMPLATE OUTBOUND SAFETY] Recipient phone number is missing.")
+        return None
+
+    to_phone = str(to_phone).strip()
+    settings = get_settings()
+
+    t_name = (template_name or getattr(settings, "whatsapp_stock_alert_template", "") or "").strip()
+    t_lang = (language_code or getattr(settings, "whatsapp_stock_alert_template_language", "en") or "en").strip()
+
+    # If the template is not configured, log a safe actionable error and do not crash the worker
+    if not t_name:
+        logger.error(
+            "[WHATSAPP TEMPLATE ERROR] WhatsApp stock alert template is not configured. "
+            "Set WHATSAPP_STOCK_ALERT_TEMPLATE in environment variables to enable proactive template fallback."
+        )
+        return None
+
+    if not settings.whatsapp_api_token or not settings.whatsapp_phone_number_id:
+        logger.error(
+            "[WHATSAPP TEMPLATE ERROR] Meta Cloud API credentials not configured. "
+            "Set WHATSAPP_API_TOKEN and WHATSAPP_PHONE_NUMBER_ID."
+        )
+        return None
+
+    url = f"{META_BASE_URL}/{settings.whatsapp_phone_number_id}/messages"
+    headers = {
+        "Authorization": f"Bearer {settings.whatsapp_api_token}",
+        "Content-Type": "application/json",
+    }
+
+    # Construct Meta template payload (approved template name and language; no hardcoded template ID)
+    template_obj: dict = {
+        "name": t_name,
+        "language": {
+            "code": t_lang,
+        },
+    }
+
+    if parameters:
+        template_obj["components"] = [
+            {
+                "type": "body",
+                "parameters": [
+                    {"type": "text", "text": str(p)}
+                    for p in parameters
+                ],
+            }
+        ]
+
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_phone,
+        "type": "template",
+        "template": template_obj,
+    }
+
+    masked_phone = to_phone[:4] + "****" + to_phone[-4:] if len(to_phone) >= 7 else "***"
+    wa_timeout = float(getattr(settings, "whatsapp_api_timeout_seconds", 15.0))
+
+    logger.info(
+        f"[WHATSAPP TEMPLATE OUTBOUND START]\n"
+        f"  URL             : {url}\n"
+        f"  Phone Number ID : {settings.whatsapp_phone_number_id}\n"
+        f"  Recipient Phone : {masked_phone}\n"
+        f"  Template Name   : {t_name}\n"
+        f"  Language Code   : {t_lang}\n"
+        f"  Parameters Count: {len(parameters) if parameters else 0}"
+    )
+
+    total_wa_start = time.time()
+    for attempt in range(1, MAX_RETRIES + 1):
+        attempt_start = time.time()
+        try:
+            async with httpx.AsyncClient(timeout=wa_timeout) as client:
+                response = await client.post(url, headers=headers, json=payload)
+
+            duration = time.time() - attempt_start
+            logger.info(
+                f"[WHATSAPP TEMPLATE OUTBOUND RESPONSE] (Attempt {attempt}/{MAX_RETRIES}, took {duration:.2f}s):\n"
+                f"  HTTP Status Code: {response.status_code}\n"
+                f"  Response Body   : {response.text}"
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                wa_message_id = data.get("messages", [{}])[0].get("id")
+                total_duration = time.time() - total_wa_start
+                logger.info(
+                    f"[WHATSAPP TEMPLATE OUTBOUND SUCCESS] Template '{t_name}' delivered to {masked_phone} "
+                    f"in {total_duration:.2f}s (wa_id={wa_message_id})"
+                )
+                return wa_message_id
+
+            if response.status_code == 429:
+                import asyncio
+                await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+                continue
+
+            logger.error(
+                f"[WHATSAPP TEMPLATE OUTBOUND ERROR] HTTP {response.status_code} sending template to {masked_phone}: "
+                f"{response.text}"
+            )
+            return None
+
+        except httpx.TimeoutException:
+            duration = time.time() - attempt_start
+            logger.warning(
+                f"[WHATSAPP TEMPLATE OUTBOUND TIMEOUT] Timeout after {duration:.2f}s sending to {masked_phone} "
+                f"(attempt {attempt}/{MAX_RETRIES})."
+            )
+            if attempt < MAX_RETRIES:
+                import asyncio
+                await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
+                continue
+            return None
+
+        except Exception as e:
+            duration = time.time() - attempt_start
+            logger.exception(
+                f"[WHATSAPP TEMPLATE OUTBOUND UNEXPECTED ERROR] Failed sending to {masked_phone} after {duration:.2f}s: {e}"
+            )
+            return None
+
     return None
 
 

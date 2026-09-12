@@ -420,11 +420,14 @@ async def trigger_stock_alert_notifications(
     from src.core.database import AsyncSessionLocal
     from src.gateway.whatsapp_client import (
         send_text_message,
+        send_template_message,
         upload_media_bytes,
         send_audio_message,
+        WhatsApp24HourWindowExceeded,
     )
     from src.language.service import synthesize_speech
     from src.config import get_settings
+    import json
 
     norm_product = _normalize_product_name(product_name)
     logger.info(
@@ -560,14 +563,67 @@ async def trigger_stock_alert_notifications(
                     f"⚠️ Warning: High demand product, stock may sell out quickly! Please call the shop immediately to reserve or confirm."
                 )
 
-            # Send WhatsApp text message
-            wa_msg_id = await send_text_message(
-                to_phone=farmer.phone_number,
-                message_text=notification_text,
-            )
+            # Verified parameters for template (ONLY verified database/event values)
+            template_parameters = [
+                product_name,
+                shop.shop_name,
+                shop_district,
+                f"{new_quantity} {unit}",
+                f"{updated_time_str} UTC",
+            ]
+
+            wa_msg_id = None
+            used_template = False
+
+            # Send normal text message inside 24h window; fallback to template on Meta error 131047
+            try:
+                wa_msg_id = await send_text_message(
+                    to_phone=farmer.phone_number,
+                    message_text=notification_text,
+                    raise_on_24h_window=True,
+                )
+            except WhatsApp24HourWindowExceeded:
+                logger.warning(
+                    f"[STOCK SIREN] Farmer {farmer.phone_number} outside 24h window (Meta 131047). "
+                    "Retrying notification with approved WhatsApp template..."
+                )
+                wa_msg_id = await send_template_message(
+                    to_phone=farmer.phone_number,
+                    parameters=template_parameters,
+                )
+                used_template = True
+            except Exception as send_err:
+                logger.error(f"[STOCK SIREN] Outbound send error to {farmer.phone_number}: {send_err}")
+                wa_msg_id = None
 
             if wa_msg_id:
-                # Successfully sent text -> Deactivate alert and stamp notification time
+                # Cache outbound metadata in Redis to allow webhook status receipt tracking & 131047 fallback
+                if redis_client:
+                    outbound_payload = {
+                        "alert_id": str(alert.id),
+                        "farmer_id": str(farmer.id),
+                        "inventory_item_id": str(inventory_item_id),
+                        "shop_id": str(shop.id),
+                        "phone_number": farmer.phone_number,
+                        "product_name": product_name,
+                        "shop_name": shop.shop_name,
+                        "district": shop_district,
+                        "new_quantity": new_quantity,
+                        "unit": unit,
+                        "updated_time_str": updated_time_str,
+                        "brand": brand_str,
+                        "language": lang,
+                        "used_template": used_template,
+                    }
+                    try:
+                        await redis_client.set(
+                            f"stock_alert_outbound:{wa_msg_id}",
+                            json.dumps(outbound_payload),
+                            ex=86400,
+                        )
+                    except Exception as r_save_err:
+                        logger.debug(f"Redis store outbound error: {r_save_err}")
+
                 alert.is_active = False
                 alert.notified_at = datetime.utcnow()
                 alert.updated_at = datetime.utcnow()
@@ -575,7 +631,7 @@ async def trigger_stock_alert_notifications(
                 notified_count += 1
                 logger.info(
                     f"[STOCK ALERT TRIGGER] Successfully notified farmer {farmer.phone_number} "
-                    f"(Alert ID {alert.id}, WA ID {wa_msg_id})."
+                    f"(Alert ID {alert.id}, WA ID {wa_msg_id}, template={used_template})."
                 )
 
                 # Send Stock Siren Voice Audio (Fail-soft)
@@ -594,6 +650,11 @@ async def trigger_stock_alert_notifications(
                     f"[STOCK ALERT TRIGGER] Failed to deliver WhatsApp message to {farmer.phone_number}. "
                     "Alert remains active."
                 )
+                if redis_client:
+                    try:
+                        await redis_client.delete(lock_key)
+                    except Exception as r_del_err:
+                        logger.debug(f"Redis delete lock error: {r_del_err}")
 
         if notified_count > 0:
             await db.commit()
@@ -605,3 +666,270 @@ async def trigger_stock_alert_notifications(
     else:
         async with AsyncSessionLocal() as session:
             return await _execute(session)
+
+
+async def handle_stock_alert_status_update(
+    status_item: dict,
+    db_session: Optional[AsyncSession] = None,
+) -> bool:
+    """
+    Handles WhatsApp delivery status receipts for Stock Siren notifications.
+    Triggered when Meta reports webhook statuses: 'sent', 'delivered', 'read', or 'failed'.
+
+    Handles Meta error 131047 specifically (24-hour window expired):
+    - Retries notification using the approved WhatsApp message template with verified parameters.
+    - If template send succeeds, deactivates the StockAlert.
+    - If template send fails or template is not configured, reactivates the StockAlert and clears the Redis lock.
+    - If any other failure occurs (not 131047), reactivates the StockAlert and clears the Redis lock.
+    """
+    from src.core.database import AsyncSessionLocal
+    from src.gateway.whatsapp_client import send_template_message
+    from src.config import get_settings
+    import json
+
+    msg_id = status_item.get("id")
+    if not msg_id:
+        return False
+
+    status_type = status_item.get("status")
+    errors = status_item.get("errors", [])
+    is_131047 = (status_type == "failed") and any(err.get("code") == 131047 for err in errors)
+
+    settings = get_settings()
+    redis_client = None
+    if settings.redis_url:
+        try:
+            import redis.asyncio as aioredis
+            redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+        except Exception as r_err:
+            logger.debug(f"Redis init error in status receipt: {r_err}")
+
+    outbound_json = None
+    if redis_client:
+        try:
+            outbound_json = await redis_client.get(f"stock_alert_outbound:{msg_id}")
+        except Exception as r_get_err:
+            logger.debug(f"Redis get error: {r_get_err}")
+
+    # PART 1: Handle asynchronous Redis metadata race if 131047 failure arrives before Redis write completes
+    if not outbound_json and is_131047:
+        RETRY_DELAYS = [0.5, 1.0, 2.0, 5.0, 10.0]
+        for delay in RETRY_DELAYS:
+            logger.info(
+                f"[STOCK SIREN WEBHOOK] Outbound metadata for {msg_id} temporarily unavailable in Redis. "
+                f"Retrying in {delay}s (bounded race recovery)..."
+            )
+            import asyncio
+            await asyncio.sleep(delay)
+            if redis_client:
+                try:
+                    outbound_json = await redis_client.get(f"stock_alert_outbound:{msg_id}")
+                except Exception as r_retry_err:
+                    logger.debug(f"Redis retry get error for {msg_id}: {r_retry_err}")
+            if outbound_json:
+                logger.info(f"[STOCK SIREN WEBHOOK] Recovered outbound metadata for {msg_id} after {delay}s delay.")
+                break
+
+    if not outbound_json:
+        if is_131047:
+            logger.error(
+                f"[STOCK SIREN WEBHOOK] Failed to correlate outbound metadata for message {msg_id} after bounded retries. "
+                "Cannot safely identify StockAlert or dispatch template fallback without verified event data. "
+                "Aborting fallback to avoid modifying unrelated alerts or sending uncorrelated messages."
+            )
+        return False
+
+    try:
+        alert_data = json.loads(outbound_json)
+    except Exception as parse_err:
+        logger.error(f"[STOCK SIREN STATUS ERROR] Failed to parse outbound data for {msg_id}: {parse_err}")
+        return False
+
+    alert_id_str = alert_data.get("alert_id")
+    if not alert_id_str:
+        return False
+
+    try:
+        alert_uuid = UUID(alert_id_str)
+    except Exception:
+        return False
+
+    def _mask_phone(p: str) -> str:
+        return p[:4] + "****" + p[-4:] if len(p) >= 7 else "***"
+
+    async def _process(db: AsyncSession) -> bool:
+        stmt = select(StockAlert).where(StockAlert.id == alert_uuid)
+        res = await db.execute(stmt)
+        alert = res.scalar_one_or_none()
+
+        if status_type == "failed":
+            if is_131047:
+                logger.warning(
+                    f"[STOCK SIREN WEBHOOK] Meta reported error 131047 for message {msg_id} "
+                    f"to {_mask_phone(alert_data.get('phone_number', ''))}. "
+                    "Customer outside 24h window. Retrying notification via approved WhatsApp template..."
+                )
+                # Check if this is a duplicate webhook for the text message where template fallback already dispatched
+                fallback_template_id = alert_data.get("fallback_template_wa_id")
+                if fallback_template_id and msg_id != fallback_template_id:
+                    logger.info(
+                        f"[STOCK SIREN WEBHOOK] Duplicate status for original text message {msg_id}; "
+                        f"template fallback ({fallback_template_id}) was already dispatched. Skipping."
+                    )
+                    return True
+
+                # Check if the template message itself failed with 131047 to halt recursive retries
+                if alert_data.get("used_template"):
+                    logger.error(
+                        f"[STOCK SIREN WEBHOOK] Template message {msg_id} also failed with 131047 for alert {alert_uuid}. "
+                        "Halting retry recursion; StockAlert remains active."
+                    )
+                    if alert:
+                        alert.is_active = True
+                        alert.notified_at = None
+                        alert.updated_at = datetime.utcnow()
+                        db.add(alert)
+                        await db.commit()
+                    if redis_client:
+                        lock_k = f"stock_alert_lock:{alert_uuid}:{alert_data.get('inventory_item_id')}"
+                        try:
+                            await redis_client.delete(lock_k)
+                        except Exception:
+                            pass
+                    return False
+
+                # PART 2: Atomic fallback claim BEFORE external template send to prevent duplicate sends across workers
+                fallback_lock_key = f"stock_alert_template_fallback:{msg_id}"
+                acquired_fallback = False
+                if redis_client:
+                    try:
+                        acquired_fallback = await redis_client.set(fallback_lock_key, "in_progress", ex=90, nx=True)
+                    except Exception as lk_err:
+                        logger.debug(f"Fallback lock error: {lk_err}")
+                        acquired_fallback = False
+                else:
+                    acquired_fallback = True
+
+                if not acquired_fallback:
+                    logger.info(
+                        f"[STOCK SIREN WEBHOOK] Template fallback for message {msg_id} already claimed or in-progress. "
+                        "Skipping duplicate fallback dispatch."
+                    )
+                    return True
+
+                template_params = [
+                    alert_data["product_name"],
+                    alert_data["shop_name"],
+                    alert_data["district"],
+                    f"{alert_data['new_quantity']} {alert_data['unit']}",
+                    f"{alert_data['updated_time_str']} UTC",
+                ]
+
+                template_wa_id = None
+                try:
+                    template_wa_id = await send_template_message(
+                        to_phone=alert_data["phone_number"],
+                        parameters=template_params,
+                    )
+                except Exception as t_err:
+                    logger.error(f"[STOCK SIREN WEBHOOK] Exception sending template message: {t_err}")
+                    template_wa_id = None
+
+                if template_wa_id:
+                    logger.info(
+                        f"[STOCK SIREN WEBHOOK] Template fallback succeeded for alert {alert_uuid} "
+                        f"(new wa_id={template_wa_id})."
+                    )
+                    alert_data["used_template"] = True
+                    alert_data["fallback_template_wa_id"] = template_wa_id
+                    if redis_client:
+                        try:
+                            # Update fallback lock to completed and cache metadata under both message IDs
+                            await redis_client.set(fallback_lock_key, "completed", ex=86400)
+                            await redis_client.set(
+                                f"stock_alert_outbound:{msg_id}",
+                                json.dumps(alert_data),
+                                ex=86400,
+                            )
+                            await redis_client.set(
+                                f"stock_alert_outbound:{template_wa_id}",
+                                json.dumps(alert_data),
+                                ex=86400,
+                            )
+                        except Exception as r_upd_err:
+                            logger.debug(f"Redis update error after template fallback: {r_upd_err}")
+
+                    if alert:
+                        alert.is_active = False
+                        alert.notified_at = datetime.utcnow()
+                        alert.updated_at = datetime.utcnow()
+                        db.add(alert)
+                        await db.commit()
+                    return True
+                else:
+                    logger.error(
+                        f"[STOCK SIREN WEBHOOK] Template fallback failed for alert {alert_uuid}. "
+                        "Releasing fallback lock; StockAlert remains active."
+                    )
+                    if redis_client:
+                        try:
+                            # Release fallback lock so future attempts can retry
+                            await redis_client.delete(fallback_lock_key)
+                        except Exception:
+                            pass
+                    if alert:
+                        alert.is_active = True
+                        alert.notified_at = None
+                        alert.updated_at = datetime.utcnow()
+                        db.add(alert)
+                        await db.commit()
+                    if redis_client:
+                        lock_k = f"stock_alert_lock:{alert_uuid}:{alert_data.get('inventory_item_id')}"
+                        try:
+                            await redis_client.delete(lock_k)
+                        except Exception:
+                            pass
+                    return False
+
+            else:
+                # Other Meta error (not 131047)
+                err_codes = [err.get("code") for err in errors]
+                logger.error(
+                    f"[STOCK SIREN WEBHOOK] WhatsApp message {msg_id} failed with non-131047 error(s) {err_codes}. "
+                    "StockAlert remains active."
+                )
+                if alert:
+                    alert.is_active = True
+                    alert.notified_at = None
+                    alert.updated_at = datetime.utcnow()
+                    db.add(alert)
+                    await db.commit()
+                if redis_client:
+                    lock_k = f"stock_alert_lock:{alert_uuid}:{alert_data.get('inventory_item_id')}"
+                    try:
+                        await redis_client.delete(lock_k)
+                    except Exception:
+                        pass
+                return False
+
+        elif status_type in ("sent", "delivered", "read"):
+            logger.info(
+                f"[STOCK SIREN WEBHOOK] Meta confirmed delivery status '{status_type}' for message {msg_id} "
+                f"(Alert ID {alert_uuid})."
+            )
+            if alert:
+                alert.is_active = False
+                if not alert.notified_at:
+                    alert.notified_at = datetime.utcnow()
+                alert.updated_at = datetime.utcnow()
+                db.add(alert)
+                await db.commit()
+            return True
+
+        return True
+
+    if db_session:
+        return await _process(db_session)
+    else:
+        async with AsyncSessionLocal() as session:
+            return await _process(session)

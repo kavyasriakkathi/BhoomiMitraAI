@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     whatsapp_business_account_id: str = Field(default="")
     whatsapp_api_timeout_seconds: float = Field(default=15.0)
     max_media_download_bytes: int = Field(default=15_728_640)  # 15 MB boundary guard
+    whatsapp_stock_alert_template: str = Field(default="bhoomimitra_stock_alert")
+    whatsapp_stock_alert_template_language: str = Field(default="en")
 
     # AI
     openai_api_key: str = Field(default="")

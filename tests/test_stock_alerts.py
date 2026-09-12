@@ -2,10 +2,10 @@ import pytest
 import pytest_asyncio
 import asyncio
 from uuid import uuid4
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from src.core.models import Farmer, FarmerProfile, Farm, Shop, Inventory, StockAlert, Conversation
+from src.core.models import Farmer, FarmerProfile, Farm, Shop, Inventory, StockAlert, Conversation, UserAccount
 from src.ai.decision_engine import AIDecisionEngine, FarmerIntent
 from src.shops.stock_alerts import (
     detect_stock_alert_action,
@@ -22,6 +22,11 @@ from src.shops.stock_alerts import (
 from src.inventory.service import InventoryService
 from src.inventory.repository import InventoryRepository
 from src.inventory.schemas import StockUpdatePayload, InventoryCreate, InventoryUpdate
+from src.shops.repository import ShopRepository
+from src.shops.schemas import ShopUpdate
+from src.auth.dependencies import verify_shop_access, get_token_from_request
+from src.auth.security import create_access_token, decode_access_token
+from src.core.exceptions import BhoomiMitraException
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.pool import StaticPool
 from src.core.database import Base
@@ -1067,3 +1072,277 @@ async def test_stock_siren_district_resolution_regression(db_session):
         )
         assert second_notified == 0
         assert mock_send2.call_count == 0
+
+
+@pytest.mark.asyncio
+async def test_production_unresolvable_location_update_and_stock_siren_trigger(db_session):
+    """
+    Simulates and validates the exact production situation:
+    - Shop has district=None, address='korutla', latitude=17.9784, longitude=79.5941.
+    - Active StockAlert exists for district='వరంగల్', product='urea'.
+    - Restock event (qty 0 -> 50) fails because 'korutla' does not resolve to Warangal,
+      and coordinates are not auto-inferred (preserving curated whitelist & avoiding arbitrary inferences).
+    - 0 notifications are sent.
+    - Shop owner performs legitimate location update (setting district='Warangal').
+    - resolve_shop_district now correctly resolves to 'Warangal'.
+    - Next restock event successfully triggers Stock Siren, notifying the farmer in Telugu via WhatsApp.
+    - Also verifies alternative legitimate action: updating address to 'Warangal' when district is None.
+    """
+    farmer = Farmer(phone_number="919876543399", preferred_language="te")
+    db_session.add(farmer)
+    await db_session.commit()
+
+    alert, is_new = await create_or_reactivate_alert(
+        db_session, farmer, "urea", "వరంగల్"
+    )
+    assert is_new is True
+    assert alert.is_active is True
+
+    # 1. Setup exact production shop initial state
+    shop_repo = ShopRepository(db_session)
+    prod_shop_id = uuid4()
+    prod_shop = Shop(
+        id=prod_shop_id,
+        shop_name="Kisan Seva Kendra",
+        owner_name="Mallesh Goud",
+        phone_number="9876543999",
+        address="korutla",
+        district=None,
+        latitude=17.9784,
+        longitude=79.5941,
+        state="Telangana",
+        status="active",
+    )
+    db_session.add(prod_shop)
+    await db_session.commit()
+
+    inv = Inventory(
+        id=uuid4(),
+        shop_id=prod_shop.id,
+        product_name="Urea Fertilizer 45kg",
+        category="Fertilizers",
+        brand="IFFCO",
+        unit="bag",
+        price=268.0,
+        quantity_in_stock=0,
+        available=False,
+    )
+    db_session.add(inv)
+    await db_session.commit()
+
+    # Step 2: In initial state, district resolution fails ('korutla' not in curated whitelist)
+    assert resolve_shop_district(prod_shop.district, prod_shop.address) is None
+
+    with patch("src.gateway.whatsapp_client.send_text_message", new_callable=AsyncMock) as mock_send:
+        notified = await trigger_stock_alert_notifications(
+            inventory_item_id=inv.id,
+            shop_id=prod_shop.id,
+            product_name="Urea Fertilizer 45kg",
+            new_quantity=50,
+            unit="bag",
+            brand="IFFCO",
+            db_session=db_session,
+        )
+        assert notified == 0
+        assert mock_send.call_count == 0
+
+    # Farmer alert remains active because no restock alert could be dispatched for this district
+    assert alert.is_active is True
+
+    # Step 3: Shop owner updates district to 'Warangal' via legitimate update mechanism
+    updated_shop = await shop_repo.update(prod_shop.id, ShopUpdate(district="Warangal"))
+    assert updated_shop is not None
+    assert updated_shop.district == "Warangal"
+    assert updated_shop.address == "korutla"
+
+    # Step 4: resolve_shop_district now successfully resolves to 'Warangal'
+    assert resolve_shop_district(updated_shop.district, updated_shop.address) == "Warangal"
+
+    # Step 5: Restock event now successfully triggers Stock Siren!
+    with patch("src.gateway.whatsapp_client.send_text_message", new_callable=AsyncMock) as mock_send_restock:
+        mock_send_restock.return_value = "wamid.siren.test02"
+        notified_restock = await trigger_stock_alert_notifications(
+            inventory_item_id=inv.id,
+            shop_id=prod_shop.id,
+            product_name="Urea Fertilizer 45kg",
+            new_quantity=50,
+            unit="bag",
+            brand="IFFCO",
+            db_session=db_session,
+        )
+        assert notified_restock == 1
+        assert mock_send_restock.call_count == 1
+        msg = mock_send_restock.call_args[1]["message_text"]
+        assert "Kisan Seva Kendra" in msg
+        assert "Warangal" in msg or "వరంగల్" in msg
+        assert "50 bag" in msg
+        assert "హెచ్చరిక" in msg or "Warning" in msg
+
+    # Step 6: Verify alternative update mechanism (updating address to 'Warangal' when district=None)
+    # Reset alert for testing address-only fallback
+    alert.is_active = True
+    alert.notified_at = None
+    # Reset shop district to None, update address to 'Warangal'
+    prod_shop.district = None
+    prod_shop.address = "Warangal"
+    db_session.add(prod_shop)
+    await db_session.commit()
+
+    assert resolve_shop_district(prod_shop.district, prod_shop.address) == "Warangal"
+
+    with patch("src.gateway.whatsapp_client.send_text_message", new_callable=AsyncMock) as mock_send_addr:
+        mock_send_addr.return_value = "wamid.siren.test03"
+        notified_addr = await trigger_stock_alert_notifications(
+            inventory_item_id=inv.id,
+            shop_id=prod_shop.id,
+            product_name="Urea Fertilizer 45kg",
+            new_quantity=50,
+            unit="bag",
+            brand="IFFCO",
+            db_session=db_session,
+        )
+        assert notified_addr == 1
+        assert mock_send_addr.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_shop_owner_authentication_lifecycle_and_address_update(db_session):
+    """
+    Validates the authentication lifecycle and profile update flow:
+    1. Request without token/cookie returns None from get_token_from_request (causes 401).
+    2. Expired JWT token raises 401 Invalid or expired authentication token.
+    3. Unauthorized shop owner (Shop B) attempting to update Shop A raises 403 Access forbidden.
+    4. Authenticated owner of Shop A passes verify_shop_access and updates address to 'Warangal'.
+    5. 'Warangal' persists in the database record.
+    6. Restock trigger resolves 'Warangal', matches Telugu subscriber for 'వరంగల్', and fires Stock Siren.
+    """
+    farmer = Farmer(phone_number="919876543388", preferred_language="te")
+    db_session.add(farmer)
+    await db_session.commit()
+
+    alert, is_new = await create_or_reactivate_alert(
+        db_session, farmer, "urea", "వరంగల్"
+    )
+    assert is_new is True
+    assert alert.is_active is True
+
+    # Setup Shop A
+    shop_repo = ShopRepository(db_session)
+    shop_a_id = uuid4()
+    shop_a = Shop(
+        id=shop_a_id,
+        shop_name="Warangal Agri Depot",
+        owner_name="Mallanna",
+        phone_number="9876543888",
+        address="korutla",  # Initial unresolvable address
+        district=None,
+        state="Telangana",
+        status="active",
+    )
+    db_session.add(shop_a)
+
+    # Setup Shop B
+    shop_b_id = uuid4()
+    shop_b = Shop(
+        id=shop_b_id,
+        shop_name="Other Shop",
+        owner_name="Other Owner",
+        phone_number="9876543777",
+        address="Some Address",
+        district=None,
+        state="Telangana",
+        status="active",
+    )
+    db_session.add(shop_b)
+    await db_session.commit()
+
+    # User A (Owner of Shop A)
+    user_a = UserAccount(
+        id=uuid4(),
+        email="owner.a@bhoomimitra.ai",
+        password_hash="hashed_pw_test_a",
+        role="shop_owner",
+        shop_id=shop_a_id,
+        is_active=True,
+    )
+    # User B (Owner of Shop B)
+    user_b = UserAccount(
+        id=uuid4(),
+        email="owner.b@bhoomimitra.ai",
+        password_hash="hashed_pw_test_b",
+        role="shop_owner",
+        shop_id=shop_b_id,
+        is_active=True,
+    )
+    db_session.add_all([user_a, user_b])
+    await db_session.commit()
+
+    # Step 1: Unauthenticated request simulation
+    mock_req_empty = MagicMock()
+    mock_req_empty.headers = {}
+    mock_req_empty.cookies = {}
+    assert get_token_from_request(mock_req_empty) is None
+
+    # Step 2: Expired token raises 401
+    expired_token = create_access_token(
+        {"sub": str(user_a.id), "role": user_a.role},
+        expires_delta=timedelta(minutes=-30),
+    )
+    with pytest.raises(BhoomiMitraException) as exc_expired:
+        decode_access_token(expired_token)
+    assert exc_expired.value.status_code == 401
+    assert "expired" in exc_expired.value.message.lower()
+
+    # Step 3: Tenant Isolation: User B cannot modify Shop A
+    with pytest.raises(BhoomiMitraException) as exc_tenant:
+        verify_shop_access(user_b, shop_a_id)
+    assert exc_tenant.value.status_code == 403
+    assert "another shop" in exc_tenant.value.message.lower()
+
+    # Step 4: Legitimate Owner A passes tenant authorization
+    verify_shop_access(user_a, shop_a_id)  # Does not raise!
+
+    # Step 5: Update Address to 'Warangal' and verify persistence
+    updated = await shop_repo.update(shop_a_id, ShopUpdate(address="Warangal"))
+    assert updated is not None
+    assert updated.address == "Warangal"
+    assert updated.district is None
+
+    # Re-fetch from DB to confirm persistence
+    persisted = await shop_repo.get_by_id(shop_a_id)
+    assert persisted.address == "Warangal"
+
+    # Step 6: Verify Stock Siren resolves 'Warangal' and triggers restock notification
+    assert resolve_shop_district(persisted.district, persisted.address) == "Warangal"
+
+    inv = Inventory(
+        id=uuid4(),
+        shop_id=shop_a.id,
+        product_name="Urea Fertilizer 45kg",
+        category="Fertilizers",
+        brand="IFFCO",
+        unit="bag",
+        price=268.0,
+        quantity_in_stock=0,
+        available=False,
+    )
+    db_session.add(inv)
+    await db_session.commit()
+
+    with patch("src.gateway.whatsapp_client.send_text_message", new_callable=AsyncMock) as mock_send:
+        mock_send.return_value = "wamid.siren.auth.test"
+        notified = await trigger_stock_alert_notifications(
+            inventory_item_id=inv.id,
+            shop_id=shop_a.id,
+            product_name="Urea Fertilizer 45kg",
+            new_quantity=50,
+            unit="bag",
+            brand="IFFCO",
+            db_session=db_session,
+        )
+        assert notified == 1
+        assert mock_send.call_count == 1
+        msg = mock_send.call_args[1]["message_text"]
+        assert "Warangal Agri Depot" in msg
+        assert "Warangal" in msg or "వరంగల్" in msg
+        assert "50 bag" in msg
