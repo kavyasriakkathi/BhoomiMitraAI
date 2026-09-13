@@ -384,7 +384,8 @@ INTENT_KEYWORDS: Dict[FarmerIntent, Dict[str, List[str]]] = {
     },
     FarmerIntent.CROP_HEALTH: {
         "en": [
-            "disease", "pest", "pests", "leaf spot", "yellowing", "wilting", "fungus",
+            "disease", "pest", "pests", "leaf spot", "yellowing", "yellow", "turning yellow",
+            "yellow leaves", "yellow leaf", "wilting", "fungus",
             "insects", "bollworm", "aphids", "whitefly", "blight", "rot", "pesticide for",
             "cure", "symptoms", "worms", "bugs", "fungicide", "infestation", "stem borer",
             "leaf curl", "caterpillar", "blast", "rust", "alternaria", "powdery mildew",

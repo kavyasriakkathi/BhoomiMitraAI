@@ -132,6 +132,16 @@ def test_greeting_with_question_is_not_pure_greeting():
     assert engine.detect_primary_intent("నమస్తే, పత్తి ధర ఎంత?") == FarmerIntent.MARKET_PRICE
 
 
+def test_english_greeting_with_crop_health_question_not_pure_greeting():
+    """English greeting accompanied by a crop-health question must NOT be classified as pure greeting."""
+    engine = get_decision_engine()
+    query = "Hello, my rice crop leaves are turning yellow. What could be the reason?"
+    assert engine.is_greeting_only(query) is False
+    intents = engine.detect_all_intents(query)
+    assert FarmerIntent.CROP_HEALTH in intents
+
+
+
 def test_intent_unknown_query():
     """Unrelated non-farming questions -> FarmerIntent.UNKNOWN."""
     engine = get_decision_engine()
