@@ -327,50 +327,11 @@ _PRODUCT_MAPPING = {
 }
 
 # ---------------------------------------------------------------------------
-# Multilingual Formatting Labels
-# ---------------------------------------------------------------------------
+from src.ai.formatting import get_shops_labels
 
-_EN_LABELS = {
-    "title":             "🏬 Nearby Agricultural Shops & Availability:",
-    "product":           "📦 Product",
-    "price":             "💰 Price",
-    "stock_in":          "In Stock",
-    "stock_low":         "Low Stock",
-    "stock_out":         "Out of Stock",
-    "contact":           "📞 Contact",
-    "status_open":       "Open",
-    "status_closed":     "Closed",
-    "delivery_avail":    "Available",
-    "delivery_none":     "Not Available",
-    "delivery":          "🚚 Delivery",
-    "dist_fmt":          "{dist} km away",
-    "dist_generic":      "Nearby",
-    "no_local_dealers":  "🏬 Nearby Agricultural Shops & Availability:\nℹ️ No licensed dealer is currently registered in your mandal/district for this product. Please check back soon as more local dealers are onboarded.",
-    "all_out_of_stock":  "⚠️ Note: This product is currently out of stock across nearby registered shops. Please contact the dealers below for upcoming restock dates.",
-    "footer_disclaimer": "ℹ️ Note: Prices and stock levels are subject to local dealer confirmation.",
-    "more":              "Find all shops at: /shops",
-}
-
-_TE_LABELS = {
-    "title":             "🏬 సమీప వ్యవసాయ దుకాణాలు & లభ్యత:",
-    "product":           "📦 ఉత్పత్తి",
-    "price":             "💰 ధర",
-    "stock_in":          "స్టాక్ అందుబాటులో ఉంది",
-    "stock_low":         "తక్కువ స్టాక్ ఉంది",
-    "stock_out":         "స్టాక్ లేదు",
-    "contact":           "📞 సంప్రదించండి",
-    "status_open":       "తెరిచి ఉంది",
-    "status_closed":     "మూసివేయబడింది",
-    "delivery_avail":    "అందుబాటులో ఉంది",
-    "delivery_none":     "అందుబాటులో లేదు",
-    "delivery":          "🚚 డెలివరీ",
-    "dist_fmt":          "{dist} కి.మీ దూరం",
-    "dist_generic":      "సమీపంలో",
-    "no_local_dealers":  "🏬 సమీప వ్యవసాయ దుకాణాలు & లభ్యత:\nℹ️ మీ మండలం/జిల్లాలో ఈ ఉత్పత్తికి సంబంధించి ప్రస్తుతం నమోదిత లైసెన్స్ డీలర్లు అందుబాటులో లేరు.",
-    "all_out_of_stock":  "⚠️ గమనిక: ఈ ఉత్పత్తి ప్రస్తుతం సమీప నమోదిత దుకాణాలలో స్టాక్ అందుబాటులో లేదు. కొత్త స్టాక్ తేదీల కోసం దయచేసి క్రింది డీలర్లను సంప్రదించండి.",
-    "footer_disclaimer": "ℹ️ గమనిక: ధరలు మరియు స్టాక్ వివరాలు స్థానిక డీలర్ నిర్ధారణకు లోబడి ఉంటాయి.",
-    "more":              "మరిన్ని దుకాణాల కోసం: /shops",
-}
+# Backward-compatible references
+_TE_LABELS = get_shops_labels("te")
+_EN_LABELS = get_shops_labels("en")
 
 _HI_LABELS = {
     "title":             "🏬 नजदीकी कृषि दुकानें एवं उपलब्धता:",
@@ -641,10 +602,10 @@ async def enrich_response_with_shops(
     else:
         latitude, longitude, district, state = loc_res
 
+    farmer_lang = getattr(farmer, "preferred_language", "en") or "en"
     from src.language.detector import detect_language
-    pref_lang = getattr(farmer, "preferred_language", "en") or "en"
-    language = detect_language(query_text, fallback=pref_lang)
-    labels = _LABELS_BY_LANG.get(language, _EN_LABELS if language == "en" else _TE_LABELS)
+    language = detect_language(query_text, fallback=farmer_lang)
+    labels = get_shops_labels(language)
 
     # Step 4: Fetch matching shops from DB (auto-seed defaults if empty)
     try:

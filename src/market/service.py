@@ -236,30 +236,11 @@ def _clean_ai_response_for_market_enrichment(ai_response: str) -> str:
 
     return "\n\n".join(cleaned_paragraphs).strip()
 
-# Multilingual labels for formatted reply across 13 languages
-_TE_LABELS = {
-    "title": "📊 {commodity} మార్కెట్ ధరలు",
-    "market": "మండి",
-    "modal": "మోడల్ ధర",
-    "min": "కనిష్ట",
-    "max": "గరిష్ట",
-    "date": "తేదీ",
-    "source_live": "అగ్‌మార్క్‌నెట్ (లైవ్)",
-    "source_local": "స్థానిక డేటాబేస్",
-    "unit_suffix": "క్వింటాల్కు",
-}
+from src.ai.formatting import get_market_labels
 
-_EN_LABELS = {
-    "title": "📊 {commodity} Mandi Prices",
-    "market": "Market",
-    "modal": "Modal Price",
-    "min": "Min",
-    "max": "Max",
-    "date": "Date",
-    "source_live": "Agmarknet (Live)",
-    "source_local": "Local Database",
-    "unit_suffix": "per Quintal",
-}
+# Backward-compatible references
+_TE_LABELS = get_market_labels("te")
+_EN_LABELS = get_market_labels("en")
 
 _LABELS_BY_LANG = {
     "te": _TE_LABELS,
@@ -636,7 +617,7 @@ class MarketService:
         - Price freshness notice (especially when today's price was requested but only older data exists)
         - Empty data fallback
         """
-        labels = _LABELS_BY_LANG.get(language, _EN_LABELS if language == "en" else _TE_LABELS)
+        labels = get_market_labels(language)
         commodity = query_response.commodity
 
         commodity_display = commodity
@@ -652,25 +633,7 @@ class MarketService:
                     break
 
         if not query_response.data_available or not query_response.results:
-            if language == "te":
-                return (
-                    f"క్షమించండి, ప్రస్తుతం {commodity_display} మండి ధర సమాచారం అందుబాటులో లేదు.\n"
-                    "దయచేసి మీ స్థానిక మండిని సంప్రదించండి లేదా "
-                    "రైతు సేవ కేంద్రాన్ని (1800-425-1422) సంప్రదించండి."
-                )
-            elif language == "hi":
-                return (
-                    f"क्षमा करें, वर्तमान में {commodity_display} के मंडी भाव उपलब्ध नहीं हैं।\n"
-                    "कृपया अपनी स्थानीय मंडी से संपर्क करें या किसान कॉल सेंटर (1800-180-1551) पर संपर्क करें।"
-                )
-            elif language == "en":
-                return (
-                    f"Sorry, I could not find current mandi prices for {commodity}.\n"
-                    "Please check your local mandi or call the Rythu Seva Kendra (1800-425-1422)."
-                )
-            else:
-                from src.ai.prompts import get_market_fallback_response
-                return get_market_fallback_response(language)
+            return labels["no_data"].format(commodity=commodity_display)
 
         # Use the most recent record per market
         seen_markets = set()
@@ -691,21 +654,17 @@ class MarketService:
             newest_date = max(r.price_date for r in deduplicated)
             latest_date_str = newest_date.strftime("%d %b %Y")
 
-            if language == "te":
-                dist_str = ""
-                if query_response.district:
+            dist_str = ""
+            if query_response.district:
+                if language == "te":
                     tel_dist = _TELUGU_DISTRICT_MAP.get(query_response.district, query_response.district)
                     dist_str = f"{tel_dist} "
-                lines = [
-                    f"⚠️ ఈరోజు {dist_str}{commodity_display} మార్కెట్ ధర డేటా అందుబాటులో లేదు.",
-                    f"📅 చివరిగా లభించిన ధర: {latest_date_str}",
-                ]
-            else:
-                dist_str = f"{query_response.district} " if query_response.district else ""
-                lines = [
-                    f"⚠️ Today's market price data for {dist_str}{commodity} is unavailable.",
-                    f"📅 Last available price: {latest_date_str}",
-                ]
+                else:
+                    dist_str = f"{query_response.district} "
+            lines = [
+                labels["today_unavailable"].format(district=dist_str, commodity=commodity_display),
+                labels["last_available"].format(date=latest_date_str),
+            ]
         else:
             lines = [labels["title"].format(commodity=commodity_display)]
 
@@ -859,9 +818,9 @@ async def enrich_response_with_market_prices(
     # Step 3: Get farmer location and profile
     district = None
     state = None
+    farmer_lang = getattr(farmer, "preferred_language", "te") or "te"
     from src.language.detector import detect_language
-    pref_lang = getattr(farmer, "preferred_language", "te") or "te"
-    language = detect_language(query_text, fallback=pref_lang)
+    language = detect_language(query_text, fallback=farmer_lang)
 
     # Extract district from query text if explicitly mentioned (e.g. "వరంగల్లో", "Warangal", "Enumamula")
     try:

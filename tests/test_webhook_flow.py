@@ -550,13 +550,14 @@ async def test_ai_failure_empty_response_sends_fallback_response():
 
 
 @pytest.mark.asyncio
-async def test_ogg_opus_configuration_does_not_force_16000_hz():
-    """Verify that Speech-to-Text configuration for OGG_OPUS does not force a 16000 Hz sample rate."""
+async def test_ogg_opus_configuration_sets_valid_sample_rate():
+    """Verify that Speech-to-Text configuration for OGG_OPUS sets a valid sample rate (never 0 Hz)."""
+    import struct
     from src.language.service import LanguageService
     from google.cloud import speech
 
     service = LanguageService()
-    captured_config = []
+    captured_configs = []
 
     mock_speech_client = AsyncMock()
     mock_response = speech.RecognizeResponse(
@@ -570,20 +571,33 @@ async def test_ogg_opus_configuration_does_not_force_16000_hz():
     )
 
     async def fake_recognize(config, audio):
-        captured_config.append(config)
+        captured_configs.append(config)
         return mock_response
 
     mock_speech_client.recognize = fake_recognize
 
     with patch.object(LanguageService, "google_client", new_callable=lambda: property(lambda self: mock_speech_client)):
-        res = await service._transcribe_with_google(b"fake_ogg_bytes", "audio/ogg")
-        assert res.transcription_text == "పత్తి పంట రక్షణ"
-        assert len(captured_config) == 1
-        cfg = captured_config[0]
-        # Encoding must be OGG_OPUS
-        assert cfg.encoding == speech.RecognitionConfig.AudioEncoding.OGG_OPUS
-        # sample_rate_hertz must not be 16000 (default unset in protobuf is 0)
-        assert cfg.sample_rate_hertz == 0
+        # Case 1: Raw bytes without OpusHead falls back to 16000 Hz (WhatsApp default)
+        res1 = await service._transcribe_with_google(b"fake_ogg_bytes", "audio/ogg")
+        assert res1.transcription_text == "పత్తి పంట రక్షణ"
+        cfg1 = captured_configs[0]
+        assert cfg1.encoding == speech.RecognitionConfig.AudioEncoding.OGG_OPUS
+        assert cfg1.sample_rate_hertz == 16000
+
+        # Case 2: Audio bytes with OpusHead containing 24000 Hz extracts 24000 Hz
+        fake_opushead = b"OggS" + b"\x00" * 24 + b"OpusHead" + b"\x01\x01\x00\x00" + struct.pack("<I", 24000)
+        res2 = await service._transcribe_with_google(fake_opushead, "audio/ogg; codecs=opus")
+        assert res2.transcription_text == "పత్తి పంట రక్షణ"
+        cfg2 = captured_configs[1]
+        assert cfg2.encoding == speech.RecognitionConfig.AudioEncoding.OGG_OPUS
+        assert cfg2.sample_rate_hertz == 24000
+
+        # Case 3: MP3 audio does not set sample_rate_hertz (0 in protobuf)
+        res3 = await service._transcribe_with_google(b"fake_mp3_bytes", "audio/mp3")
+        assert res3.transcription_text == "పత్తి పంట రక్షణ"
+        cfg3 = captured_configs[2]
+        assert cfg3.encoding == speech.RecognitionConfig.AudioEncoding.MP3
+        assert cfg3.sample_rate_hertz == 0
 
 
 @pytest.mark.asyncio

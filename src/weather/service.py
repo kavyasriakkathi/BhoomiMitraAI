@@ -188,38 +188,11 @@ def _extract_district_from_query(query_text: str) -> Optional[str]:
     return None
 
 
-# ------------------------------------------------------------------
-# Static Labels for Telugu / English Replies
-# ------------------------------------------------------------------
-_TE_LABELS = {
-    "title": "🌡️ వాతావరణ సమాచారం ({location})",
-    "temp": "ఉష్ణోగ్రత",
-    "feels_like": "అనిపిస్తుంది",
-    "wind": "గాలి వేగం",
-    "humidity": "తేమ (Humidity)",
-    "condition": "వాతావరణం",
-    "source_live": "ఓపెన్వెదర్ (లైవ్)",
-    "source_local": "స్థానిక వాతావరణ డేటా",
-    "rain_alert": "🌧️ రేపటి అంచనా: మీ ప్రాంతంలో వర్షం పడే అవకాశం ఉంది. దయచేసి పంటలపై తగిన రక్షణ చర్యలు తీసుకోండి.",
-    "clear_alert": "☀️ రేపటి అంచనా: వాతావరణం పొడిగా మరియు అనుకూలంగా ఉంటుంది.",
-    "no_data": "ℹ️ గమనిక: ఈ ప్రాంతానికి సంబంధించిన వాతావరణ సమాచారం ప్రస్తుతం అందుబాటులో లేదు. దయచేసి స్థానిక వాతావరణ కేంద్రం లేదా కిసాన్ కాల్ సెంటర్ (1800-180-1551) ను సంప్రదించండి.",
-    "ask_location": "📍 మీ పంటలకు సంబంధించిన ఖచ్చితమైన వాతావరణ సమాచారం కోసం దయచేసి మీ జిల్లా లేదా ప్రాంతం పేరును తెలపండి (ఉదాహరణకు: వరంగల్, గుంటూరు).",
-}
+from src.ai.formatting import get_weather_labels, get_weather_condition_desc
 
-_EN_LABELS = {
-    "title": "🌡️ Weather Information ({location})",
-    "temp": "Temperature",
-    "feels_like": "Feels Like",
-    "wind": "Wind Speed",
-    "humidity": "Humidity",
-    "condition": "Condition",
-    "source_live": "OpenWeather (Live)",
-    "source_local": "Local Weather Data",
-    "rain_alert": "🌧️ Tomorrow's Forecast: Rain is expected in your area. Please take necessary protective measures for your crops.",
-    "clear_alert": "☀️ Tomorrow's Forecast: Weather is expected to be clear/partly cloudy and dry.",
-    "no_data": "ℹ️ Note: Weather forecast is currently unavailable for this location. Please check local agromet advisories or the Kisan Call Centre (1800-180-1551).",
-    "ask_location": "📍 Please provide your district or area name (e.g., Warangal, Guntur) to get accurate weather forecast information for your crops.",
-}
+# Backward-compatible references
+_TE_LABELS = get_weather_labels("te")
+_EN_LABELS = get_weather_labels("en")
 
 _LABELS_BY_LANG = {
     "te": _TE_LABELS,
@@ -457,15 +430,17 @@ class WeatherService:
 
     def format_whatsapp_reply(self, response: WeatherForecastResponse, language: str = "en") -> str:
         """Format the forecast response into a friendly WhatsApp text block."""
-        labels = _LABELS_BY_LANG.get(language, _EN_LABELS if language == "en" else _TE_LABELS)
+        labels = get_weather_labels(language)
 
         if not response.data_available:
             return labels["no_data"]
 
-        # Translate weather condition description for Telugu & other languages
-        condition_desc = response.current.description
-        if language == "te":
-            condition_desc = self.translate_condition(response.current.condition_code, condition_desc)
+        # Localize weather condition description across all 13 supported languages
+        condition_desc = get_weather_condition_desc(
+            response.current.condition_code,
+            response.current.description,
+            language=language,
+        )
 
         # Determine rain forecast for tomorrow
         tomorrow_date = (datetime.utcnow() + timedelta(days=1)).date()
@@ -499,22 +474,8 @@ class WeatherService:
 
     @staticmethod
     def translate_condition(code: int, default_desc: str) -> str:
-        """Map OpenWeatherMap condition code to friendly Telugu description."""
-        if 200 <= code < 300:
-            return "ఉరుములతో కూడిన వర్షం (Thunderstorm)"
-        if 300 <= code < 400:
-            return "చిరుజల్లులు (Drizzle)"
-        if 500 <= code < 600:
-            return "వర్షం (Rain)"
-        if 600 <= code < 700:
-            return "మంచు (Snow)"
-        if 700 <= code < 800:
-            return "పొగమంచు (Mist/Fog)"
-        if code == 800:
-            return "ఆకాశం నిర్మలంగా ఉంది (Clear Sky)"
-        if 800 < code < 900:
-            return "పాక్షికంగా మేఘావృతమై ఉంది (Cloudy)"
-        return default_desc
+        """Map OpenWeatherMap condition code to friendly description."""
+        return get_weather_condition_desc(code, default_desc, language="te")
 
 
 # ------------------------------------------------------------------
@@ -537,10 +498,10 @@ async def enrich_response_with_weather(
     - Any unhandled error occurs
     """
     query_lower = query_text.lower()
+    farmer_lang = getattr(farmer, "preferred_language", "en") or "en"
     from src.language.detector import detect_language
-    pref_lang = getattr(farmer, "preferred_language", "en") or "en"
-    language = detect_language(query_text, fallback=pref_lang)
-    labels = _LABELS_BY_LANG.get(language, _EN_LABELS if language == "en" else _TE_LABELS)
+    language = detect_language(query_text, fallback=farmer_lang)
+    labels = get_weather_labels(language)
 
     # Step 1: Detect weather intent
     from src.ai.decision_engine import WEATHER_KEYWORDS_MULTILINGUAL, WEATHER_KEYWORDS_TANGLISH

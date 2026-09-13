@@ -29,6 +29,10 @@ class LanguageMetadata:
     prompt_name: str
     script: str
     stt_code: str
+    tts_code: Optional[str] = None
+    tts_voice_name: Optional[str] = None
+    supported_stt: bool = True
+    supported_tts: bool = True
     supported: bool = True
 
 
@@ -40,6 +44,10 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         prompt_name="Telugu",
         script="telu",
         stt_code="te-IN",
+        tts_code="te-IN",
+        tts_voice_name="te-IN-Standard-A",
+        supported_stt=True,
+        supported_tts=True,
         supported=True,
     ),
     "hi": LanguageMetadata(
@@ -49,6 +57,10 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         prompt_name="Hindi",
         script="deva",
         stt_code="hi-IN",
+        tts_code="hi-IN",
+        tts_voice_name="hi-IN-Standard-A",
+        supported_stt=True,
+        supported_tts=True,
         supported=True,
     ),
     "en": LanguageMetadata(
@@ -58,6 +70,10 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         prompt_name="English",
         script="latn",
         stt_code="en-IN",
+        tts_code="en-IN",
+        tts_voice_name="en-IN-Standard-A",
+        supported_stt=True,
+        supported_tts=True,
         supported=True,
     ),
     "ta": LanguageMetadata(
@@ -67,6 +83,10 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         prompt_name="Tamil",
         script="taml",
         stt_code="ta-IN",
+        tts_code="ta-IN",
+        tts_voice_name="ta-IN-Standard-A",
+        supported_stt=True,
+        supported_tts=True,
         supported=True,
     ),
     "kn": LanguageMetadata(
@@ -76,6 +96,10 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         prompt_name="Kannada",
         script="knda",
         stt_code="kn-IN",
+        tts_code="kn-IN",
+        tts_voice_name="kn-IN-Standard-A",
+        supported_stt=True,
+        supported_tts=True,
         supported=True,
     ),
     "ml": LanguageMetadata(
@@ -85,6 +109,10 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         prompt_name="Malayalam",
         script="mlym",
         stt_code="ml-IN",
+        tts_code="ml-IN",
+        tts_voice_name="ml-IN-Standard-A",
+        supported_stt=True,
+        supported_tts=True,
         supported=True,
     ),
     "mr": LanguageMetadata(
@@ -94,6 +122,10 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         prompt_name="Marathi",
         script="deva",
         stt_code="mr-IN",
+        tts_code="mr-IN",
+        tts_voice_name="mr-IN-Standard-A",
+        supported_stt=True,
+        supported_tts=True,
         supported=True,
     ),
     "bn": LanguageMetadata(
@@ -103,6 +135,10 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         prompt_name="Bengali",
         script="beng",
         stt_code="bn-IN",
+        tts_code="bn-IN",
+        tts_voice_name="bn-IN-Standard-A",
+        supported_stt=True,
+        supported_tts=True,
         supported=True,
     ),
     "gu": LanguageMetadata(
@@ -112,6 +148,10 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         prompt_name="Gujarati",
         script="gujr",
         stt_code="gu-IN",
+        tts_code="gu-IN",
+        tts_voice_name="gu-IN-Standard-A",
+        supported_stt=True,
+        supported_tts=True,
         supported=True,
     ),
     "or": LanguageMetadata(
@@ -121,6 +161,10 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         prompt_name="Odia",
         script="orya",
         stt_code="or-IN",
+        tts_code=None,
+        tts_voice_name=None,
+        supported_stt=True,
+        supported_tts=False,
         supported=True,
     ),
     "pa": LanguageMetadata(
@@ -129,7 +173,11 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         native_name="ਪੰਜਾਬੀ",
         prompt_name="Punjabi",
         script="guru",
-        stt_code="pa-IN",
+        stt_code="pa-Guru-IN",
+        tts_code="pa-IN",
+        tts_voice_name="pa-IN-Standard-A",
+        supported_stt=True,
+        supported_tts=True,
         supported=True,
     ),
     "as": LanguageMetadata(
@@ -139,6 +187,10 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         prompt_name="Assamese",
         script="beng",
         stt_code="as-IN",
+        tts_code=None,
+        tts_voice_name=None,
+        supported_stt=True,
+        supported_tts=False,
         supported=True,
     ),
     "ur": LanguageMetadata(
@@ -148,6 +200,10 @@ SUPPORTED_LANGUAGES: Dict[str, LanguageMetadata] = {
         prompt_name="Urdu",
         script="arab",
         stt_code="ur-IN",
+        tts_code="ur-IN",
+        tts_voice_name="ur-IN-Standard-A",
+        supported_stt=True,
+        supported_tts=True,
         supported=True,
     ),
 }

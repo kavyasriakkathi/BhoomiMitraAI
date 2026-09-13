@@ -3,8 +3,8 @@ BhoomiMitra AI — AI Decision Engine & Orchestration Layer
 
 The central decision-making brain of BhoomiMitra AI.
 Responsible for:
-1. Multi-lingual intent classification across 13 Indian languages (Telugu, Hindi, English, Tamil, Kannada, Malayalam, Marathi, Bengali, Gujarati, Odia, Punjabi, Assamese, Urdu, plus Romanized inputs).
-2. Authoritative module routing (Market, Weather, Schemes, Shops, Advisory, Vision, Escalation).
+1. Multi-lingual intent classification (English, Telugu, Tanglish, Mixed).
+2. Authoritative module routing (Market, Weather, Schemes, Shops, Advisory, Vision).
 3. Anti-hallucination and agricultural safety enforcement.
 4. Factual data guarantees (real data is preserved exactly; LLM never guesses prices/weather/dosages).
 5. Single-intent and multi-intent response assembly with localized fallbacks.
@@ -18,7 +18,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.models import Farmer, Conversation
 from src.core.logging import logger
-from src.language.detector import detect_language
 from src.ai.prompts import (
     get_fallback_response,
     get_market_fallback_response,
@@ -48,423 +47,48 @@ class FarmerIntent(str, Enum):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Intent Keyword & Pattern Mappings (13 Languages + Romanized)
+# Inten# ─────────────────────────────────────────────────────────────────────────────
+# Intent Keyword & Pattern Mappings (13 Languages + Transliterated)
 # ─────────────────────────────────────────────────────────────────────────────
 
 GREETING_PATTERNS = [
-    r"\b(?:hello|hi|hey|hai|helo|namaste|namaskar|namaskaram|namaskaralu|pranam|vanakkam|namaskara|namaskaram|adaab|sat\s*sri\s*akal|khammaghani)\b",
+    r"\b(?:hello|hi|hey|hai|helo|namaste|namaskar|namaskaram|namaskaralu|vanakkam|namaskara|nomoshkar|nomoskar|kem\s*cho|sat\s*sri\s*akal|satsriakal|salaam|salam|aadab)\b",
     r"\b(?:good\s+morning|good\s+afternoon|good\s+evening|greetings)\b",
-    r"^(?:నమస్తే|నమస్కారం|నమస్కారాలు|హలో|హాయ్|नमस्ते|नमस्कार|प्रणाम|வணக்கம்|ನಮಸ್ಕಾರ|ನಮಸ್ಕಾರಗಳು|നമസ്കാരം|নমস্কার|নমস্কাৰ|સત\s*શ્રી\s*અકાલ|ਸਤਿ\s*ਸ੍ਰੀ\s*ਅਕਾਲ|ନମସ୍କାର|سلام|ആദരവ്)[\s\!,\.]*$",
-    r"^(?:హాయ్|నమస్తే|హలో|నమస్కారం|नमस्ते|नमस्कार|வணக்கம்|ನಮಸ್ಕಾರ|নমস্কার)\s+(?:భూమిమిత్ర|bhoomimitra|भूमिमित्र|பூமிமித்ரா|ಭೂಮಿಮಿತ್ರ|రైతు\s*మిత్ర|రైతు\s*అన్న|రైతు|किसान|விவசாயி)?[\s\!,\.]*$",
+    r"^(?:నమస్తే|నమస్కారం|నమస్కారాలు|హలో|హాయ్|नमस्ते|नमस्कार|வணக்கம்|ನಮಸ್ಕಾರ|നമസ്കാരം|নমস্কার|নমস্কাৰ|કેમ\s*છો|ਸਤਿ\s*ਸ੍ਰੀ\s*ਅਕਾਲ|ନମସ୍କାର|سلام|آداب)[\s\!,\.]*$",
+    r"^(?:హాయ్|నమస్తే|హలో|నమస్కారం|नमस्ते|नमस्कार|வணக்கம்|ನಮಸ್ಕಾರ|നമസ്കാരം|নমস্কার|নমস্কাৰ|નમસ્તે|ਸਤਿ\s*ਸ੍ਰੀ\s*ਅਕਾਲ|ନମସ୍କାର|سلام)\s+(?:భూమిమిత్ర|bhoomimitra|भूमिमित्र|பூமிமித்ரா|ಭೂಮಿಮಿತ್ರ|ഭൂമിമിത്ര|ভূমিমিত্র|ভূমিমিত্ৰ|ભૂમિમિત્ર|ਭੂਮੀਮਿੱਤਰ|ଭୂମିମିତ୍ର|بھومی\s*مترا|రైతు\s*మిత్ర|రైతు\s*అన్న|రైతు|किसान|farmer)?[\s\!,\.]*$",
 ]
 
-GREETING_REPLIES: Dict[str, str] = {
-    "te": (
-        "నమస్తే! నేను మీ భూమిమిత్ర AI వ్యవసాయ సహాయకుడిని. 🙏\n\n"
-        "పంట సలహాలు, తెగుళ్ల నివారణ, ఎరువుల సమాచారం, మార్కెట్ ధరలు "
-        "మరియు వాతావరణ అంచనా కోసం నన్ను అడగవచ్చు. మీకు ఏ విధంగా సహాయపడగలను?"
-    ),
-    "hi": (
-        "नमस्ते! मैं आपका भूमिमित्र AI कृषि सहायक हूँ। 🙏\n\n"
-        "आप मुझसे फसल सलाह, कीट व रोग नियंत्रण, खाद की जानकारी, मंडी भाव "
-        "और मौसम पूर्वानुमान के बारे में पूछ सकते हैं। मैं आपकी क्या मदद कर सकता हूँ?"
-    ),
-    "en": (
-        "Hello! I am your BhoomiMitra AI farming assistant. 🙏\n\n"
-        "You can ask me about crop advisory, pest/disease management, fertilizer recommendations, "
-        "mandi prices, and weather forecasts. How can I assist you today?"
-    ),
-    "ta": (
-        "வணக்கம்! நான் உங்கள் பூமிமித்ரா AI விவசாய உதவியாளர். 🙏\n\n"
-        "பயிர் ஆலோசனைகள், பூச்சி கட்டுப்பாடு, உர பரிந்துரைகள், சந்தை விலைகள் "
-        "மற்றும் வானிலை முன்னறிவிப்பு பற்றி என்னிடம் கேட்கலாம். உங்களுக்கு எப்படி உதவ முடியும்?"
-    ),
-    "kn": (
-        "ನಮಸ್ಕಾರ! ನಾನು ನಿಮ್ಮ ಭೂಮಿಮಿತ್ರ AI ಕೃಷಿ ಸಹಾಯಕ. 🙏\n\n"
-        "ಬೆಳೆ ಸಲಹೆ, ಕೀಟ ಮತ್ತು ರೋಗ ನಿಯಂತ್ರಣ, ರಸಗೊಬ್ಬರ ಮಾಹಿತಿ, ಮಾರುಕಟ್ಟೆ ದರಗಳು "
-        "ಮತ್ತು ಹವಾಮಾನ ಮುನ್ಸೂಚನೆಗಾಗಿ ನೀವು ನನ್ನನ್ನು ಕೇಳಬಹುದು. ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?"
-    ),
-    "ml": (
-        "നമസ്കാരം! ഞാൻ നിങ്ങളുടെ ഭൂമിമിത്ര AI കാർഷിക സഹായിയാണ്. 🙏\n\n"
-        "വിള ഉപദേശങ്ങൾ, കീട-രോഗ നിയന്ത്രണം, വളം വിവരങ്ങൾ, വിപണി വിലകൾ, "
-        "കാലാവസ്ഥാ പ്രവചനം എന്നിവയെക്കുറിച്ച് നിങ്ങൾക്ക് എന്നോട് ചോദിക്കാം. ഞാൻ നിങ്ങളെ എങ്ങനെ സഹായിക്കണം?"
-    ),
-    "mr": (
-        "नमस्कार! मी तुमचा भूमिमित्र AI कृषी सहाय्यक आहे. 🙏\n\n"
-        "तुम्ही मला पीक सल्ला, कीड व रोग नियंत्रण, खत व्यवस्थापन, बाजारभाव "
-        "आणि हवामान अंदाजाबद्दल विचारू शकता. मी आपली काय मदत करू शकतो?"
-    ),
-    "bn": (
-        "নমস্কার! আমি আপনার ভূমিমিত্র AI কৃষি সহকারী। 🙏\n\n"
-        "আপনি ফসল পরামর্শ, কীট ও রোগ নিয়ন্ত্রণ, সার তথ্য, বাজার দর "
-        "এবং আবহাওয়ার পূর্বাভাসের জন্য আমাকে জিজ্ঞাসা করতে পারেন। আমি আপনাকে কীভাবে সাহায্য করতে পারি?"
-    ),
-    "gu": (
-        "નમસ્તે! હું તમારો ભૂમિમિત્ર AI કૃષિ સહાયક છું. 🙏\n\n"
-        "તમે મને પાકની સલાહ, જીવાત નિયંત્રણ, ખાતરની માહિતી, બજાર ભાવ "
-        "અને હવામાન આગાહી વિશે પૂછી શકો છો. હું તમને કેવી રીતે મદદ કરી શકું?"
-    ),
-    "or": (
-        "ନମସ୍କାର! ମୁଁ ଆପଣଙ୍କର ଭୂମିମିତ୍ର AI କୃଷି ସହାୟକ। 🙏\n\n"
-        "ଆପଣ ଫସଲ ପରାମର୍ଶ, କୀଟ ନିୟନ୍ତ୍ରଣ, ସାର ସୂଚନା, ବଜାର ଦର "
-        "ଏବଂ ପାଣିପାଗ ପୂର୍ବାନୁମାନ ବିଷୟରେ ମୋତେ ପଚାରିପାରିବେ। ମୁଁ ଆପଣଙ୍କୁ କିପରି ସାହାଯ୍ୟ କରିପାରିବି?"
-    ),
-    "pa": (
-        "ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ! ਮੈਂ ਤੁਹਾਡਾ ਭੂਮੀਮਿੱਤਰ AI ਖੇਤੀਬਾੜੀ ਸਹਾਇਕ ਹਾਂ। 🙏\n\n"
-        "ਤੁਸੀਂ ਫਸਲ ਦੀ ਸਲਾਹ, ਕੀੜੇ-ਮਕੌੜਿਆਂ ਦੀ ਰੋਕਥਾਮ, ਖਾਦ ਦੀ ਜਾਣਕਾਰੀ, ਮੰਡੀ ਭਾਅ "
-        "ਅਤੇ ਮੌਸਮ ਬਾਰੇ ਪੁੱਛ ਸਕਦੇ ਹੋ। ਮੈਂ ਤੁਹਾਡੀ ਕੀ ਮਦਦ ਕਰ ਸਕਦਾ ਹਾਂ?"
-    ),
-    "as": (
-        "নমস্কাৰ! মই আপোনাৰ ভূমিমিত্ৰ AI কৃষি সহায়ক। 🙏\n\n"
-        "আপুনি শস্য পৰামৰ্শ, পোক-পৰুৱা নিয়ন্ত্ৰণ, সাৰৰ তথ্য, বজাৰ দৰ "
-        "আৰু বতৰৰ আগজাননীৰ বিষয়ে মোক সুধিব পাৰে। মই আপোনাক কেনেকৈ সহায় কৰিব পাৰোঁ?"
-    ),
-    "ur": (
-        "سلام! میں آپ کا بھومی مترا AI زرعی معاون ہوں۔ 🙏\n\n"
-        "آپ فصل کے مشورے، کیڑوں اور بیماریوں کی روک تھام، کھاد کی معلومات، منڈی کے بھاؤ "
-        "اور موسم کی پیش گوئی کے بارے میں مجھ سے پوچھ سکتے ہیں۔ میں آپ کی کیا مدد کر سکتا ہوں؟"
-    ),
+GREETING_TOKENS = {
+    "hi", "hello", "hey", "namaste", "namaskar", "namaskaram", "vanakkam", "namaskara",
+    "nomoshkar", "nomoskar", "salam", "salaam", "aadab", "kemcho",
+    "హాయ్", "నమస్తే", "హలో", "నమస్కారం",
+    "नमस्ते", "नमस्कार", "प्रणाम", "राम", "जय",
+    "வணக்கம்",
+    "ನಮಸ್ಕಾರ",
+    "നമസ്കാരം",
+    "নমস্কার", "নমস্কাৰ",
+    "કેમ", "છો", "નમસ્તે",
+    "ਸਤਿ", "ਸ੍ਰੀ", "ਅਕਾਲ",
+    "ନମସ୍କାର",
+    "سلام", "آداب",
 }
 
-MARKET_PRICE_KEYWORDS_EN = [
-    "market price", "mandi price", "mandi rate", "market rate", "selling price",
-    "rate per quintal", "cotton price", "cotton rate", "paddy price", "chilli price",
-    "tomato price", "price of", "prices of", "how much price", "how much rate",
-    "market value", "mandi rates", "market prices",
-]
+GREETING_RESPONSES = {
+    "te": "నమస్తే! నేను మీ భూమిమిత్ర AI వ్యవసాయ సహాయకుడిని. 🙏\n\nపంట సలహాలు, తెగుళ్ల నివారణ, ఎరువుల సమాచారం, మార్కెట్ ధరలు మరియు వాతావరణ అంచనా కోసం నన్ను అడగవచ్చు. మీకు ఏ విధంగా సహాయపడగలను?",
+    "hi": "नमस्ते! मैं आपका भूमिमित्र AI कृषि सहायक हूँ। 🙏\n\nआप मुझसे फसल सलाह, कीट व रोग नियंत्रण, खाद की जानकारी, मंडी भाव और मौसम पूर्वानुमान के बारे में पूछ सकते हैं। मैं आपकी क्या मदद कर सकता हूँ?",
+    "en": "Hello! I am your BhoomiMitra AI farming assistant. 🙏\n\nYou can ask me about crop advisory, pest/disease management, fertilizer recommendations, mandi prices, and weather forecasts. How can I assist you today?",
+    "ta": "வணக்கம்! நான் உங்கள் பூமிமித்ரா AI விவசாய உதவியாளர். 🙏\n\nபயிர் ஆலோசனைகள், பூச்சி கட்டுப்பாடு, உர மேலாண்மை, சந்தை விலைகள் மற்றும் வானிலை தகவல்களுக்கு என்னை கேட்கலாம். உங்களுக்கு நான் எவ்வாறு உதவ முடியும்?",
+    "kn": "ನಮಸ್ಕಾರ! ನಾನು ನಿಮ್ಮ ಭೂಮಿಮಿತ್ರ AI ಕೃಷಿ ಸಹಾಯಕ. 🙏\n\nಬೆಳೆ ಸಲಹೆ, ಕೀಟ ಮತ್ತು ರೋಗ ನಿಯಂತ್ರಣ, ಗೊಬ್ಬರ ಮಾಹಿತಿ, ಮಾರುಕಟ್ಟೆ ದರಗಳು ಮತ್ತು ಹವಾಮಾನ ಮುನ್ಸೂಚನೆಗಾಗಿ ನೀವು ನನ್ನನ್ನು ಕೇಳಬಹುದು. ನಾನು ನಿಮಗೆ ಹೇಗೆ ಸಹಾಯ ಮಾಡಲಿ?",
+    "ml": "നമസ്കാരം! ഞാൻ നിങ്ങളുടെ ഭൂമിമിത്ര AI കാർഷിക സഹായിയാണ്. 🙏\n\nവിള ഉപദേശങ്ങൾ, കീടനിയന്ത്രണം, വളപ്രയോഗം, വിപണി വിലകൾ, കാലാവസ്ഥാ പ്രവചനം എന്നിവയെക്കുറിച്ച് നിങ്ങൾക്ക് എന്നോട് ചോദിക്കാം. ഞാൻ നിങ്ങളെ എങ്ങനെ സഹായിക്കണം?",
+    "mr": "नमस्कार! मी आपला भूमिमित्र AI शेती सल्लागार आहे. 🙏\n\nपीक सल्ला, कीड व रोग नियंत्रण, खत व्यवस्थापन, बाजारभाव आणि हवामान अंदाजाबाबत आपण मला विचारू शकता. मी आपली काय मदत करू शकतो?",
+    "bn": "নমস্কার! আমি আপনার ভূমিমিত্র AI কৃষি সহকারী। 🙏\n\nফসল পরামর্শ, কীটপতঙ্গ নিয়ন্ত্রণ, সারের তথ্য, বাজার দর এবং আবহাওয়ার পূর্বাভাসের জন্য আপনি আমাকে জিজ্ঞাসা করতে পারেন। আমি আপনাকে কীভাবে সাহায্য করতে পারি?",
+    "gu": "નમસ્તે! હું તમારો ભૂમિમિત્ર AI કૃષિ સહાયક છું. 🙏\n\nપાક સલાહ, જીવાત નિયંત્રણ, ખાતરની માહિતી, બજાર ભાવ અને હવામાનની આગાહી વિશે તમે મને પૂછી શકો છો. હું તમને કેવી રીતે મદદ કરી શકું?",
+    "or": "ନମସ୍କାର! ମୁଁ ଆପଣଙ୍କର ଭୂମିମିତ୍ର AI କୃଷି ସହାୟକ। 🙏\n\nଫସଲ ପରାମର୍ଶ, କୀଟ ନିୟନ୍ତ୍ରଣ, ସାର ସୂଚନା, ମଣ୍ଡି ଦର ଏବଂ ପାଣିପାଗ ପୂର୍ବାନୁମାନ ବିଷୟରେ ଆପଣ ମୋତେ ପଚାରିପାରିବେ। ମୁଁ ଆପଣଙ୍କୁ କିପରି ସାହାଯ୍ୟ କରିପାରିବି?",
+    "pa": "ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ! ਮੈਂ ਤੁਹਾਡਾ ਭੂਮੀਮਿੱਤਰ AI ਖੇਤੀਬਾੜੀ ਸਹਾਇਕ ਹਾਂ। 🙏\n\nਫ਼ਸਲ ਸਲਾਹ, ਕੀਟ ਰੋਕਥਾਮ, ਖਾਦ ਜਾਣਕਾਰੀ, ਮੰਡੀ ਭਾਅ ਅਤੇ ਮੌਸਮ ਦੀ ਜਾਣਕਾਰੀ ਲਈ ਤੁਸੀਂ ਮੈਨੂੰ ਪੁੱਛ ਸਕਦੇ ਹੋ। ਮੈਂ ਤੁਹਾਡੀ ਕੀ ਮਦਦ ਕਰ ਸਕਦਾ ਹਾਂ?",
+    "as": "নমস্কাৰ! মই আপোনাৰ ভূমিমিত্ৰ AI কৃষি সহায়ক। 🙏\n\nশস্যৰ পৰামৰ্শ, পোক-পৰুৱা নিয়ント্ৰণ, সাৰৰ তথ্য, বজাৰ দৰ আৰু বতৰৰ আগজাননীৰ বিষয়ে আপুনি মোক সুধিব পাৰে। মই আপোনাক কেনেকৈ সহায় কৰিব পাৰোঁ?",
+    "ur": "سلام! میں آپ کا بھومی مترا AI زرعی معاون ہوں۔ 🙏\n\nآپ مجھ سے فصل کے مشورے، کیڑوں اور بیماریوں کی روک تھام، کھاد کی معلومات، منڈی کے بھاؤ اور موسم کی پیشن گوئی کے بارے میں پوچھ سکتے ہیں। میں آپ کی کیا مدد کر سکتا ہوں?",
+}
 
-MARKET_PRICE_KEYWORDS_TE = [
-    "మార్కెట్ ధర", "మార్కెట్ ధరలు", "మండి ధర", "మండి ధరలు", "ధర ఎంత", "రేటు ఎంత",
-    "క్వింటాల్", "క్వింటాలు", "అమ్ముకోవాలి", "గిట్టుబాటు ధర", "మార్కెట్లో", "మండిలో",
-    "పత్తి ధర", "మిర్చి ధర", "వరి ధర", "టమాటా ధర", "రేట్లు", "ధరలు",
-]
-
-MARKET_PRICE_KEYWORDS_MULTILINGUAL = [
-    # Hindi & Marathi
-    "मंडी भाव", "बाजार भाव", "मंडी रेट", "क्विंटल का भाव", "कपास का भाव", "धान का भाव",
-    "टमाटर का भाव", "मिर्च का भाव", "बाजार दर", "विक्री किंमत", "कापूस भाव", "सोयाबीन भाव",
-    # Tamil
-    "சந்தை விலை", "மண்டி விலை", "விலை என்ன", "குவிண்டால் விலை", "நெல் விலை", "பருத்தி விலை",
-    # Kannada
-    "ಮಾರುಕಟ್ಟೆ ಬೆಲೆ", "ಮಂಡಿ ದರ", "ಬೆಲೆ ಎಷ್ಟು", "ಕ್ವಿಂಟಾಲ್ ಬೆಲೆ", "ಹತ್ತಿ ಬೆಲೆ", "ಭತ್ತದ ಬೆಲೆ",
-    # Malayalam
-    "വിപണി വില", "വിപണി നിരക്ക്", "വില എത്ര", "ക്വിന്റൽ വില", "നെല്ല് വില",
-    # Bengali & Assamese
-    "বাজার দর", "বাজারের দাম", "কত দাম", "কুইন্টাল দর", "ধানের দাম", "বজাৰ দৰ", "কপাহৰ দাম",
-    # Gujarati
-    "બજાર ભાવ", "મંડી ભાવ", "ભાવ કેટલો", "ભાવ શું છે", "કપાસનો ભાવ", "ડાંગરનો ભાવ",
-    # Odia
-    "ବଜାର ଦର", "ମଣ୍ଡି ଦର", "ଦର କେତେ", "କ୍ୱିଣ୍ଟାଲ ଦର", "ଧାନ ଦର",
-    # Punjabi
-    "ਮੰਡੀ ਭਾਅ", "ਬਾਜ਼ਾਰ ਭਾਅ", "ਭਾਅ ਕਿੰਨਾ", "ਕਣਕ ਦਾ ਭਾਅ", "ਝੋਨੇ ਦਾ ਭਾਅ",
-    # Urdu
-    "منڈی کا بھاؤ", "مارکیٹ ریٹ", "قیمت کیا ہے", "فی کوئنٹل ریٹ", "کپاس کا ریٹ",
-]
-
-MARKET_PRICE_KEYWORDS_TANGLISH = [
-    "rate entha", "dhara entha", "rate entho", "dhara entho", "cotton rate", "patti rate",
-    "patti dhara", "mirchi rate", "mirapa rate", "tomato rate", "tamata rate", "mandi rate",
-    "market lo", "mandi lo", "market price", "mandi price", "bajar rate", "ammukovali",
-    "eeroju rate", "today rate", "rate ela undi", "dhara ela undi", "per quintal rate",
-    "lo cotton rate", "lo patti rate", "patti rate entha", "cotton rate entha",
-    "mandi bhav", "kapas bhav", "dhan ka rate", "eshtu rate", "vilai enna", "koto dam",
-]
-
-WEATHER_KEYWORDS_EN = [
-    "weather", "forecast", "rain", "raining", "rainy", "temperature", "humidity",
-    "wind", "storm", "thunderstorm", "will it rain", "precipitation", "cloudy", "sunny",
-    "climate", "degrees",
-]
-
-WEATHER_KEYWORDS_TE = [
-    "వాతావరణం", "వాతావరణ", "వర్షం", "వర్షాలు", "వాన", "వానలు", "కురుస్తుందా",
-    "పడుతుందా", "కురుస్తుంది", "పడుతుంది", "ఉష్ణోగ్రత", "తేమ", "ఎండ", "చలి",
-    "వాతావరణ అంచనా", "మంచు", "తుఫాను", "జల్లులు", "మేఘాలు",
-]
-
-WEATHER_KEYWORDS_MULTILINGUAL = [
-    # Hindi & Marathi
-    "मौसम", "बारिश", "तापमान", "हवामान", "पाऊस", "गारपीट", "हवामान अंदाज", "वादळ", "उष्णता",
-    # Tamil
-    "வானிலை", "மழை", "மழை பெய்யுமா", "வெப்பநிலை", "காற்று", "வானிலை அறிக்கை",
-    # Kannada
-    "ಹವಾಮಾನ", "ಮಳೆ", "ಮಳೆ ಬರುತ್ತಾ", "ತಾಪಮಾನ", "ಗಾಳಿ", "ಹವಾಮಾನ ವರದಿ",
-    # Malayalam
-    "കാലാവസ്ഥ", "മഴ", "മഴ പെയ്യുമോ", "താപനില", "കാറ്റ്",
-    # Bengali & Assamese
-    "আবহাওয়া", "বৃষ্টি", "বৃষ্টি হবে কি", "তাপমাত্রা", "বতৰ", "বৰষুণ", "বতৰৰ আগজাননী",
-    # Gujarati
-    "હવામાન", "વરસાદ", "વરસાદ પડશે", "તાપમાન", "આગાહી",
-    # Odia
-    "ପାଣିପାଗ", "ବର୍ଷା", "ବର୍ଷା ହେବ କି", "ତାପମାତ୍ରା",
-    # Punjabi
-    "ਮੌਸਮ", "ਮੀਂਹ", "ਬਰਸਾਤ", "ਮੀਂਹ ਪਵੇਗਾ", "ਤਾਪਮਾਨ",
-    # Urdu
-    "موسم", "بارش", "درجہ حرارت", "کیا بارش ہوگی", "موسم کا حال",
-]
-
-WEATHER_KEYWORDS_TANGLISH = [
-    "varsham", "varsham paduthunda", "varsham vasthunda", "vana vasthunda",
-    "vana paduthunda", "weather ela undi", "eeroju varsham", "repu varsham",
-    "eppudu paduthundi", "rain paduthunda", "rain vasthada", "temperature entha",
-    "cloudy ga undi", "varsham padtada", "varsham padtundha", "rain padtundha",
-    "varsham eppudu", "varsham ela", "barish hogi kya", "paus padel ka",
-    "mazhai varuma", "male barutta", "varsad aavshe",
-]
-
-SCHEMES_KEYWORDS_EN = [
-    "scheme", "schemes", "subsidy", "subsidies", "yojana", "pm kisan", "rythu bandhu",
-    "rythu bharosa", "crop insurance", "fasal bima", "kcc", "kisan credit",
-    "solar pump subsidy", "government assistance", "grant", "subsidized",
-]
-
-SCHEMES_KEYWORDS_TE = [
-    "పథకం", "పథకాలు", "సబ్సిడీ", "సబ్సిడీలు", "రైతు బంధు", "రైతు భరోసా", "పీఎం కిసాన్",
-    "పంట బీమా", "రుణమాఫీ", "ప్రభుత్వ సహాయం", "ప్రభుత్వ", "అర్హత", "ప్రయోజనాలు",
-    "ప్రభుత్వ పథకాలు", "రైతు పథకాలు",
-]
-
-SCHEMES_KEYWORDS_MULTILINGUAL = [
-    # Hindi & Marathi
-    "योजना", "सरकारी योजना", "सब्सिडी", "अनुदान", "पीएम किसान", "फसल बीमा", "कर्जमाफी", "कृषी योजना",
-    # Tamil
-    "திட்டம்", "அரசு திட்டம்", "மானியம்", "பயிர் காப்பீடு", "கிசான்",
-    # Kannada
-    "ಯೋಜನೆ", "ಸರ್ಕಾರಿ ಯೋಜನೆ", "ಸಬ್ಸಿಡಿ", "ಬೆಳೆ ವಿಮೆ", "ರೈತ ಯೋಜನೆ",
-    # Malayalam
-    "പദ്ധതി", "സർക്കാർ പദ്ധതി", "സബ്‌സിഡി", "വിള ഇൻഷുറൻസ്",
-    # Bengali & Assamese
-    "প্রকল্প", "সরকারি প্রকল্প", "ভর্তুকি", "শস্য বীমা", "আঁচনি", "চৰকাৰী আঁচনি",
-    # Gujarati
-    "યોજના", "સરકારી યોજના", "સબસિડી", "પાક વીમો", "કિસાન યોજના",
-    # Odia
-    "ଯୋଜନା", "ସରକାରୀ ଯୋଜନା", "ସବସିଡି", "ଫସଲ ବୀମା",
-    # Punjabi
-    "ਸਕੀਮ", "ਸਰਕਾਰੀ ਸਕੀਮ", "ਸਬਸਿਡੀ", "ਫਸਲ ਬੀਮਾ", "ਕਿਸਾਨ ਸਕੀਮ",
-    # Urdu
-    "اسکیم", "سرکاری اسکیم", "سبسڈی", "فصل کا بیمہ", "کسان اسکیم",
-]
-
-SCHEMES_KEYWORDS_TANGLISH = [
-    "pathakam", "pathakalu", "prabhutva pathakalu", "rythu pathakalu", "subsidilu",
-    "subsidy", "pm kisan", "rythu bharosa", "rythu bandhu", "panta bheema",
-    "kisan subsidy", "gov schemes", "sarakaru sahaym", "pathakam apply",
-    "prabhutva", "pathakalu unnaya", "sarkari yojana", "fasal bima", "anudan",
-]
-
-SHOPS_KEYWORDS_EN = [
-    "where to buy", "where can i buy", "where i can buy", "shops near", "stores near",
-    "buy urea", "buy dap", "dealer", "dealers", "input availability", "available in shop",
-    "fertilizer store", "pesticide store", "buy fertilizer", "buy pesticide", "buy seeds",
-    "shops nearby", "store nearby", "agro agency",
-]
-
-SHOPS_KEYWORDS_TE = [
-    "ఎక్కడ దొరుకుతుంది", "ఎక్కడ కొనాలి", "సమీప దుకాణాలు", "ఎరువుల దుకాణం", "మందుల షాపు",
-    "కొనుగోలు", "దుకాణం", "షాపు", "లభిస్తుంది", "యూరియా దొరుకుతుందా", "డీలర్", "డీలర్లు",
-    "దుకాణాలు", "షాపులు", "దొరికే చోటు",
-]
-
-SHOPS_KEYWORDS_MULTILINGUAL = [
-    # Hindi & Marathi
-    "दुकान", "कहाँ मिलेगा", "कहाँ से खरीदें", "दुकानें", "खाद की दुकान", "कृषी केंद्र", "कुठे मिळेल", "खरेदी",
-    # Tamil
-    "எங்கு கிடைக்கும்", "எங்கே வாங்கலாம்", "அருகிலுள்ள கடைகள்", "உரக் கடை", "பூச்சிக்கொல்லி கடை",
-    # Kannada
-    "ಎಲ್ಲಿ ಸಿಗುತ್ತದೆ", "ಎಲ್ಲಿ ಖರೀದಿಸಬೇಕು", "ಹತ್ತಿರದ ಅಂಗಡಿಗಳು", "ರಸಗೊಬ್ಬರ ಅಂಗಡಿ", "ಕೃಷಿ ಕೇಂದ್ರ",
-    # Malayalam
-    "എവിടെ കിട്ടും", "എവിടെ വാങ്ങാം", "അടുത്തുള്ള കടകൾ", "വളം കട",
-    # Bengali & Assamese
-    "কোথায় পাব", "কোথায় কিনতে পাওয়া যাবে", "নিকটবর্তী দোকান", "সারের দোকান", "ক'ত পাম",
-    # Gujarati
-    "ક્યાં મળશે", "ક્યાંથી ખરીદવું", "નજીકની દુકાનો", "ખાતરની દુકાન",
-    # Odia
-    "କେଉଁଠି ମିଳିବ", "କେଉଁଠାରୁ କିଣିବେ", "ନିକଟସ୍ଥ ଦୋକାନ", "ସାର ଦୋକାନ",
-    # Punjabi
-    "ਕਿੱਥੇ ਮਿਲੇਗਾ", "ਕਿੱਥੋਂ ਖਰੀਦੀਏ", "ਨੇੜਲੀਆਂ ਦੁਕਾਨਾਂ", "ਖਾਦ ਦੀ ਦੁਕਾਨ",
-    # Urdu
-    "کہاں ملے گا", "کہاں سے خریدیں", "قریبی دکانیں", "کھاد کی دکان",
-]
-
-SHOPS_KEYWORDS_TANGLISH = [
-    "ekkada dorukuthundi", "ekkada konali", "shops ekkada", "shop ekkada", "urea ekkada",
-    "dap ekkada", "seeds ekkada", "fertilizer shop", "pesticide shop", "near shops",
-    "daggara shop", "konadaniki", "dorukuthunda", "shops daggara", "dealer daggara",
-    "dorukutundi", "konachu", "kaha milega", "kuthe milel", "enga kedaikkum", "elli sigutte",
-]
-
-CROP_HEALTH_KEYWORDS_EN = [
-    "disease", "pest", "pests", "leaf spot", "yellowing", "wilting", "fungus",
-    "insects", "bollworm", "aphids", "whitefly", "blight", "rot", "pesticide for",
-    "cure", "symptoms", "worms", "bugs", "fungicide", "infestation", "stem borer",
-    "leaf curl", "caterpillar", "blast", "rust", "alternaria", "powdery mildew",
-]
-
-CROP_HEALTH_KEYWORDS_TE = [
-    "తెగులు", "తెగుళ్ళు", "పురుగు", "పురుగులు", "ఆకుమచ్చ", "పసుపుగా", "రాలిపోవడం",
-    "ముడత", "ఎండిపోవడం", "పచ్చదోమ", "తామర పురుగులు", "బూడిద తెగులు", "అగ్గితెగులు",
-    "ఆల్టర్నేరియా", "నివారణ", "మందు పిచికారీ", "రోగం", "లక్షణాలు", "మచ్చలు", "పురుగుల",
-]
-
-CROP_HEALTH_KEYWORDS_MULTILINGUAL = [
-    # Hindi & Marathi
-    "रोग", "कीड़ा", "कीट", "फफूंद", "झुलसा", "इल्ली", "माहू", "कीटनाशक", "इलाज", "लक्षण", "रोग नियंत्रण", "कीड", "अळी", "औषध फवारणी",
-    # Tamil
-    "நோய்", "பூச்சி", "புழு", "இலைப்புள்ளி", "பூச்சிக்கொல்லி", "மருந்து", "நிவாரணம்",
-    # Kannada
-    "ರೋಗ", "ಕೀಟ", "ಹುಳು", "ಎಲೆ ಚುಕ್ಕೆ", "ಕೀಟನಾಶಕ", "ಔಷಧಿ", "ನಿಯಂತ್ರಣ",
-    # Malayalam
-    "രോഗം", "കീടങ്ങൾ", "പുഴു", "കുമിൾനാശിനി", "മരുന്ന്", "ചികിത്സ",
-    # Bengali & Assamese
-    "রোগ", "পোকা", "কীটপতঙ্গ", "কীটনাশক", "ঔষধ", "প্রতিকার", "পোক",
-    # Gujarati
-    "રોગ", "જીવાત", "ઇયળ", "કીટનાશક", "દવા", "ઉપચાર",
-    # Odia
-    "ରୋଗ", "ପୋକ", "କୀଟନାଶକ", "ଔଷଧ", "ନିୟନ୍ତ୍ରଣ",
-    # Punjabi
-    "ਰੋਗ", "ਬਿਮਾਰੀ", "ਕੀੜੇ", "ਸੁੰਡੀ", "ਕੀਟਨਾਸ਼ਕ", "ਸਪਰੇਅ", "ਦਵਾਈ",
-    # Urdu
-    "بیماری", "کیڑے", "سنڈی", "کیڑے مار دوا", "علاج", "اسپرے",
-]
-
-CROP_HEALTH_KEYWORDS_TANGLISH = [
-    "tegulu", "purugu", "purugulu", "aakulu pasupuga", "aaku machalu", "marutunnayi",
-    "endipotundi", "mudatha", "dosa penu", "pacha doma", "kurchuku potundi",
-    "panta rogamu", "pesticide spray", "cheda", "pulla rali", "pula rali",
-    "purugula mandu", "tegulu mandu", "ralipothundi", "pasupuga marutunnayi",
-    "keeda laga hai", "rog ahe", "poochi marunthu", "rogha aushadha",
-]
-
-FERTILIZER_KEYWORDS_EN = [
-    "fertilizer", "fertilizers", "nutrient", "npk", "urea application", "which fertilizer",
-    "what fertilizer", "micronutrient", "zinc deficiency", "potash dose", "fertilizer schedule",
-    "how much fertilizer", "apply fertilizer", "manure", "compost", "dosage of urea", "dap dose",
-]
-
-FERTILIZER_KEYWORDS_TE = [
-    "ఎరువు", "ఎరువులు", "ఏ ఎరువు వేయాలి", "ఎరువుల యాజమాన్యం", "పోషకాలు", "నత్రజని",
-    "భాస్వరం", "పొటాష్", "సూక్ష్మ పోషకాలు", "ఎరువుల మోతాదు", "జింక్ లోపం", "ఎరువు వాడాలి",
-    "బాస్వరం", "యూరియా మోతాదు", "ఎంత వేయాలి", "యూరియా ఎంత",
-]
-
-FERTILIZER_KEYWORDS_MULTILINGUAL = [
-    # Hindi & Marathi
-    "खाद", "उर्वरक", "यूरिया", "डीएपी", "पोटाश", "पोषक तत्व", "खत", "खते", "रासायनिक खत", "सेंद्रिय खत", "मात्रा",
-    # Tamil
-    "உரம்", "உரங்கள்", "யூரியா", "டிஏபி", "உர அளவு", "நுண்ணூட்டம்",
-    # Kannada
-    "ಗೊಬ್ಬರ", "ರಸಗೊಬ್ಬರ", "ಯೂರಿಯಾ", "ಡಿಎಪಿ", "ಪೋಷಕಾಂಶ", "ಗೊಬ್ಬರದ ಪ್ರಮಾಣ",
-    # Malayalam
-    "വളം", "രാസവളം", "യൂറിയ", "ഡാപ്പ്", "വളപ്രയോഗം",
-    # Bengali & Assamese
-    "সার", "ইউরিয়া", "ডিএপি", "রাসায়নিক সার", "সাৰ",
-    # Gujarati
-    "ખાતર", "યુરિયા", "ડીએપી", "પોષક તત્વો", "ખાતરની માત્રા",
-    # Odia
-    "ସାର", "ୟୁରିଆ", "ଡିଏପି", "ପୋଷକ ତତ୍ତ୍ୱ",
-    # Punjabi
-    "ਖਾਦ", "ਯੂਰੀਆ", "ਡੀਏਪੀ", "ਖਾਦ ਦੀ ਮਾਤਰਾ",
-    # Urdu
-    "کھاد", "یوریا", "ڈی اے پی", "کھاد کی مقدار", "غذائی اجزاء",
-]
-
-FERTILIZER_KEYWORDS_TANGLISH = [
-    "e eruvu veyali", "eruvulu eppudu", "fertilizer eppudu", "npk ela veyali", "poshakalu",
-    "eruvu dose", "micronutrients", "urea dose", "e eruvu vadali", "fertilizer schedule",
-    "eruvu entha", "eruvulu ela", "fertilizer dose", "konsa khad", "kiti khat takayche",
-    "yava gobbara", "enna uram",
-]
-
-IRRIGATION_KEYWORDS_EN = [
-    "irrigation", "watering", "water schedule", "drip irrigation", "how much water",
-    "when to water", "moisture", "flood irrigation", "sprinkler",
-]
-
-IRRIGATION_KEYWORDS_TE = [
-    "నీరు", "నీటి యాజమాన్యం", "నీరు పెట్టాలి", "తడి ఇవ్వాలి", "డ్రిప్", "బిందు సేద్యం",
-    "ఎప్పుడు నీరు", "నీరు కట్టాలి", "నీటి తడి", "నీటి పారుదల",
-]
-
-IRRIGATION_KEYWORDS_MULTILINGUAL = [
-    # Hindi & Marathi
-    "सिंचाई", "पानी देना", "ड्रिप", "पानी कब दें", "पाणी व्यवस्थापन", "ठिबक सिंचन", "पाणी देणे",
-    # Tamil
-    "நீர்ப்பாசனம்", "தண்ணீர் பாய்ச்சுதல்", "சொட்டு நீர்", "பாசனம்",
-    # Kannada
-    "ನೀರಾವರಿ", "ನೀರುಣಿಸುವುದು", "ಹನಿ ನೀರಾವರಿ", "ನೀರು ಹಾಕುವುದು",
-    # Malayalam
-    "ജലസേചനം", "നനയ്ക്കൽ", "തുള്ളി നന",
-    # Bengali & Assamese
-    "সেচ", "পানি দেওয়া", "জলসেচ", "পানী যোগান",
-    # Gujarati
-    "પિયત", "પાણી આપવું", "ટપક પિયત", "સિંચાઈ",
-    # Odia
-    "ଜଳସେଚନ", "ପାଣି ଦେବା",
-    # Punjabi
-    "ਸਿੰਚਾਈ", "ਪਾਣੀ ਲਾਉਣਾ",
-    # Urdu
-    "آبپاشی", "پانی دینا", "ڈرپ اریگیشن",
-]
-
-IRRIGATION_KEYWORDS_TANGLISH = [
-    "neeru eppudu pettali", "thadi eppudu ivvali", "neeti yajamanyam", "water eppudu pettali",
-    "drip irrigation", "water kattachu", "thadulu eppudu", "neeru eppudu",
-    "kitna pani chahiye", "pani kab dena hai", "kiti pani dyayche", "neeru eshtu", "thanni eppadi",
-]
-
-SOWING_KEYWORDS_EN = [
-    "sowing", "seed rate", "seed treatment", "planting time", "how to sow", "seed spacing",
-    "nursery", "germination", "transplanting", "sowing depth",
-]
-
-SOWING_KEYWORDS_TE = [
-    "విత్తనాలు", "విత్తన శుద్ధి", "విత్తే సమయం", "నాట్లు", "నాటడం", "ఎప్పుడు విత్తాలి",
-    "విత్తన మోతాదు", "మొలక", "నారుమడి",
-]
-
-SOWING_KEYWORDS_MULTILINGUAL = [
-    "बुवाई", "बीज दर", "बीज उपचार", "पेरणी", "बियाणे", "விதைப்பு", "ಬಿತ್ತನೆ", "വിത്ത് നടൽ", "বপন", "વાવણી", "ବୁଣିବା", "ਬਿਜਾਈ", "بوائی",
-]
-
-SOWING_KEYWORDS_TANGLISH = [
-    "vithanalu eppudu veyali", "vithana shuddi", "sowing time", "seed rate entha",
-    "natlu eppudu", "vithadam ela", "seeds eppudu", "buwai kab kare", "perani kadhi",
-]
-
-HARVESTING_KEYWORDS_EN = [
-    "harvesting", "harvest time", "when to harvest", "picking cotton", "harvest maturity",
-    "threshing", "storage", "post harvest",
-]
-
-HARVESTING_KEYWORDS_TE = [
-    "కోత", "కోత సమయం", "ఎప్పుడు కోయాలి", "పత్తి ఏరడం", "దిగుబడి", "నిల్వ", "కోయడం", "కోతలు",
-]
-
-HARVESTING_KEYWORDS_MULTILINGUAL = [
-    "कटाई", "फसल कटाई", "कापणी", "काढणी", "அறுவடை", "ಕಟಾವು", "വിളവെടുപ്പ്", "ফসল কাটা", "કાપણી", "ଅମଳ", "ਵਾਢੀ", "کٹائی",
-]
-
-HARVESTING_KEYWORDS_TANGLISH = [
-    "kotha eppudu koyali", "harvesting time", "patti eppudu thiyyali", "kotha kosaru",
-    "nilva cheyadam", "digubadi", "kotha samayam", "katai kab kare", "kapani kadhi",
-]
-
-REMINDERS_KEYWORDS_EN = [
-    "remind me", "set reminder", "schedule reminder", "alert me", "reminder",
-]
-
-REMINDERS_KEYWORDS_TE = [
-    "గుర్తు చేయండి", "రిమైండర్", "షెడ్యూల్", "గుర్తుపెట్టుకో",
-]
-
-REMINDERS_KEYWORDS_MULTILINGUAL = [
-    "याद दिलाना", "रिमाइंडर", "आठवण करून द्या", "நினைவூட்டல்", "ನೆನಪಿಸಿ", "ഓർമ്മിപ്പിക്കുക", "মনে করিয়ে দিন", "યાદ અપાવો", "ମନେ ପକାଇଦିଅ", "ਯਾਦ ਦਿਵਾਓ", "یاد دلائیں",
-]
-
-REMINDERS_KEYWORDS_TANGLISH = [
-    "remind cheyandi", "gurthu cheyandi", "reminder pettandi", "schedule cheyandi",
-    "yaad dilana", "reminder set karo",
-]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 11. Stock Alert Keywords (Proactive Input Restock Notifications)
@@ -499,6 +123,624 @@ STOCK_ALERT_KEYWORDS_TANGLISH = [
     "alert vaddu", "alert cancel cheyandi", "naa alerts", "na alerts", "my alerts enti",
 ]
 
+INTENT_KEYWORDS: Dict[FarmerIntent, Dict[str, List[str]]] = {
+    FarmerIntent.STOCK_ALERT: {
+        "en": STOCK_ALERT_KEYWORDS_EN,
+        "te": STOCK_ALERT_KEYWORDS_TE,
+        "multilingual": STOCK_ALERT_KEYWORDS_MULTILINGUAL,
+        "transliterated": STOCK_ALERT_KEYWORDS_TANGLISH,
+    },
+    FarmerIntent.REMINDERS: {
+        "en": ["remind me", "set reminder", "schedule reminder", "alert me", "reminder"],
+        "te": ["గుర్తు చేయండి", "రిమైండర్", "షెడ్యూల్", "గుర్తుపెట్టుకో"],
+        "hi": ["याद दिलाना", "रिमाइंडर", "याद दिलाएं", "अलर्ट करें", "शेड्यूल"],
+        "ta": ["நினைவூட்டு", "நினைவூட்டல்", "ரிமைண்டர்"],
+        "kn": ["ನೆನಪಿಸಿ", "ನೆನಪಿನಲ್ಲಿಡಿ", "ರಿಮೈಂಡರ್"],
+        "ml": ["ഓർമ്മിപ്പിക്കുക", "ഓർമ്മപ്പെടുത്തൽ", "റിമൈൻഡർ"],
+        "mr": ["आठवण करा", "आठवण द्या", "स्मरण", "रिमाइंडर"],
+        "bn": ["মনে করিয়ে দাও", "মনে করাবেন", "রিমাইন্ডার"],
+        "gu": ["યાદ અપાવો", "યાદ રાખજો", "રીમાઇન્ડર"],
+        "pa": ["ਯਾਦ ਕਰਵਾਓ", "ਚੇਤੇ ਕਰਵਾਓ", "ਰਿਮਾਈਂਡർ"],
+        "or": ["ମନେ ପକାଇ ଦିଅନ୍ତୁ", "ମନେ ରଖନ୍ତୁ", "ରିମାଇଣ୍ଡର"],
+        "as": ["মনত পেলাই দিব", "মনত পেলাওক", "ৰিমাইণ্ডাৰ"],
+        "ur": ["یاد دلائیں", "یاد دہانی", "ریمائنڈر"],
+        "transliterated": ["remind cheyandi", "gurthu cheyandi", "yaad dilana", "yaad dilaye", "set reminder", "schedule reminder"],
+    },
+    FarmerIntent.MARKET_PRICE: {
+        "en": [
+            "market price", "mandi price", "mandi rate", "market rate", "selling price",
+            "rate per quintal", "cotton price", "cotton rate", "paddy price", "chilli price",
+            "tomato price", "price of", "prices of", "how much price", "how much rate",
+            "market value", "mandi rates", "market prices",
+        ],
+        "te": [
+            "మార్కెట్ ధర", "మార్కెట్ ధరలు", "మండి ధర", "మండి ధరలు", "ధర ఎంత", "రేటు ఎంత",
+            "క్వింటాల్", "క్వింటాలు", "అమ్ముకోవాలి", "గిట్టుబాటు ధర", "మార్కెట్లో", "మండిలో",
+            "పత్తి ధర", "మిర్చి ధర", "వరి ధర", "టమాటా ధర", "రేట్లు", "ధరలు",
+        ],
+        "hi": [
+            "मंडी भाव", "मंडी रेट", "बाजार भाव", "फसल का भाव", "दाम कितना", "भाव क्या है",
+            "भाव कितना", "क्विंटल", "बिक्री मूल्य", "मंडी दर", "रेट क्या है", "मंडी में",
+        ],
+        "ta": [
+            "சந்தை விலை", "மண்டி விலை", "விலை என்ன", "விற்பனை விலை", "குவிண்டால்",
+            "சந்தை நிலவரம்", "ரேட் என்ன", "சந்தையில்",
+        ],
+        "kn": [
+            "ಮಾರುಕಟ್ಟೆ ಬೆಲೆ", "ಮಂಡಿ ದರ", "ಬೆಲೆ ಎಷ್ಟು", "ದರ ಎಷ್ಟು", "ಕ್ವಿಂಟಾಲ್",
+            "ಮಾರುಕಟ್ಟೆ ದರ", "ಮಾರಾಟ ಬೆಲೆ", "ಮಾರುಕಟ್ಟೆಯಲ್ಲಿ",
+        ],
+        "ml": [
+            "വിപണി വില", "മാർക്കറ്റ് വില", "വില എത്ര", "ക്വിന്റൽ",
+            "മാർക്കറ്റ് നിരക്ക്", "വിൽപ്പന വില", "മാർക്കറ്റിൽ",
+        ],
+        "mr": [
+            "बाजारभाव", "मंडी भाव", "बाजार दर", "भाव किती", "दर किती", "क्विंटल",
+            "हमीभाव", "विक्री दर", "मार्केट भाव",
+        ],
+        "bn": [
+            "বাজার দর", "মান্ডি দর", "দাম কত", "দর কত", "কুইন্টাল",
+            "বিক্রয় মূল্য", "বাজারের দাম", "মান্ডিতে",
+        ],
+        "gu": [
+            "બજાર ભાવ", "મંડી ભાવ", "ભાવ શું છે", "ભાવ કેટલો", "ક્વિન્ટલ",
+            "બજાર દર", "વેચાણ કિંમત", "માર્કેટ ભાવ",
+        ],
+        "pa": [
+            "ਮੰਡੀ ਭਾਅ", "ਬਾਜ਼ਾਰ ਭਾਅ", "ਰੇਟ ਕੀ ਹੈ", "ਭਾਅ ਕਿੰਨਾ", "ਕੁਇੰਟਲ",
+            "ਮੰਡੀ ਰੇਟ", "ਵੇਚ ਮੁੱਲ", "ਮੰਡੀ ਵਿੱਚ",
+        ],
+        "or": [
+            "ମଣ୍ଡି ଦର", "ବଜାର ଦର", "ଦର କେତେ", "ମୂଲ୍ୟ କେତେ", "କ୍ୱିଣ୍ଟାଲ",
+            "ବିକ୍ରି ମୂଲ୍ୟ", "ମଣ୍ଡିରେ",
+        ],
+        "as": [
+            "বজাৰ দৰ", "মণ্ডী দৰ", "দাম কিমান", "দৰ কিমান", "কুইণ্টল",
+            "বিক্ৰী মূল্য", "মণ্ডীত",
+        ],
+        "ur": [
+            "منڈی کا بھاؤ", "مارکیٹ ریٹ", "قیمت کیا ہے", "بھاؤ کتنا", "فی کوئنٹل",
+            "منڈی ریٹ", "منڈی میں",
+        ],
+        "transliterated": [
+            "rate entha", "dhara entha", "rate entho", "dhara entho", "cotton rate", "patti rate",
+            "patti dhara", "mirchi rate", "mirapa rate", "tomato rate", "tamata rate", "mandi rate",
+            "market lo", "mandi lo", "market price", "mandi price", "bajar rate", "ammukovali",
+            "eeroju rate", "today rate", "rate ela undi", "dhara ela undi", "per quintal rate",
+            "lo cotton rate", "lo patti rate", "patti rate entha", "cotton rate entha",
+            "bhav kitna", "bhav kya hai", "mandi bhav", "bajarbhav", "dara kete", "bele eshtu",
+            "vilai enna", "dam koto", "mandi bha", "qeemat",
+        ],
+    },
+    FarmerIntent.WEATHER: {
+        "en": [
+            "weather", "forecast", "rain", "raining", "rainy", "temperature", "humidity",
+            "wind", "storm", "thunderstorm", "will it rain", "precipitation", "cloudy", "sunny",
+            "climate", "degrees",
+        ],
+        "te": [
+            "వాతావరణం", "వాతావరణ", "వర్షం", "వర్షాలు", "వాన", "వానలు", "కురుస్తుందా",
+            "పడుతుందా", "కురుస్తుంది", "పడుతుంది", "ఉష్ణోగ్రత", "తేమ", "ఎండ", "చలి",
+            "వాతావరణ అంచనా", "మంచు", "తుఫాను", "జల్లులు", "మేఘాలు",
+        ],
+        "hi": [
+            "मौसम", "मौसम कैसा", "बारिश", "वर्षा", "बारिश होगी", "तापमान", "हवा",
+            "आंधी", "तूफान", "बादल", "मौसम का हाल", "ठंड", "गर्मी",
+        ],
+        "ta": [
+            "வானிலை", "மழை", "மழை பெய்யுமா", "வெப்பநிலை", "காற்று", "புயல்",
+            "மேகமூட்டம்", "வானிலை அறிக்கை",
+        ],
+        "kn": [
+            "ಹವಾಮಾನ", "ಮಳೆ", "ಮಳೆ ಬರುತ್ತಾ", "ತಾಪಮಾನ", "ಗಾಳಿ", "ಮಳೆ ಮುನ್ಸೂಚನೆ", "ಮೋಡ",
+        ],
+        "ml": [
+            "കാലാവസ്ഥ", "മഴ", "മഴ പെയ്യുമോ", "താപനില", "കാറ്റ്", "ഇടിമിന്നൽ", "കാലാവസ്ഥ പ്രവചനം",
+        ],
+        "mr": [
+            "हवामान", "पाऊस", "पाऊस पडेल का", "तापमान", "वादळ", "गारपीट", "हवामान अंदाज",
+        ],
+        "bn": [
+            "আবহাওয়া", "বৃষ্টি", "বৃষ্টি হবে কি", "তাপমাত্রা", "ঝড়", "আবহাওয়ার পূর্বাভাস", "মেঘ",
+        ],
+        "gu": [
+            "હવામાન", "વરસાદ", "વરસાદ પડશે", "તાપમાન", "પવન", "વાવાઝોડું", "હવામાન આગાહી",
+        ],
+        "pa": [
+            "ਮੌਸਮ", "ਮੀਂਹ", "ਬਰਸਾਤ", "ਮੀਂਹ ਪਵੇਗਾ", "ਤਾਪਮਾਨ", "ਹਵਾ", "ਤੂਫ਼ਾਨ", "ਮੌਸਮ ਦੀ ਜਾਣਕਾਰੀ",
+        ],
+        "or": [
+            "ପାଣିପାଗ", "ବର୍ଷା", "ବର୍ଷା ହେବ କି", "ତାପମାତ୍ରା", "ପବନ", "ଝଡ଼", "ପାଣିପାଗ ସୂଚନା",
+        ],
+        "as": [
+            "বতৰ", "বৰষুণ", "বৰষুণ হ'ব নেকি", "তাপমাত্ৰা", "ধুমুহা", "বতৰৰ আগজাননী",
+        ],
+        "ur": [
+            "موسم", "بارش", "بارش ہوگی", "درجہ حرارت", "طوفان", "موسم کا حال", "ہوا",
+        ],
+        "transliterated": [
+            "varsham", "varsham paduthunda", "varsham vasthunda", "vana vasthunda",
+            "vana paduthunda", "weather ela undi", "eeroju varsham", "repu varsham",
+            "eppudu paduthundi", "rain paduthunda", "rain vasthada", "temperature entha",
+            "cloudy ga undi", "varsham padtada", "varsham padtundha", "rain padtundha",
+            "varsham eppudu", "varsham ela", "barish hogi", "barish kab", "mazha", "paus",
+            "varsad", "bristi", "meeh", "barsha", "boroxun", "weather",
+        ],
+    },
+    FarmerIntent.GOVERNMENT_SCHEMES: {
+        "en": [
+            "scheme", "schemes", "subsidy", "subsidies", "yojana", "pm kisan", "rythu bandhu",
+            "rythu bharosa", "crop insurance", "fasal bima", "kcc", "kisan credit",
+            "solar pump subsidy", "government assistance", "grant", "subsidized",
+        ],
+        "te": [
+            "పథకం", "పథకాలు", "సబ్సిడీ", "సబ్సిడీలు", "రైతు బంధు", "రైతు భరోసా", "పీఎం కిసాన్",
+            "పంట బీమా", "రుణమాఫీ", "ప్రభుత్వ సహాయం", "ప్రభుత్వ", "అర్హత", "ప్రయోజనాలు",
+            "ప్రభుత్వ పథకాలు", "రైతు పథకాలు",
+        ],
+        "hi": [
+            "योजना", "सब्सिडी", "पीएम किसान", "फसल बीमा", "सरकारी योजना", "अनुदान",
+            "ऋण माफी", "किसान क्रेडिट कार्ड", "केसीसी", "कृषि योजना", "सरकारी सहायता",
+        ],
+        "ta": [
+            "திட்டம்", "மானியம்", "பிஎம் கிசான்", "பயிர் காப்பீடு", "அரசு திட்டம்", "விவசாய கடன்",
+        ],
+        "kn": [
+            "ಯೋಜನೆ", "ಸಬ್ಸಿಡಿ", "ಪಿಎಂ ಕಿಸಾನ್", "ಬೆಳೆ ವಿಮೆ", "ಸರ್ಕಾರಿ ಯೋಜನೆ", "ರೈತ ಯೋಜನೆ", "ಸಾಲ ಮನ್ನಾ",
+        ],
+        "ml": [
+            "പദ്ധതി", "സബ്‌സിഡി", "പിഎം കിസാൻ", "വിള ഇൻഷുറൻസ്", "സർക്കാർ പദ്ധതി", "കൃഷി ധനസഹായം",
+        ],
+        "mr": [
+            "योजना", "अनुदान", "सब्सिडी", "पीएम किसान", "पीक विमा", "शासकीय योजना", "कर्जमाफी", "शेतकरी योजना",
+        ],
+        "bn": [
+            "প্রকল্প", "ভর্তুকি", "যোজনা", "পিএম কিষাণ", "ফসল বীমা", "সরকারি অনুদান", "কৃষক বন্ধু",
+        ],
+        "gu": [
+            "યોજના", "સબસિડી", "પીએમ કિસાન", "પાક વીમો", "સરકારી સહાય", "ખેડૂત યોજના", "ધિરાણ",
+        ],
+        "pa": [
+            "ਸਕੀਮ", "ਸਬਸਿਡੀ", "ਯੋਜਨਾ", "ਪੀਐਮ ਕਿਸਾਨ", "ਫ਼ਸਲ ਬੀਮਾ", "ਸਰਕਾਰੀ ਸਹਾਇਤਾ", "ਕਰਜ਼ਾ ਮੁਆਫ਼ੀ",
+        ],
+        "or": [
+            "ଯୋଜନା", "ସବସିଡି", "ପିଏମ କିଷାନ", "ଫସଲ ବୀମା", "ସରକାରୀ ସହାୟତା", "କାଳିଆ ଯୋଜନା",
+        ],
+        "as": [
+            "আঁচনি", "ৰেহাই", "যোজনা", "পিএম কিষাণ", "শস্য বীমা", "চৰকাৰী সাহায্য",
+        ],
+        "ur": [
+            "اسکیم", "سبسڈی", "سرکاری اسکیم", "پی ایم کسان", "فصل بیمہ", "قرض معافی", "امداد",
+        ],
+        "transliterated": [
+            "pathakam", "pathakalu", "prabhutva pathakalu", "rythu pathakalu", "subsidilu",
+            "subsidy", "pm kisan", "rythu bharosa", "rythu bandhu", "panta bheema",
+            "kisan subsidy", "gov schemes", "sarakaru sahaym", "pathakam apply",
+            "prabhutva", "pathakalu unnaya", "yojana", "anudan",
+        ],
+    },
+    FarmerIntent.SHOPS: {
+        "en": [
+            "where to buy", "where can i buy", "where i can buy", "shops near", "stores near",
+            "buy urea", "buy dap", "dealer", "dealers", "input availability", "available in shop",
+            "fertilizer store", "pesticide store", "buy fertilizer", "buy pesticide", "buy seeds",
+            "shops nearby", "store nearby", "agro agency",
+        ],
+        "te": [
+            "ఎక్కడ దొరుకుతుంది", "ఎక్కడ కొనాలి", "సమీప దుకాణాలు", "ఎరువుల దుకాణం", "మందుల షాపు",
+            "కొనుగోలు", "దుకాణం", "షాపు", "లభిస్తుంది", "యూరియా దొరుకుతుందా", "డీలర్", "డీలర్లు",
+            "దుకాణాలు", "షాపులు", "దొరికే చోటు",
+        ],
+        "hi": [
+            "दुकान", "कहाँ मिलेगा", "कहाँ से खरीदें", "खाद की दुकान", "दवा की दुकान", "डीलर",
+            "कहाँ उपलब्ध", "बीज भंडार", "कृषि सेवा केंद्र", "दुकान कहाँ",
+        ],
+        "ta": [
+            "எங்கு கிடைக்கும்", "எங்கு வாங்கலாம்", "உரக்கடை", "மருந்துக்கடை", "அருகிலுள்ள கடை",
+            "டீலர்", "விற்பனை நிலையம்", "கடை எங்கு",
+        ],
+        "kn": [
+            "ಎಲ್ಲಿ ಸಿಗುತ್ತದೆ", "ಎಲ್ಲಿ ಖರೀದಿಸಬೇಕು", "ಗೊಬ್ಬರದ ಅಂಗಡಿ", "ಔಷಧಿ ಅಂಗಡಿ", "ಹತ್ತಿರದ ಅಂಗಡಿ",
+            "ಡೀಲರ್", "ಕೃಷಿ ಕೇಂದ್ರ", "ಅಂಗಡಿ ಎಲ್ಲಿ",
+        ],
+        "ml": [
+            "എവിടെ ലഭിക്കും", "എവിടെ വാങ്ങാം", "വളക്കട", "കീടനാശിനി കട", "സമീപത്തെ കട",
+            "ഡീലർ", "കട എവിടെ",
+        ],
+        "mr": [
+            "कुठे मिळेल", "कुठून खरेदी करावे", "खताचे दुकान", "औषधाचे दुकान", "जवळचे दुकान",
+            "कृषी केंद्र", "विक्रेता", "दुकान कुठे",
+        ],
+        "bn": [
+            "কোথায় পাওয়া যাবে", "কোথায় কিনব", "সারের দোকান", "কীটনাশকের দোকান",
+            "কাছের দোকান", "ডিলার", "দোকান কোথায়",
+        ],
+        "gu": [
+            "ક્યાં મળશે", "ક્યાંથી ખરીદવું", "ખાતરની દુકાન", "દવાની દુકાન", "નજીકની દુકાન",
+            "ડીલર", "એગ્રો સેન્ટર", "દુકાન ક્યાં",
+        ],
+        "pa": [
+            "ਕਿੱਥੇ ਮਿਲੇਗਾ", "ਕਿੱਥੋਂ ਖਰੀਦੀਏ", "ਖਾਦ ਦੀ ਦੁਕਾਨ", "ਦਵਾਈ ਦੀ ਦੁਕਾਨ", "ਨੇੜਲੀ ਦੁਕਾਨ",
+            "ਡੀਲਰ", "ਦੁਕਾਨ ਕਿੱਥੇ",
+        ],
+        "or": [
+            "କେଉଁଠି ମିଳିବ", "କେଉଁଠୁ କିଣିବି", "ସାର ଦୋକାନ", "ଔଷଧ ଦୋକାନ", "ନିକଟସ୍ଥ ଦୋକାନ",
+            "ଡିଲର", "ଦୋକାନ କେଉଁଠି",
+        ],
+        "as": [
+            "ক'ত পোৱা যাব", "ক'ত কিনিব পাৰি", "সাৰৰ দোকান", "ঔষধৰ দোকান", "ওচৰৰ দোকান",
+            "ডিলাৰ", "দোকান ক'ত",
+        ],
+        "ur": [
+            "کہاں ملے گا", "کہاں سے خریدیں", "کھاد کی دکان", "دوا کی دکان", "قریبی دکان",
+            "ڈیلر", "دکان کہاں",
+        ],
+        "transliterated": [
+            "ekkada dorukuthundi", "ekkada konali", "shops ekkada", "shop ekkada", "urea ekkada",
+            "dap ekkada", "seeds ekkada", "fertilizer shop", "pesticide shop", "near shops",
+            "daggara shop", "konadaniki", "dorukuthunda", "shops daggara", "dealer daggara",
+            "dorukutundi", "konachu", "kahan milega", "kuthe bhetel",
+        ],
+    },
+    FarmerIntent.CROP_HEALTH: {
+        "en": [
+            "disease", "pest", "pests", "leaf spot", "yellowing", "wilting", "fungus",
+            "insects", "bollworm", "aphids", "whitefly", "blight", "rot", "pesticide for",
+            "cure", "symptoms", "worms", "bugs", "fungicide", "infestation", "stem borer",
+            "leaf curl", "caterpillar", "blast", "rust", "alternaria", "powdery mildew",
+        ],
+        "te": [
+            "తెగులు", "తెగుళ్ళు", "పురుగు", "పురుగులు", "ఆకుమచ్చ", "పసుపుగా", "రాలిపోవడం",
+            "ముడత", "ఎండిపోవడం", "పచ్చదోమ", "తామర పురుగులు", "బూడిద తెగులు", "అగ్గితెగులు",
+            "ఆల్టర్నేరియా", "నివారణ", "మందు పిచికారీ", "రోగం", "లక్షణాలు", "మచ్చలు", "పురుగుల",
+        ],
+        "hi": [
+            "कीट", "रोग", "कीड़ा", "बीमारी", "सुंडी", "पत्ती पीली", "धब्बे", "फंगस",
+            "इल्ली", "झुलसा", "माहू", "रोकथाम", "कीटनाशक छिड़काव", "रोग उपचार", "कीट उपचार", "रोग का उपचार",
+        ],
+        "ta": [
+            "நோய்", "பூச்சி", "புழு", "இலைப்புள்ளி", "மஞ்சள் நிறம்", "பூஞ்சை",
+            "கட்டுப்பாடு", "பூச்சிக்கொல்லி", "தாக்குதல்", "மருந்து தெளிப்பு",
+        ],
+        "kn": [
+            "ರೋಗ", "ಕೀಟ", "ಹುಳು", "ಎಲೆ ಚುಕ್ಕೆ", "ಹಳದಿ", "ಶಿಲೀಂಧ್ರ",
+            "ಬಾಧೆ", "ನಿಯಂತ್ರಣ", "ಕೀಟನಾಶಕ ಸಿಂಪಡಣೆ", "ಔಷಧ",
+        ],
+        "ml": [
+            "രോഗം", "കീടം", "പുഴു", "ഇലപ്പുള്ളി", "മഞ്ഞളിപ്പ്", "കുമിൾ",
+            "കീടനിയന്ത്രണം", "കീടനാശിനി പ്രയോഗം",
+        ],
+        "mr": [
+            "रोग", "कीड", "अळी", "बोंडअळी", "पाने पिवळी", "करपा", "बुरशी",
+            "तुडतुडे", "मावा", "नियंत्रण", "फवारणी औषध",
+        ],
+        "bn": [
+            "রোগ", "পোকা", "কীটপতঙ্গ", "পাতায় দাগ", "হলুদ পাতা", "ছত্রাক",
+            "পোকামাকড়", "ব্লাইট", "দমন", "কীটনাশক স্প্রে",
+        ],
+        "gu": [
+            "રોગ", "જીવાત", "ઈયળ", "ગુલાબી ઈયળ", "પાંદડા પીળા", "ફૂગ",
+            "નિયંત્રણ", "દવાનો છંટકાવ", "ઉપદ્રવ",
+        ],
+        "pa": [
+            "ਬਿਮਾਰੀ", "ਕੀੜਾ", "ਸੁੰਡੀ", "ਗੁਲਾਬੀ ਸੁੰਡੀ", "ਪੀਲੇ ਪੱਤੇ", "ਉੱਲੀ",
+            "ਰੋਕਥਾਮ", "ਕੀਟਨਾਸ਼ਕ ਸਪਰੇਅ", "ਤੇਲਾ",
+        ],
+        "or": [
+            "ରୋଗ", "ପୋକ", "ପତ୍ର ଦାଗ", "ହଳଦିଆ", "କବକ",
+            "ନିୟନ୍ତ୍ରଣ", "କୀଟନାଶକ ସ୍ପ୍ରେ", "ଚିକିତ୍ସା",
+        ],
+        "as": [
+            "ৰোগ", "পোক", "পৰুৱা", "পাত হালধীয়া", "ভেঁকুৰ",
+            "নিয়ন্ত্ৰণ", "কীটনাশক স্প্ৰে", "উপায়",
+        ],
+        "ur": [
+            "بیماری", "کیڑا", "کیڑے", "سنڈی", "پتے پیلے", "فنگس",
+            "روکتھام", "کیڑے مار دوا", "اسپرے", "بیماری کا علاج", "کیڑوں کا علاج",
+        ],
+        "transliterated": [
+            "tegulu", "purugu", "purugulu", "aakulu pasupuga", "aaku machalu", "marutunnayi",
+            "endipotundi", "mudatha", "dosa penu", "pacha doma", "kurchuku potundi",
+            "panta rogamu", "pesticide spray", "cheda", "pulla rali", "pula rali",
+            "purugula mandu", "tegulu mandu", "ralipothundi", "pasupuga marutunnayi",
+            "keeda", "roga", "rogh", "poka", "puzhu", "poochi", "sundi",
+        ],
+    },
+    FarmerIntent.FERTILIZER: {
+        "en": [
+            "fertilizer", "fertilizers", "nutrient", "npk", "urea application", "which fertilizer",
+            "what fertilizer", "micronutrient", "zinc deficiency", "potash dose", "fertilizer schedule",
+            "how much fertilizer", "apply fertilizer", "manure", "compost", "dosage of urea", "dap dose",
+        ],
+        "te": [
+            "ఎరువు", "ఎరువులు", "ఏ ఎరువు వేయాలి", "ఎరువుల యాజమాన్యం", "పోషకాలు", "నత్రజని",
+            "భాస్వరం", "పొటాష్", "సూక్ష్మ పోషకాలు", "ఎరువుల మోతాదు", "జింక్ లోపం", "ఎరువు వాడాలి",
+            "బాస్వరం", "యూరియా మోతాదు",
+        ],
+        "hi": [
+            "खाद", "उर्वरक", "यूरिया", "डीएपी", "पोटाश", "पोषक तत्व",
+            "कितनी खाद", "एनपीके", "जिंक", "गोबर खाद", "खाद की मात्रा",
+        ],
+        "ta": [
+            "உரம்", "உரங்கள்", "யூரியா", "டிஏபி", "பொட்டாஷ்",
+            "ஊட்டச்சத்து", "எவ்வளவு உரம்", "உர அளவு", "என்.பி.கே",
+        ],
+        "kn": [
+            "ಗೊಬ್ಬರ", "ರಸಗೊಬ್ಬರ", "ಯೂರಿಯಾ", "ಡಿಎಪಿ", "ಪೋಷಕಾಂಶ",
+            "ಎಷ್ಟು ಗೊಬ್ಬರ", "ಗೊಬ್ಬರದ ಪ್ರಮಾಣ", "ಪೊಟ್ಯಾಷ್",
+        ],
+        "ml": [
+            "വളം", "രാസവളം", "യൂറിയ", "ഡിഎപി", "പോഷകങ്ങൾ",
+            "എത്ര വളം", "പൊട്ടാഷ്", "വളപ്രയോഗം",
+        ],
+        "mr": [
+            "खत", "रासायनिक खत", "युरिया", "डीएपी", "पोटॅश",
+            "पोषकतत्वे", "खताची मात्रा", "किती खत द्यावे", "शेणखत",
+        ],
+        "bn": [
+            "সার", "রাসায়নিক সার", "ইউরিয়া", "ডিএপি", "পটাশ",
+            "পুষ্টি উপাদান", "কত সার", "সারের মাত্রা",
+        ],
+        "gu": [
+            "ખાતર", "રાસાયણિક ખાતર", "યૂરિયા", "ડીએપી", "પોટાશ",
+            "પોષક તત્વો", "કેટલું ખાતર", "ખાતરનો ડોઝ",
+        ],
+        "pa": [
+            "ਖਾਦ", "ਯੂਰੀਆ", "ਡੀਏਪੀ", "ਪੋਟਾਸ਼", "ਪੋਸ਼ਕ ਤੱਤ",
+            "ਕਿੰਨੀ ਖਾਦ", "ਰੂੜੀ ਖਾਦ",
+        ],
+        "or": [
+            "ସାର", "ରାସାୟନିକ ସାର", "ୟୁରିଆ", "ଡିଏପି", "ପୋଟାସ",
+            "ପୋଷକ ତତ୍ତ୍ୱ", "କେତେ ସାର", "ସାର ପ୍ରୟୋଗ",
+        ],
+        "as": [
+            "সাৰ", "ৰাসায়নিক সাৰ", "ইউৰিয়া", "ডিএপি", "পটাছ",
+            "কি সাৰ", "সাৰৰ মাত্ৰা",
+        ],
+        "ur": [
+            "کھاد", "یوریا", "ڈی اے پی", "پوٹاش", "غذائی اجزاء",
+            "کتنی کھاد", "کھاد کا استعمال",
+        ],
+        "transliterated": [
+            "e eruvu veyali", "eruvulu eppudu", "fertilizer eppudu", "npk ela veyali", "poshakalu",
+            "eruvu dose", "micronutrients", "urea dose", "e eruvu vadali", "fertilizer schedule",
+            "eruvu entha", "eruvulu ela", "fertilizer dose", "khad", "gobbara", "uram", "valam", "khat",
+        ],
+    },
+    FarmerIntent.IRRIGATION: {
+        "en": [
+            "irrigation", "watering", "water schedule", "drip irrigation", "how much water",
+            "when to water", "moisture", "flood irrigation", "sprinkler",
+        ],
+        "te": [
+            "నీరు", "నీటి యాజమాన్యం", "నీరు పెట్టాలి", "తడి ఇవ్వాలి", "డ్రిప్", "బిందు సేద్యం",
+            "ఎప్పుడు నీరు", "నీరు కట్టాలి", "నీటి తడి", "నీటి పారుదల",
+        ],
+        "hi": [
+            "सिंचाई", "पानी देना", "पानी कब दें", "ड्रिप सिंचाई", "कितना पानी",
+            "सिंचाई का समय", "फव्वारा",
+        ],
+        "ta": [
+            "நீர்ப்பாசனம்", "தண்ணீர் பாய்ச்ச", "சொட்டு நீர்", "எப்போது தண்ணீர்", "பாசன வசதி",
+        ],
+        "kn": [
+            "ನೀರಾವರಿ", "ನೀರುಣಿಸುವುದು", "ಹನಿ ನೀರಾವರಿ", "ಯಾವಾಗ ನೀರು", "ನೀರು ಕೊಡುವುದು",
+        ],
+        "ml": [
+            "നനയ്ക്കൽ", "ജലസേചനം", "തുള്ളി നന", "എപ്പോൾ വെള്ളം", "നന",
+        ],
+        "mr": [
+            "सिंचन", "पाणी देणे", "ठिबक सिंचन", "पाणी व्यवस्थापन", "कधी पाणी द्यावे", "तुषार",
+        ],
+        "bn": [
+            "সেচ", "পানি দেওয়া", "ড্রিপ সেচ", "কখন পানি দেব", "জলসেচ",
+        ],
+        "gu": [
+            "પિયત", "પાણી આપવું", "ટપક પદ્ધતિ", "ક્યારે પાણી આપવું", "સિંચાઈ",
+        ],
+        "pa": [
+            "ਸਿੰਚਾਈ", "ਪਾਣੀ ਲਾਉਣਾ", "ਤੁਪਕਾ ਸਿੰਚਾਈ", "ਕਦੋਂ ਪਾਣੀ", "ਪਾਣੀ ਦੀ ਲੋੜ",
+        ],
+        "or": [
+            "ଜଳସେଚନ", "ପାଣି ଦେବା", "ବୁନ୍ଦା ଜଳସେଚନ", "କେବେ ପାଣି",
+        ],
+        "as": [
+            "জলসিঞ্চন", "পানী দিয়া", "টোপাল জলসিঞ্চন", "কেতিয়া পানী",
+        ],
+        "ur": [
+            "آبپاشی", "پانی دینا", "ڈرپ آبپاشی", "کب پانی دیں", "پانی کی ضرورت",
+        ],
+        "transliterated": [
+            "neeru eppudu pettali", "thadi eppudu ivvali", "neeti yajamanyam", "water eppudu pettali",
+            "drip irrigation", "water kattachu", "thadulu eppudu", "neeru eppudu",
+            "pani", "neeravari", "thanni", "vellam", "jol", "sinchan", "piyat",
+        ],
+    },
+    FarmerIntent.SOWING: {
+        "en": [
+            "sowing", "seed rate", "seed treatment", "planting time", "how to sow", "seed spacing",
+            "nursery", "germination", "transplanting", "sowing depth",
+        ],
+        "te": [
+            "విత్తనాలు", "విత్తన శుద్ధి", "విత్తే సమయం", "నాట్లు", "నాటడం", "ఎప్పుడు విత్తాలి",
+            "విత్తన మోతాదు", "మొలక", "నారుమడి",
+        ],
+        "hi": [
+            "बुआई", "बीज उपचार", "बुवाई का समय", "बीज दर", "पौधरोपण", "अंकुरण", "कब बोएं", "बीज शोधन",
+        ],
+        "ta": [
+            "விதைப்பு", "விதை நேர்த்தி", "விதைக்கும் நேரம்", "நாற்று நடுதல்", "முளைப்பு", "விதை அளவு",
+        ],
+        "kn": [
+            "ಬಿತ್ತನೆ", "ಬೀಜೋಪಚಾರ", "ಬಿತ್ತನೆ ಸಮಯ", "ನಾಟಿ", "ಮೊಳಕೆ", "ಬೀಜದ ಪ್ರಮಾಣ",
+        ],
+        "ml": [
+            "വിത്ത് വിതയ്ക്കൽ", "വിത്തുചികിത്സ", "നടീൽ സമയം", "മുളയ്ക്കൽ", "ഞാറുനടീൽ",
+        ],
+        "mr": [
+            "पेरणी", "बीजप्रक्रिया", "पेरणीची वेळ", "बियाणे दर", "लागवड", "उगवण", "कधी पेरावे",
+        ],
+        "bn": [
+            "বপন", "বীজ শোধন", "বপনের সময়", "চারা রোপণ", "অঙ্কুরোদগম", "বীজের হার",
+        ],
+        "gu": [
+            "વાવણી", "બીજ માવજત", "વાવણીનો સમય", "ધરૂ રોપણ", "ઉગાવો", "બિયારણ દર",
+        ],
+        "pa": [
+            "ਬਿਜਾਈ", "ਬੀਜ ਸੋਧ", "ਬਿਜਾਈ ਦਾ ਸਮਾਂ", "ਪਨੀਰੀ", "ਅੰਕੁਰਨ", "ਕਦੋਂ ਬੀਜੀਏ",
+        ],
+        "or": [
+            "ବୁଣିବା", "ବିହନ ବିଶୋଧନ", "ବୁଣିବା ସମୟ", "ତଳି ରୋପଣ", "ଗଜା ହେବା",
+        ],
+        "as": [
+            "বীজ সিঁচা", "বীজ শোধন", "ৰোপণৰ সময়", "পুলি ৰোপণ", "অঙ্কুৰণ",
+        ],
+        "ur": [
+            "بوائی", "بیج کا علاج", "کاشت کا وقت", "پود کاری", "اگاؤ", "کب بوئیں",
+        ],
+        "transliterated": [
+            "vithanalu eppudu veyali", "vithana shuddi", "sowing time", "seed rate entha",
+            "natlu eppudu", "vithadam ela", "vithanala", "vithadam", "vithanalu", "vithana",
+            "seeds eppudu", "buwai", "bittane", "perani", "vavani",
+        ],
+    },
+    FarmerIntent.HARVESTING: {
+        "en": [
+            "harvesting", "harvest time", "when to harvest", "picking cotton", "harvest maturity",
+            "threshing", "storage", "post harvest",
+        ],
+        "te": [
+            "కోత", "కోత సమయం", "ఎప్పుడు కోయాలి", "పత్తి ఏరడం", "దిగుబడి", "నిల్వ", "కోయడం", "కోతలు",
+        ],
+        "hi": [
+            "कटाई", "कटाई का समय", "फसल कटाई", "गहाई", "कब काटें", "भंडारण", "तुड़ाई",
+        ],
+        "ta": [
+            "அறுவடை", "அறுவடை காலம்", "எப்போது அறுவடை", "பறித்தல்", "சேமிப்பு",
+        ],
+        "kn": [
+            "ಕಟಾವು", "ಸುಗ್ಗಿ", "ಕಟಾವಿನ ಸಮಯ", "ಯಾವಾಗ ಕಟಾವು", "ಸಂಗ್ರಹಣೆ",
+        ],
+        "ml": [
+            "വിളവെടുപ്പ്", "കൊയ്ത്ത്", "എപ്പോൾ കൊയ്യണം", "സംഭരണം",
+        ],
+        "mr": [
+            "कापणी", "काढणी", "काढणीची वेळ", "वेचणी", "साठवणूक", "कधी काढावे",
+        ],
+        "bn": [
+            "ফসল কাটা", "কাটার সময়", "তোলার সময়", "সংরক্ষণ", "মাড়াই",
+        ],
+        "gu": [
+            "કાપણી", "લણણી", "કાપણીનો સમય", "વીણવું", "સંગ્રહ",
+        ],
+        "pa": [
+            "ਵਾਢੀ", "ਕਟਾਈ", "ਵਾਢੀ ਦਾ ਸਮਾਂ", "ਚੁਗਾਈ", "ਸੰਭਾਲ",
+        ],
+        "or": [
+            "ଅମଳ", "କାଟିବା ସମୟ", "ଫସଲ କଟା", "ସଂରକ୍ଷଣ",
+        ],
+        "as": [
+            "শস্য চপোৱা", "কটাৰ সময়", "চপোৱাৰ সময়", "সংৰক্ষণ",
+        ],
+        "ur": [
+            "کٹائی", "فصل کی کٹائی", "چنائی", "ذخیرہ اندوزی", "کب کاٹیں",
+        ],
+        "transliterated": [
+            "kotha eppudu koyali", "harvesting time", "patti eppudu thiyyali", "kotha kosaru",
+            "nilva cheyadam", "digubadi", "kotha samayam", "panta kotha", "kotha time", "koyadam",
+            "katai", "katavu", "aruvadai", "koythu",
+        ],
+    },
+}
+
+# Module-level aliases for backward compatibility
+MARKET_PRICE_KEYWORDS_EN = INTENT_KEYWORDS[FarmerIntent.MARKET_PRICE]["en"]
+MARKET_PRICE_KEYWORDS_TE = INTENT_KEYWORDS[FarmerIntent.MARKET_PRICE]["te"]
+MARKET_PRICE_KEYWORDS_TANGLISH = INTENT_KEYWORDS[FarmerIntent.MARKET_PRICE]["transliterated"]
+
+WEATHER_KEYWORDS_EN = INTENT_KEYWORDS[FarmerIntent.WEATHER]["en"]
+WEATHER_KEYWORDS_TE = INTENT_KEYWORDS[FarmerIntent.WEATHER]["te"]
+WEATHER_KEYWORDS_TANGLISH = INTENT_KEYWORDS[FarmerIntent.WEATHER]["transliterated"]
+
+SCHEMES_KEYWORDS_EN = INTENT_KEYWORDS[FarmerIntent.GOVERNMENT_SCHEMES]["en"]
+SCHEMES_KEYWORDS_TE = INTENT_KEYWORDS[FarmerIntent.GOVERNMENT_SCHEMES]["te"]
+SCHEMES_KEYWORDS_TANGLISH = INTENT_KEYWORDS[FarmerIntent.GOVERNMENT_SCHEMES]["transliterated"]
+
+SHOPS_KEYWORDS_EN = INTENT_KEYWORDS[FarmerIntent.SHOPS]["en"]
+SHOPS_KEYWORDS_TE = INTENT_KEYWORDS[FarmerIntent.SHOPS]["te"]
+SHOPS_KEYWORDS_TANGLISH = INTENT_KEYWORDS[FarmerIntent.SHOPS]["transliterated"]
+
+CROP_HEALTH_KEYWORDS_EN = INTENT_KEYWORDS[FarmerIntent.CROP_HEALTH]["en"]
+CROP_HEALTH_KEYWORDS_TE = INTENT_KEYWORDS[FarmerIntent.CROP_HEALTH]["te"]
+CROP_HEALTH_KEYWORDS_TANGLISH = INTENT_KEYWORDS[FarmerIntent.CROP_HEALTH]["transliterated"]
+
+FERTILIZER_KEYWORDS_EN = INTENT_KEYWORDS[FarmerIntent.FERTILIZER]["en"]
+FERTILIZER_KEYWORDS_TE = INTENT_KEYWORDS[FarmerIntent.FERTILIZER]["te"]
+FERTILIZER_KEYWORDS_TANGLISH = INTENT_KEYWORDS[FarmerIntent.FERTILIZER]["transliterated"]
+
+IRRIGATION_KEYWORDS_EN = INTENT_KEYWORDS[FarmerIntent.IRRIGATION]["en"]
+IRRIGATION_KEYWORDS_TE = INTENT_KEYWORDS[FarmerIntent.IRRIGATION]["te"]
+IRRIGATION_KEYWORDS_TANGLISH = INTENT_KEYWORDS[FarmerIntent.IRRIGATION]["transliterated"]
+
+SOWING_KEYWORDS_EN = INTENT_KEYWORDS[FarmerIntent.SOWING]["en"]
+SOWING_KEYWORDS_TE = INTENT_KEYWORDS[FarmerIntent.SOWING]["te"]
+SOWING_KEYWORDS_TANGLISH = INTENT_KEYWORDS[FarmerIntent.SOWING]["transliterated"]
+
+HARVESTING_KEYWORDS_EN = INTENT_KEYWORDS[FarmerIntent.HARVESTING]["en"]
+HARVESTING_KEYWORDS_TE = INTENT_KEYWORDS[FarmerIntent.HARVESTING]["te"]
+HARVESTING_KEYWORDS_TANGLISH = INTENT_KEYWORDS[FarmerIntent.HARVESTING]["transliterated"]
+
+REMINDERS_KEYWORDS_EN = INTENT_KEYWORDS[FarmerIntent.REMINDERS]["en"]
+REMINDERS_KEYWORDS_TE = INTENT_KEYWORDS[FarmerIntent.REMINDERS]["te"]
+REMINDERS_KEYWORDS_TANGLISH = INTENT_KEYWORDS[FarmerIntent.REMINDERS]["transliterated"]
+
+GENERAL_FARMING_WORDS = [
+    # English
+    "crop", "crops", "farm", "farming", "land", "field", "acre", "acres", "yield", "soil", "cotton", "paddy", "chilli", "tomato", "maize", "agriculture",
+    # Telugu
+    "పంట", "పొలం", "సాగు", "భూమి", "ఎకరం", "దిగుబడి", "నేల", "పత్తి", "వరి", "మిర్చి",
+    # Hindi / Marathi
+    "फसल", "खेती", "खेत", "किसान", "जमीन", "मिट्टी", "पैदावार", "कपास", "धान", "गेहूं", "शेती", "शेतकरी", "पीक",
+    # Tamil
+    "பயிர்", "விவசாயம்", "நிலம்", "வயல்", "மண்", "விவசாயி", "மகசூல்", "பருத்தி", "நெல்",
+    # Kannada
+    "ಬೆಳೆ", "ಕೃಷಿ", "ಜಮೀನು", "ಹೊಲ", "ಮಣ್ಣು", "ರೈತ", "ಇಳುವರಿ", "ಹತ್ತಿ", "ಭತ್ತ",
+    # Malayalam
+    "വിള", "കൃഷി", "നിലം", "പാടം", "മണ്ണ്", "കർഷകൻ", "വിളവ്", "നെല്ല്",
+    # Bengali / Assamese
+    "ফসল", "চাষ", "জমি", "মাটি", "কৃষক", "ফলন", "ধান", "খেতি",
+    # Gujarati
+    "પાક", "ખેતી", "જમીન", "ખેતર", "માટી", "ખેડૂત", "ઉત્પાદન", "કપાસ",
+    # Punjabi
+    "ਫ਼ਸਲ", "ਖੇਤੀ", "ਜ਼ਮੀਨ", "ਖੇਤ", "ਮਿੱਟੀ", "ਕਿਸਾਨ", "ਝਾੜ", "ਕਣਕ", "ਝੋਨਾ",
+    # Odia
+    "ଫସଲ", "ଚାଷ", "ଜମି", "ବିଲ", "ମାଟି", "କୃଷକ", "ଅମଳ", "ଧାନ",
+    # Urdu
+    "فصل", "کھیتی", "کھیت", "کسان", "زمین", "مٹی", "پیداوار", "کپاس",
+]
+
+
+
+GREETING_REPLIES = GREETING_RESPONSES
+
+def _flatten_multilingual(intent: FarmerIntent) -> List[str]:
+    kws = []
+    for lang, lst in INTENT_KEYWORDS.get(intent, {}).items():
+        if lang not in ("en", "te", "transliterated"):
+            kws.extend(lst)
+    return kws
+
+MARKET_PRICE_KEYWORDS_MULTILINGUAL = _flatten_multilingual(FarmerIntent.MARKET_PRICE)
+WEATHER_KEYWORDS_MULTILINGUAL = _flatten_multilingual(FarmerIntent.WEATHER)
+SCHEMES_KEYWORDS_MULTILINGUAL = _flatten_multilingual(FarmerIntent.GOVERNMENT_SCHEMES)
+SHOPS_KEYWORDS_MULTILINGUAL = _flatten_multilingual(FarmerIntent.SHOPS)
+CROP_HEALTH_KEYWORDS_MULTILINGUAL = _flatten_multilingual(FarmerIntent.CROP_HEALTH)
+FERTILIZER_KEYWORDS_MULTILINGUAL = _flatten_multilingual(FarmerIntent.FERTILIZER)
+IRRIGATION_KEYWORDS_MULTILINGUAL = _flatten_multilingual(FarmerIntent.IRRIGATION)
+SOWING_KEYWORDS_MULTILINGUAL = _flatten_multilingual(FarmerIntent.SOWING)
+HARVESTING_KEYWORDS_MULTILINGUAL = _flatten_multilingual(FarmerIntent.HARVESTING)
+REMINDERS_KEYWORDS_MULTILINGUAL = _flatten_multilingual(FarmerIntent.REMINDERS)
+
 
 def _normalize_query_text(text: str) -> str:
     """
@@ -513,6 +755,15 @@ def _normalize_query_text(text: str) -> str:
     cleaned = re.sub(r"[\u200b-\u200d\ufeff]", "", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned).strip()
     return cleaned
+
+def _matches_intent_keywords(msg: str, intent: FarmerIntent) -> bool:
+    """Check if lowercased message matches any keywords across all languages for a specific intent."""
+    lang_map = INTENT_KEYWORDS.get(intent, {})
+    for lang, keywords in lang_map.items():
+        for kw in keywords:
+            if _normalize_query_text(kw).lower() in msg:
+                return True
+    return False
 
 
 class AIDecisionEngine:
@@ -540,31 +791,27 @@ class AIDecisionEngine:
 
         if not is_greeting_match:
             tokens = [t.strip(",.!?") for t in msg.split() if t.strip(",.!?")]
-            greeting_tokens = [
-                "hi", "hello", "hey", "namaste", "namaskar", "namaskaram", "pranam",
-                "vanakkam", "namaskara", "adaab", "హాయ్", "నమస్తే", "హలో", "नमस्ते",
-                "नमस्कार", "प्रणाम", "வணக்கம்", "ನಮಸ್ಕಾರ", "নমস্কার", "سلام"
-            ]
-            if len(tokens) <= 3 and any(t in greeting_tokens for t in tokens):
+            if len(tokens) <= 3 and any(t in GREETING_TOKENS for t in tokens):
                 is_greeting_match = True
 
         if not is_greeting_match:
             return False
 
         # If any domain keywords are present, it's not a pure greeting
-        domain_keywords = (
-            MARKET_PRICE_KEYWORDS_EN + MARKET_PRICE_KEYWORDS_TE + MARKET_PRICE_KEYWORDS_MULTILINGUAL + MARKET_PRICE_KEYWORDS_TANGLISH +
-            WEATHER_KEYWORDS_EN + WEATHER_KEYWORDS_TE + WEATHER_KEYWORDS_MULTILINGUAL + WEATHER_KEYWORDS_TANGLISH +
-            SCHEMES_KEYWORDS_EN + SCHEMES_KEYWORDS_TE + SCHEMES_KEYWORDS_MULTILINGUAL + SCHEMES_KEYWORDS_TANGLISH +
-            SHOPS_KEYWORDS_EN + SHOPS_KEYWORDS_TE + SHOPS_KEYWORDS_MULTILINGUAL + SHOPS_KEYWORDS_TANGLISH +
-            CROP_HEALTH_KEYWORDS_EN + CROP_HEALTH_KEYWORDS_TE + CROP_HEALTH_KEYWORDS_MULTILINGUAL + CROP_HEALTH_KEYWORDS_TANGLISH +
-            FERTILIZER_KEYWORDS_EN + FERTILIZER_KEYWORDS_TE + FERTILIZER_KEYWORDS_MULTILINGUAL + FERTILIZER_KEYWORDS_TANGLISH +
-            IRRIGATION_KEYWORDS_EN + IRRIGATION_KEYWORDS_TE + IRRIGATION_KEYWORDS_MULTILINGUAL + IRRIGATION_KEYWORDS_TANGLISH +
-            STOCK_ALERT_KEYWORDS_EN + STOCK_ALERT_KEYWORDS_TE + STOCK_ALERT_KEYWORDS_MULTILINGUAL + STOCK_ALERT_KEYWORDS_TANGLISH
-        )
-
-        for kw in domain_keywords:
-            if kw in msg:
+        for intent in [
+            FarmerIntent.STOCK_ALERT,
+            FarmerIntent.MARKET_PRICE,
+            FarmerIntent.WEATHER,
+            FarmerIntent.GOVERNMENT_SCHEMES,
+            FarmerIntent.SHOPS,
+            FarmerIntent.CROP_HEALTH,
+            FarmerIntent.FERTILIZER,
+            FarmerIntent.IRRIGATION,
+            FarmerIntent.SOWING,
+            FarmerIntent.HARVESTING,
+            FarmerIntent.REMINDERS,
+        ]:
+            if _matches_intent_keywords(msg, intent):
                 return False
 
         return True
@@ -572,12 +819,15 @@ class AIDecisionEngine:
     @staticmethod
     def get_greeting_reply(language: str = "te") -> str:
         """Return a helpful, welcoming WhatsApp greeting response in the requested language."""
-        return GREETING_REPLIES.get(language, GREETING_REPLIES["en"])
+        return GREETING_RESPONSES.get(
+            language,
+            GREETING_RESPONSES.get("en", "Hello! I am your BhoomiMitra AI farming assistant. 🙏")
+        )
 
     @classmethod
     def detect_all_intents(cls, user_message: str) -> List[FarmerIntent]:
         """
-        Identify all intents present in the farmer's message across supported languages.
+        Identify all intents present in the farmer's message across all 13 supported languages.
         Supports multi-intent queries (e.g. market prices + weather).
         """
         if not user_message or not user_message.strip():
@@ -597,93 +847,54 @@ class AIDecisionEngine:
         detected: List[FarmerIntent] = []
 
         # 0. Stock Alerts (prioritized if user asks for stock availability alert/cancellation/listing)
-        if (any(kw in msg for kw in STOCK_ALERT_KEYWORDS_EN) or
-            any(kw in msg_original for kw in STOCK_ALERT_KEYWORDS_TE) or
-            any(kw in msg_original for kw in STOCK_ALERT_KEYWORDS_MULTILINGUAL) or
-            any(kw in msg for kw in STOCK_ALERT_KEYWORDS_TANGLISH)):
+        if _matches_intent_keywords(msg, FarmerIntent.STOCK_ALERT):
             detected.append(FarmerIntent.STOCK_ALERT)
 
         # 0.1. Reminders (prioritized if user asks to be reminded)
-        if (any(kw in msg for kw in REMINDERS_KEYWORDS_EN) or
-            any(kw in msg_original for kw in REMINDERS_KEYWORDS_TE) or
-            any(kw in msg_original for kw in REMINDERS_KEYWORDS_MULTILINGUAL) or
-            any(kw in msg for kw in REMINDERS_KEYWORDS_TANGLISH)):
+        if _matches_intent_keywords(msg, FarmerIntent.REMINDERS):
             detected.append(FarmerIntent.REMINDERS)
 
         # 1. Market Price
-        if (any(kw in msg for kw in MARKET_PRICE_KEYWORDS_EN) or
-            any(kw in msg_original for kw in MARKET_PRICE_KEYWORDS_TE) or
-            any(kw in msg_original for kw in MARKET_PRICE_KEYWORDS_MULTILINGUAL) or
-            any(kw in msg for kw in MARKET_PRICE_KEYWORDS_TANGLISH)):
+        if _matches_intent_keywords(msg, FarmerIntent.MARKET_PRICE):
             detected.append(FarmerIntent.MARKET_PRICE)
 
         # 2. Weather
-        if (any(kw in msg for kw in WEATHER_KEYWORDS_EN) or
-            any(kw in msg_original for kw in WEATHER_KEYWORDS_TE) or
-            any(kw in msg_original for kw in WEATHER_KEYWORDS_MULTILINGUAL) or
-            any(kw in msg for kw in WEATHER_KEYWORDS_TANGLISH)):
+        if _matches_intent_keywords(msg, FarmerIntent.WEATHER):
             detected.append(FarmerIntent.WEATHER)
 
         # 3. Government Schemes
-        if (any(kw in msg for kw in SCHEMES_KEYWORDS_EN) or
-            any(kw in msg_original for kw in SCHEMES_KEYWORDS_TE) or
-            any(kw in msg_original for kw in SCHEMES_KEYWORDS_MULTILINGUAL) or
-            any(kw in msg for kw in SCHEMES_KEYWORDS_TANGLISH)):
+        if _matches_intent_keywords(msg, FarmerIntent.GOVERNMENT_SCHEMES):
             detected.append(FarmerIntent.GOVERNMENT_SCHEMES)
 
         # 4. Shops / Input Availability
-        if (any(kw in msg for kw in SHOPS_KEYWORDS_EN) or
-            any(kw in msg_original for kw in SHOPS_KEYWORDS_TE) or
-            any(kw in msg_original for kw in SHOPS_KEYWORDS_MULTILINGUAL) or
-            any(kw in msg for kw in SHOPS_KEYWORDS_TANGLISH)):
+        if _matches_intent_keywords(msg, FarmerIntent.SHOPS):
             detected.append(FarmerIntent.SHOPS)
 
         # 5. Crop Health / Disease / Pest
-        if (any(kw in msg for kw in CROP_HEALTH_KEYWORDS_EN) or
-            any(kw in msg_original for kw in CROP_HEALTH_KEYWORDS_TE) or
-            any(kw in msg_original for kw in CROP_HEALTH_KEYWORDS_MULTILINGUAL) or
-            any(kw in msg for kw in CROP_HEALTH_KEYWORDS_TANGLISH)):
+        if _matches_intent_keywords(msg, FarmerIntent.CROP_HEALTH):
             detected.append(FarmerIntent.CROP_HEALTH)
 
         # 6. Fertilizer / Nutrients
-        if (any(kw in msg for kw in FERTILIZER_KEYWORDS_EN) or
-            any(kw in msg_original for kw in FERTILIZER_KEYWORDS_TE) or
-            any(kw in msg_original for kw in FERTILIZER_KEYWORDS_MULTILINGUAL) or
-            any(kw in msg for kw in FERTILIZER_KEYWORDS_TANGLISH)):
+        if _matches_intent_keywords(msg, FarmerIntent.FERTILIZER):
             detected.append(FarmerIntent.FERTILIZER)
 
         # 7. Irrigation
-        if (any(kw in msg for kw in IRRIGATION_KEYWORDS_EN) or
-            any(kw in msg_original for kw in IRRIGATION_KEYWORDS_TE) or
-            any(kw in msg_original for kw in IRRIGATION_KEYWORDS_MULTILINGUAL) or
-            any(kw in msg for kw in IRRIGATION_KEYWORDS_TANGLISH)):
+        if _matches_intent_keywords(msg, FarmerIntent.IRRIGATION):
             detected.append(FarmerIntent.IRRIGATION)
 
         # 8. Sowing
-        if (any(kw in msg for kw in SOWING_KEYWORDS_EN) or
-            any(kw in msg_original for kw in SOWING_KEYWORDS_TE) or
-            any(kw in msg_original for kw in SOWING_KEYWORDS_MULTILINGUAL) or
-            any(kw in msg for kw in SOWING_KEYWORDS_TANGLISH)):
+        if _matches_intent_keywords(msg, FarmerIntent.SOWING):
             detected.append(FarmerIntent.SOWING)
 
         # 9. Harvesting
-        if (any(kw in msg for kw in HARVESTING_KEYWORDS_EN) or
-            any(kw in msg_original for kw in HARVESTING_KEYWORDS_TE) or
-            any(kw in msg_original for kw in HARVESTING_KEYWORDS_MULTILINGUAL) or
-            any(kw in msg for kw in HARVESTING_KEYWORDS_TANGLISH)):
+        if _matches_intent_keywords(msg, FarmerIntent.HARVESTING):
             detected.append(FarmerIntent.HARVESTING)
 
         # Fallback: if no specific domain matched, identify as general farming or unknown
         if not detected:
             from src.rag.service import extract_crop_from_text
             mentioned_crop = extract_crop_from_text(msg_original)
-            agri_words = [
-                "crop", "crops", "farm", "farming", "land", "field", "acre", "acres", "yield",
-                "soil", "cotton", "paddy", "chilli", "tomato", "maize", "agriculture",
-                "పంట", "పొలం", "సాగు", "భూమి", "ఎకరం", "దిగుబడి", "నేల", "పత్తి", "వరి", "మిర్చి",
-                "फसल", "खेती", "खेत", "किसान", "पिक", "शेती", "பயிர்", "விவசாயம்", "ಬೆಳೆ", "ಕೃಷಿ", "விளைச்சல்"
-            ]
-            if mentioned_crop or any(w in msg for w in agri_words):
+            if mentioned_crop or any(w in msg for w in GENERAL_FARMING_WORDS):
                 detected.append(FarmerIntent.GENERAL_FARMING)
             else:
                 detected.append(FarmerIntent.UNKNOWN)
@@ -704,7 +915,6 @@ class AIDecisionEngine:
     ) -> str:
         """
         Main decision and orchestration pipeline.
-        - Identifies language dynamically (13 languages + Romanized)
         - Identifies intents
         - Bypasses LLM for pure greetings
         - Coordinates specialized services only when relevant
@@ -715,14 +925,14 @@ class AIDecisionEngine:
         user_message = conversation.user_message or ""
         logger.info(f"[DECISION ENGINE START] Farmer: {farmer.id} | Query: '{user_message}'")
 
-        # Resolve language using deterministic multi-tier language detector
-        pref_lang = getattr(farmer, "preferred_language", "te") or "te"
-        language = detect_language(user_message, fallback=pref_lang)
-        logger.info(f"[DECISION ENGINE] Detected language: '{language}' (Farmer preferred: '{pref_lang}')")
+        # Resolve language deterministically using centralized detector
+        from src.language.detector import detect_language
+        pref_fallback = getattr(farmer, "preferred_language", None) or "te"
+        language = detect_language(user_message, fallback=pref_fallback)
 
         # 1. Pure Greeting Shortcut
         if self.is_greeting_only(user_message):
-            logger.info(f"[DECISION ENGINE] Pure greeting detected. Returning instant greeting ({language}) for farmer {farmer.id}.")
+            logger.info(f"[DECISION ENGINE] Pure greeting detected. Returning instant greeting for farmer {farmer.id}.")
             reply = self.get_greeting_reply(language=language)
             conversation.ai_response = reply
             conversation.intent = FarmerIntent.GREETING.value

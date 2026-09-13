@@ -20,6 +20,54 @@ from src.ai.prompts import (
 from src.config import get_settings
 from src.ai.gemini_client import generate_response
 import re
+from typing import Optional
+
+
+def build_target_language_directive(
+    language_code: Optional[str],
+    default: str = "te",
+    is_multimodal: bool = False
+) -> str:
+    """
+    Constructs an explicit target-language directive for Gemini system prompts.
+    Normalizes language against the centralized registry and safely falls back.
+    """
+    from src.language.languages import get_language, normalize_language_code, DEFAULT_LANGUAGE
+    normalized = normalize_language_code(language_code, default=default or DEFAULT_LANGUAGE)
+    meta = get_language(normalized)
+    if not meta:
+        normalized = DEFAULT_LANGUAGE
+        meta = get_language(DEFAULT_LANGUAGE)
+
+    code = meta.code
+    name = meta.prompt_name or meta.display_name
+    script = meta.script
+
+    if is_multimodal:
+        return (
+            f"=== TARGET RESPONSE LANGUAGE DIRECTIVE ===\n"
+            f"[TARGET_RESPONSE_LANGUAGE: {code}]\n"
+            f"[TARGET_RESPONSE_LANGUAGE_NAME: {name}]\n"
+            f"[TARGET_RESPONSE_LANGUAGE_SCRIPT: {script}]\n"
+            f"MANDATORY INSTRUCTIONS:\n"
+            f"1. In the JSON output, the 'friendly_whatsapp_reply' field MUST be written completely in {name} ({code}) using {script} script where applicable.\n"
+            f"2. Do NOT switch to English merely because the user caption contains English words or Romanized terms.\n"
+            f"3. Strictly preserve numbers, units, crop names, chemical names, and prices accurately.\n"
+            f"4. This language directive strictly governs linguistic output format and does NOT override factual safety or diagnostic caution rules."
+        )
+
+    return (
+        f"=== TARGET RESPONSE LANGUAGE DIRECTIVE ===\n"
+        f"[TARGET_RESPONSE_LANGUAGE: {code}]\n"
+        f"[TARGET_RESPONSE_LANGUAGE_NAME: {name}]\n"
+        f"[TARGET_RESPONSE_LANGUAGE_SCRIPT: {script}]\n"
+        f"MANDATORY INSTRUCTIONS:\n"
+        f"1. You MUST respond to the farmer in {name} ({code}) using {script} script where applicable.\n"
+        f"2. Do NOT switch to English merely because the farmer's input contains English words, Latin script, or Romanized terms.\n"
+        f"3. If the input is Romanized / transliterated text, provide your full response in {name} native script.\n"
+        f"4. Strictly preserve all numbers, units (e.g. kg/acre, ml/L), prices, dates, crop names, product names, and verified dosage values exactly without alteration.\n"
+        f"5. This language directive strictly governs linguistic output format and does NOT override factual safety or Ground Truth agronomic constraints."
+    )
 
 
 def is_dosage_sensitive_query(text: str) -> bool:
@@ -345,14 +393,14 @@ class AIService:
             # 1. Explicit crop mentioned in current message (e.g. "టమాటా" / Tomato overrides profile's "Cotton")
             # 2. If short follow-up and query_crop is None, crop from recent conversation history
             # 3. Farmer profile current_crop
-            effective_crop = query_crop or (recent_context_crop if recent_context_crop else (profile.current_crop if profile else None))
+            effective_crop = query_crop or (recent_context_crop if recent_context_crop else (getattr(profile, "current_crop", None) if profile else None))
 
             # Build farmer context string
             farmer_context = build_farmer_context(
-                crop=effective_crop or (profile.current_crop if profile else None),
-                district=profile.district if profile else None,
-                state=profile.state if profile else None,
-                land_size=profile.land_size_acres if profile else None,
+                crop=effective_crop or (getattr(profile, "current_crop", None) if profile else None),
+                district=getattr(profile, "district", None) if profile else None,
+                state=getattr(profile, "state", None) if profile else None,
+                land_size=getattr(profile, "land_size_acres", None) if profile else None,
             )
 
             # 3. Fetch farmer long-term memory context
@@ -386,7 +434,7 @@ class AIService:
                 rag_results = await rag_service.search_knowledge(
                     query=rag_query,
                     top_k=rag_top_k,
-                    state=profile.state if profile else None,
+                    state=getattr(profile, "state", None) if profile else None,
                     crop=effective_crop,
                 )
                 if rag_results:
@@ -433,8 +481,12 @@ class AIService:
                     provider_used="hard_grounding_gate",
                 )
 
-            # 4. Build system prompt combining profile, memory engine, and RAG ground truth
-            full_system_prompt = f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\n{farmer_context}\n\n{memory_context}"
+            # 4. Build target-language directive and system prompt combining profile, memory engine, and RAG ground truth
+            lang_directive = build_target_language_directive(
+                user_lang,
+                default=getattr(profile, "preferred_language", "te") or "te"
+            )
+            full_system_prompt = f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\n{lang_directive}\n\n{farmer_context}\n\n{memory_context}"
             if rag_context_text:
                 full_system_prompt += f"\n\n{rag_context_text}"
 
@@ -643,10 +695,10 @@ async def process_image_message(
     # 1. Fetch farmer profile
     profile = await repo.get_farmer_profile(farmer.id)
     farmer_context = build_farmer_context(
-        crop=profile.current_crop if profile else None,
-        district=profile.district if profile else None,
-        state=profile.state if profile else None,
-        land_size=profile.land_size_acres if profile else None,
+        crop=getattr(profile, "current_crop", None) if profile else None,
+        district=getattr(profile, "district", None) if profile else None,
+        state=getattr(profile, "state", None) if profile else None,
+        land_size=getattr(profile, "land_size_acres", None) if profile else None,
     )
     
     from src.memory.service import FarmerMemoryService
@@ -655,9 +707,17 @@ async def process_image_message(
     mem_service = FarmerMemoryService(mem_repo)
     memory_context = await mem_service.format_memory_for_system_prompt(farmer.id)
 
+    user_caption = conversation.user_message or ""
+    from src.language.detector import detect_language
+    from src.language.languages import normalize_language_code
+    img_lang = detect_language(user_caption, fallback=getattr(farmer, "preferred_language", "te") or "te") if user_caption.strip() else (getattr(farmer, "preferred_language", "te") or "te")
+    img_lang_code = normalize_language_code(img_lang, default=getattr(farmer, "preferred_language", "te") or "te")
+    lang_directive = build_target_language_directive(img_lang_code, default=getattr(farmer, "preferred_language", "te") or "te", is_multimodal=True)
+
     # Add a vision-specific system prompt instruction enforcing JSON and diagnostic safety
     full_system_prompt = (
         f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\n"
+        f"{lang_directive}\n\n"
         "The user has uploaded an image of their crop. Diagnose any visible diseases, pests, or deficiencies.\n"
         "IMAGE DIAGNOSIS SAFETY RULES:\n"
         "- Never claim that an image proves a disease with absolute certainty. Use cautious wording like 'appears consistent with', 'may indicate', or 'possible symptoms of'.\n"
@@ -698,7 +758,7 @@ async def process_image_message(
     from src.ai.prompts import get_non_crop_image_response
     import json
     
-    user_caption = conversation.user_message or "Please analyze this image."
+    caption_to_send = user_caption if user_caption.strip() else "Please analyze this image."
     
     try:
         ai_response_text = await generate_multimodal_response(
@@ -706,7 +766,7 @@ async def process_image_message(
             conversation_history=history,
             image_bytes=image_bytes,
             mime_type=mime_type,
-            user_message=user_caption
+            user_message=caption_to_send
         )
         if not ai_response_text:
             raise Exception("Empty response from AI")
@@ -723,7 +783,7 @@ async def process_image_message(
         )
 
         if is_non_crop:
-            reply_text = get_non_crop_image_response(farmer.preferred_language or "te")
+            reply_text = get_non_crop_image_response(img_lang_code)
             conversation.ai_response = reply_text
             db.add(conversation)
             await db.commit()

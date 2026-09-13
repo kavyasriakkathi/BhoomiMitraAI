@@ -421,3 +421,301 @@ async def test_query_crop_overrides_profile_crop():
         assert len(captured_requests) == 1
         assert "టమాటా" in captured_requests[0].message
         assert "టమాటాలో ఆకుముడత" in result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. COMPREHENSIVE 13-LANGUAGE INTENT ROUTING TESTS
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "query,expected_intent",
+    [
+        # 1. Market Price (13 languages)
+        ("వరంగల్లో ఈరోజు పత్తి ధర ఎంత", FarmerIntent.MARKET_PRICE),
+        ("कपास का मंडी भाव कितना है", FarmerIntent.MARKET_PRICE),
+        ("What is the market price of cotton in Warangal", FarmerIntent.MARKET_PRICE),
+        ("பருத்தி சந்தை விலை என்ன", FarmerIntent.MARKET_PRICE),
+        ("ಹತ್ತಿ ಮಾರುಕಟ್ಟೆ ಬೆಲೆ ಎಷ್ಟು", FarmerIntent.MARKET_PRICE),
+        ("പരുത്തി വിപണി വില എത്ര", FarmerIntent.MARKET_PRICE),
+        ("कापसाचा बाजारभाव किती आहे", FarmerIntent.MARKET_PRICE),
+        ("তুলার বাজার দর কত", FarmerIntent.MARKET_PRICE),
+        ("કપાસનો બજાર ભાવ કેટલો છે", FarmerIntent.MARKET_PRICE),
+        ("ਕਪਾਹ ਦਾ ਮੰਡੀ ਭਾਅ ਕੀ ਹੈ", FarmerIntent.MARKET_PRICE),
+        ("କପା ମଣ୍ଡି ଦର କେତେ", FarmerIntent.MARKET_PRICE),
+        ("কপাহৰ বজাৰ দৰ কিমান", FarmerIntent.MARKET_PRICE),
+        ("کپاس کا منڈی ریٹ کیا ہے", FarmerIntent.MARKET_PRICE),
+
+        # 2. Weather (13 languages)
+        ("రేపు వర్షం పడుతుందా", FarmerIntent.WEATHER),
+        ("कल बारिश होगी क्या मौसम कैसा रहेगा", FarmerIntent.WEATHER),
+        ("Will it rain tomorrow in Warangal", FarmerIntent.WEATHER),
+        ("நாளை மழை பெய்யுமா வானிலை எப்படி", FarmerIntent.WEATHER),
+        ("ನಾಳೆ ಮಳೆ ಬರುತ್ತಾ ಹವಾಮಾನ ಹೇಗೆ", FarmerIntent.WEATHER),
+        ("നാളെ മഴ പെയ്യുമോ കാലാവസ്ഥ പ്രവചനം", FarmerIntent.WEATHER),
+        ("उद्या पाऊस पडेल का हवामान अंदाज", FarmerIntent.WEATHER),
+        ("কাল কি বৃষ্টি হবে আবহাওয়া কেমন", FarmerIntent.WEATHER),
+        ("કાલે વરસાદ પડશે કે નહિ હવામાન", FarmerIntent.WEATHER),
+        ("ਕੱਲ੍ਹ ਮੀਂਹ ਪਵੇਗਾ ਮੌਸਮ ਕਿਹੋ ਜਿਹਾ ਰਹੇਗਾ", FarmerIntent.WEATHER),
+        ("କାଲି ବର୍ଷା ହେବ କି ପାଣିପାଗ ସୂଚନା", FarmerIntent.WEATHER),
+        ("কাইলৈ বৰষুণ হ'ব নেকি বতৰৰ খবৰ", FarmerIntent.WEATHER),
+        ("کل بارش ہوگی کیا موسم کا حال بتائیں", FarmerIntent.WEATHER),
+
+        # 3. Government Schemes (13 languages)
+        ("రైతు భరోసా ప్రభుత్వ పథకం వివరాలు", FarmerIntent.GOVERNMENT_SCHEMES),
+        ("पीएम किसान सम्मान निधि सरकारी योजना की जानकारी", FarmerIntent.GOVERNMENT_SCHEMES),
+        ("Tell me about PM Kisan government subsidy scheme", FarmerIntent.GOVERNMENT_SCHEMES),
+        ("விவசாய மானியம் அரசு திட்டம் விவரங்கள்", FarmerIntent.GOVERNMENT_SCHEMES),
+        ("ಕಿಸಾನ್ ಸಬ್ಸಿಡಿ ಸರ್ಕಾರಿ ಯೋಜನೆ ವಿವರ", FarmerIntent.GOVERNMENT_SCHEMES),
+        ("വിള ഇൻഷുറൻസ് സർക്കാർ പദ്ധതി", FarmerIntent.GOVERNMENT_SCHEMES),
+        ("पीक विमा शेतकरी शासकीय योजना माहिती", FarmerIntent.GOVERNMENT_SCHEMES),
+        ("কৃষক বন্ধু সরকারি অনুদান প্রকল্প", FarmerIntent.GOVERNMENT_SCHEMES),
+        ("ખેડૂત સબસિડી સરકારી યોજના ની માહિતી", FarmerIntent.GOVERNMENT_SCHEMES),
+        ("ਫ਼ਸਲ ਬੀਮਾ ਸਰਕਾਰੀ ਸਹਾਇਤਾ ਸਕੀਮ", FarmerIntent.GOVERNMENT_SCHEMES),
+        ("କାଳିଆ ଯୋଜନା ସରକାରୀ ସହାୟତା ବିବରଣୀ", FarmerIntent.GOVERNMENT_SCHEMES),
+        ("শস্য বীমা চৰকাৰী সাহায্য আঁচনি", FarmerIntent.GOVERNMENT_SCHEMES),
+        ("پی ایم کسان سرکاری اسکیم کی تفصیلات", FarmerIntent.GOVERNMENT_SCHEMES),
+
+        # 4. Shops / Input Availability (13 languages)
+        ("యూరియా ఎరువుల దుకాణం ఎక్కడ ఉంది", FarmerIntent.SHOPS),
+        ("यूरिया खाद की दुकान कहाँ मिलेगी", FarmerIntent.SHOPS),
+        ("Where can I buy urea fertilizer from nearby shops", FarmerIntent.SHOPS),
+        ("உரக்கடை எங்கு உள்ளது மருந்து வாங்க", FarmerIntent.SHOPS),
+        ("ಗೊಬ್ಬರದ ಅಂಗಡಿ ಎಲ್ಲಿ ಸಿಗುತ್ತದೆ", FarmerIntent.SHOPS),
+        ("വളക്കട എവിടെ ലഭിക്കും സമീപത്തെ കട", FarmerIntent.SHOPS),
+        ("खताचे दुकान कुठे मिळेल औषध खरेदी", FarmerIntent.SHOPS),
+        ("সারের দোকান কোথায় পাওয়া যাবে", FarmerIntent.SHOPS),
+        ("ખાતરની દુકાન ક્યાં મળશે એગ્રો સેન્ટર", FarmerIntent.SHOPS),
+        ("ਖਾਦ ਦੀ ਦੁਕਾਨ ਕਿੱਥੇ ਮਿਲੇਗੀ ਡੀਲਰ", FarmerIntent.SHOPS),
+        ("ସାର ଦୋକାନ କେଉଁଠି ମିଳିବ କିଣିବା ପାଇଁ", FarmerIntent.SHOPS),
+        ("সাৰৰ দোকান ক'ত পোৱা যাব", FarmerIntent.SHOPS),
+        ("کھاد کی دکان کہاں ملے گی قریبی ڈیلر", FarmerIntent.SHOPS),
+
+        # 5. Crop Health / Pest / Disease (13 languages)
+        ("మిరప పంటలో ఆకుముడత తెగులు నివారణ", FarmerIntent.CROP_HEALTH),
+        ("कपास में गुलाबी सुंडी कीट रोकथाम", FarmerIntent.CROP_HEALTH),
+        ("How to control bollworm pest and blight disease", FarmerIntent.CROP_HEALTH),
+        ("பருத்தி பயிரில் புழு நோய் கட்டுப்பாடு", FarmerIntent.CROP_HEALTH),
+        ("ಬೆಳೆಯಲ್ಲಿ ಕೀಟ ರೋಗ ಬಾಧೆ ನಿಯಂತ್ರಣ", FarmerIntent.CROP_HEALTH),
+        ("വിളകളിൽ പുഴു രോഗം കീടനിയന്ത്രണം", FarmerIntent.CROP_HEALTH),
+        ("कापूस पिकावर बोंडअळी रोग नियंत्रण फवारणी", FarmerIntent.CROP_HEALTH),
+        ("তুলা ফসলে পোকা রোগ দমন স্প্রে", FarmerIntent.CROP_HEALTH),
+        ("કપાસમાં ગુલાબી ઈયળ જીવાત રોગ નિયંત્રણ", FarmerIntent.CROP_HEALTH),
+        ("ਫ਼ਸਲ ਵਿੱਚ ਸੁੰਡੀ ਬਿਮਾਰੀ ਕੀਟਨਾਸ਼ਕ ਸਪਰੇਅ", FarmerIntent.CROP_HEALTH),
+        ("ଫସଲରେ ପୋକ ରୋଗ ନିୟନ୍ତ୍ରଣ କୀଟନାଶକ", FarmerIntent.CROP_HEALTH),
+        ("খেতিত পোক পৰুৱা ৰোগ নিয়ন্ত্ৰণ", FarmerIntent.CROP_HEALTH),
+        ("فصل میں کیڑے اور بیماری کی روکتھام", FarmerIntent.CROP_HEALTH),
+
+        # 6. Fertilizer / Nutrients (13 languages)
+        ("వరి పంటకు ఏ ఎరువుల మోతాదు వేయాలి", FarmerIntent.FERTILIZER),
+        ("गेहूं में यूरिया खाद कितनी मात्रा में डालें", FarmerIntent.FERTILIZER),
+        ("What is the recommended NPK fertilizer schedule", FarmerIntent.FERTILIZER),
+        ("நெல் பயிருக்கு எவ்வளவு உரம் இட வேண்டும்", FarmerIntent.FERTILIZER),
+        ("ಭತ್ತದ ಬೆಳೆಗೆ ಎಷ್ಟು ರಸಗೊಬ್ಬರ ಪ್ರಮಾಣ ಹಾಕಬೇಕು", FarmerIntent.FERTILIZER),
+        ("നെല്ലിന് എത്ര രാസവളം പ്രയോഗിക്കണം", FarmerIntent.FERTILIZER),
+        ("कापूस पिकाला किती रासायनिक खत द्यावे", FarmerIntent.FERTILIZER),
+        ("ধান চাষে কতটা রাসায়নিক সার প্রয়োগ করব", FarmerIntent.FERTILIZER),
+        ("કપાસમાં કેટલું રાસાયણિક ખાતર આપવું", FarmerIntent.FERTILIZER),
+        ("ਕਣਕ ਨੂੰ ਕਿੰਨੀ ਰਸਾਇਣਕ ਖਾਦ ਪਾਈਏ", FarmerIntent.FERTILIZER),
+        ("ଧାନ ଫସଲରେ କେତେ ରାସାୟନିକ ସାର ପ୍ରୟୋଗ କରିବି", FarmerIntent.FERTILIZER),
+        ("ধান খেতিত কিমান ৰাসায়নিক সাৰ প্ৰয়োগ কৰিম", FarmerIntent.FERTILIZER),
+        ("گندم کی فصل میں کتنی کھاد استعمال کریں", FarmerIntent.FERTILIZER),
+
+        # 7. Irrigation / Water (13 languages)
+        ("పత్తి పంటకు నీరు ఎప్పుడు పెట్టాలి", FarmerIntent.IRRIGATION),
+        ("कपास में ड्रिप सिंचाई से पानी कब दें", FarmerIntent.IRRIGATION),
+        ("When to provide drip irrigation watering", FarmerIntent.IRRIGATION),
+        ("பருத்தி பயிருக்கு சொட்டு நீர்ப்பாசனம் எப்போது", FarmerIntent.IRRIGATION),
+        ("ಹತ್ತಿ ಬೆಳೆಗೆ ಹನಿ ನೀರಾವರಿ ಯಾವಾಗ ನೀಡಬೇಕು", FarmerIntent.IRRIGATION),
+        ("തുള്ളി നന ജലസേചനം എപ്പോൾ നൽകണം", FarmerIntent.IRRIGATION),
+        ("कापूस पिकाला ठिबक सिंचन पाणी कधी द्यावे", FarmerIntent.IRRIGATION),
+        ("ড্রিপ সেচ দিয়ে কখন পানি দিতে হবে", FarmerIntent.IRRIGATION),
+        ("કપાસમાં ટપક પદ્ધતિ થી ક્યારે પાણી આપવું", FarmerIntent.IRRIGATION),
+        ("ਫ਼ਸਲ ਨੂੰ ਤੁਪਕਾ ਸਿੰਚਾਈ ਨਾਲ ਕਦੋਂ ਪਾਣੀ ਲਾਈਏ", FarmerIntent.IRRIGATION),
+        ("ବୁନ୍ଦା ଜଳସେଚନ ମାଧ୍ୟମରେ କେବେ ପାଣି ଦେବି", FarmerIntent.IRRIGATION),
+        ("টোপাল জলসিঞ্চন কেতিয়া পানী দিব লাগে", FarmerIntent.IRRIGATION),
+        ("فصل میں ڈرپ آبپاشی سے کب پانی دیں", FarmerIntent.IRRIGATION),
+
+        # 8. Sowing / Planting (13 languages)
+        ("విత్తనాల విత్తే సమయం మరియు నాట్లు", FarmerIntent.SOWING),
+        ("कपास की बुवाई का समय और बीज उपचार", FarmerIntent.SOWING),
+        ("What is the best sowing time and seed rate", FarmerIntent.SOWING),
+        ("விதைப்பு நேரம் மற்றும் விதை நேர்த்தி", FarmerIntent.SOWING),
+        ("ಬಿತ್ತನೆ ಸಮಯ ಮತ್ತು ಬೀಜೋಪಚಾರ ಮಾಹಿತಿ", FarmerIntent.SOWING),
+        ("വിത്ത് വിതയ്ക്കൽ സമയം ഞാറുനടീൽ", FarmerIntent.SOWING),
+        ("पेरणीची वेळ आणि बीजप्रक्रिया कशी करावी", FarmerIntent.SOWING),
+        ("বীজ বপনের সময় ও চারা রোপণ পদ্ধতি", FarmerIntent.SOWING),
+        ("વાવણીનો સમય અને બીજ માવજત પદ્ધતિ", FarmerIntent.SOWING),
+        ("ਬਿਜਾਈ ਦਾ ਸਮਾਂ ਅਤੇ ਬੀਜ ਸੋਧ ਜਾਣਕਾਰੀ", FarmerIntent.SOWING),
+        ("ବୁଣିବା ସମୟ ଏବଂ ବିହନ ବିଶୋଧନ", FarmerIntent.SOWING),
+        ("বীজ সিঁচা আৰু পুলি ৰোপণৰ সময়", FarmerIntent.SOWING),
+        ("فصل کی بوائی کا وقت اور بیج کا علاج", FarmerIntent.SOWING),
+
+        # 9. Harvesting / Storage (13 languages)
+        ("పత్తి కోత సమయం మరియు కోయడం", FarmerIntent.HARVESTING),
+        ("कपास की फसल कटाई का समय और तुड़ाई", FarmerIntent.HARVESTING),
+        ("When is the optimal harvest time and picking", FarmerIntent.HARVESTING),
+        ("பருத்தி அறுவடை காலம் எப்போது பறித்தல்", FarmerIntent.HARVESTING),
+        ("ಹತ್ತಿ ಕಟಾವಿನ ಸಮಯ ಮತ್ತು ಸುಗ್ಗಿ", FarmerIntent.HARVESTING),
+        ("വിളവെടുപ്പ് സമയം എപ്പോൾ കൊയ്യണം", FarmerIntent.HARVESTING),
+        ("कापूस वेचणी आणि काढणीची वेळ", FarmerIntent.HARVESTING),
+        ("ফসল কাটার সময় ও মাড়াই পদ্ধতি", FarmerIntent.HARVESTING),
+        ("કપાસની વીણવું અને કાપણીનો સમય", FarmerIntent.HARVESTING),
+        ("ਕਣਕ ਦੀ ਵਾਢੀ ਦਾ ਸਮਾਂ ਅਤੇ ਕਟਾਈ", FarmerIntent.HARVESTING),
+        ("ଫସଲ କାଟିବା ସମୟ ଏବଂ ଅମଳ", FarmerIntent.HARVESTING),
+        ("শস্য চপোৱাৰ সময় আৰু কটাৰ সময়", FarmerIntent.HARVESTING),
+        ("فصل کی کٹائی کا وقت اور چنائی", FarmerIntent.HARVESTING),
+
+        # 10. Reminders (13 languages)
+        ("నాకు స్ప్రే గుర్తు చేయండి", FarmerIntent.REMINDERS),
+        ("मुझे खाद डालने की याद दिलाना", FarmerIntent.REMINDERS),
+        ("Please set reminder for irrigation", FarmerIntent.REMINDERS),
+        ("உரம் போட நினைவூட்டல் அமை", FarmerIntent.REMINDERS),
+        ("ಔಷಧ ಸಿಂಪಡಿಸಲು ನೆನಪಿಸಿ", FarmerIntent.REMINDERS),
+        ("വളം പ്രയോഗിക്കാൻ ഓർമ്മിപ്പിക്കുക", FarmerIntent.REMINDERS),
+        ("खत देण्याची आठवण करा", FarmerIntent.REMINDERS),
+        ("সার দেওয়ার কথা মনে করিয়ে দাও", FarmerIntent.REMINDERS),
+        ("ખાતર આપવાનું યાદ અપાવો", FarmerIntent.REMINDERS),
+        ("ਸਪਰੇਅ ਕਰਨ ਦੀ ਯਾਦ ਕਰਵਾਓ", FarmerIntent.REMINDERS),
+        ("ସାର ପ୍ରୟୋଗ ମନେ ପକାଇ ଦିଅନ୍ତୁ", FarmerIntent.REMINDERS),
+        ("সাৰ দিয়াৰ কথা মনত পেলাই দিব", FarmerIntent.REMINDERS),
+        ("اسپرے کرنے کی یاد دلائیں", FarmerIntent.REMINDERS),
+
+        # 11. General Farming / Advisory (13 languages)
+        ("మా ఊరి భూమి నేల సారవంతం", FarmerIntent.GENERAL_FARMING),
+        ("किसान की जमीन और मिट्टी की पैदावार", FarmerIntent.GENERAL_FARMING),
+        ("General farming practices for my agricultural field", FarmerIntent.GENERAL_FARMING),
+        ("விவசாயி நிலம் மற்றும் மண் வளம்", FarmerIntent.GENERAL_FARMING),
+        ("ರೈತ ಜಮೀನು ಮತ್ತು ಕೃಷಿ ಪದ್ಧತಿ", FarmerIntent.GENERAL_FARMING),
+        ("കർഷകൻ കൃഷി നിലം മണ്ണ്", FarmerIntent.GENERAL_FARMING),
+        ("शेतकरी जमीन आणि शेती उत्पादन", FarmerIntent.GENERAL_FARMING),
+        ("কৃষক জমি এবং চাষাবাদ পদ্ধতি", FarmerIntent.GENERAL_FARMING),
+        ("ખેડૂત જમીન અને ખેતી ઉત્પાદન", FarmerIntent.GENERAL_FARMING),
+        ("ਕਿਸਾਨ ਜ਼ਮੀਨ ਅਤੇ ਖੇਤੀ ਝਾੜ", FarmerIntent.GENERAL_FARMING),
+        ("କୃଷକ ଜମି ଏବଂ ଚାଷ ପଦ୍ଧତି", FarmerIntent.GENERAL_FARMING),
+        ("কৃষক মাটি আৰু খেতি পদ্ধতি", FarmerIntent.GENERAL_FARMING),
+        ("کسان کی زمین اور کھیتی باڑی", FarmerIntent.GENERAL_FARMING),
+
+        # 12. Greetings (13 languages)
+        ("నమస్తే భూమిమిత్ర", FarmerIntent.GREETING),
+        ("नमस्ते भूमिमित्र", FarmerIntent.GREETING),
+        ("Hello BhoomiMitra", FarmerIntent.GREETING),
+        ("வணக்கம் பூமிமித்ரா", FarmerIntent.GREETING),
+        ("ನಮಸ್ಕಾರ ಭೂಮಿಮಿತ್ರ", FarmerIntent.GREETING),
+        ("നമസ്കാരം ഭൂമിമിത്ര", FarmerIntent.GREETING),
+        ("नमस्कार भूमिमित्र", FarmerIntent.GREETING),
+        ("নমস্কার ভূমিমিত্র", FarmerIntent.GREETING),
+        ("નમસ્તે ભૂમિમિત્ર", FarmerIntent.GREETING),
+        ("ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ ਭੂਮੀਮਿੱਤਰ", FarmerIntent.GREETING),
+        ("ନମସ୍କାର ଭୂମିମିତ୍ର", FarmerIntent.GREETING),
+        ("নমস্কাৰ ভূমিমিত্ৰ", FarmerIntent.GREETING),
+        ("سلام بھومی مترا", FarmerIntent.GREETING),
+
+        # 13. Unknown queries
+        ("12345 67890 xyz abc", FarmerIntent.UNKNOWN),
+        ("what is quantum computing", FarmerIntent.UNKNOWN),
+    ]
+)
+def test_all_13_languages_intent_classification(query, expected_intent):
+    """Verify that intent detection works reliably across all 13 supported languages."""
+    engine = get_decision_engine()
+    detected = engine.detect_primary_intent(query)
+    assert detected == expected_intent, f"Failed for query '{query}': expected {expected_intent}, got {detected}"
+
+
+def test_multilingual_multi_intent_detection():
+    """Verify multi-intent classification across different languages."""
+    engine = get_decision_engine()
+
+    # Hindi: Market + Weather
+    hi_intents = engine.detect_all_intents("कपास का मंडी भाव कितना है और कल बारिश होगी क्या?")
+    assert FarmerIntent.MARKET_PRICE in hi_intents
+    assert FarmerIntent.WEATHER in hi_intents
+
+    # Tamil: Fertilizer + Irrigation
+    ta_intents = engine.detect_all_intents("நெல் பயிருக்கு எவ்வளவு உரம் இட வேண்டும் மற்றும் சொட்டு நீர்ப்பாசனம் எப்போது?")
+    assert FarmerIntent.FERTILIZER in ta_intents
+    assert FarmerIntent.IRRIGATION in ta_intents
+
+    # Marathi: Crop Health + Shops
+    mr_intents = engine.detect_all_intents("कापूस पिकावर बोंडअळी रोग नियंत्रण फवारणी औषध खताचे दुकान कुठे मिळेल?")
+    assert FarmerIntent.CROP_HEALTH in mr_intents
+    assert FarmerIntent.SHOPS in mr_intents
+
+    # Bengali: Sowing + Schemes
+    bn_intents = engine.detect_all_intents("বীজ বপনের সময় এবং কৃষক বন্ধু সরকারি অনুদান প্রকল্প")
+    assert FarmerIntent.SOWING in bn_intents
+    assert FarmerIntent.GOVERNMENT_SCHEMES in bn_intents
+
+
+def test_hindi_vs_marathi_intent_routing_regression():
+    """Verify Hindi and Marathi specific agricultural queries route cleanly."""
+    engine = get_decision_engine()
+
+    # Marathi specific terms
+    assert engine.detect_primary_intent("कापसाचा बाजारभाव किती आहे") == FarmerIntent.MARKET_PRICE
+    assert engine.detect_primary_intent("कापूस पिकाला ठिबक सिंचन पाणी कधी द्यावे") == FarmerIntent.IRRIGATION
+    assert engine.detect_primary_intent("पेरणीची वेळ आणि बीजप्रक्रिया कशी करावी") == FarmerIntent.SOWING
+    assert engine.detect_primary_intent("कापूस वेचणी आणि काढणीची वेळ") == FarmerIntent.HARVESTING
+    assert engine.detect_primary_intent("खताचे दुकान कुठे मिळेल") == FarmerIntent.SHOPS
+
+    # Hindi specific terms
+    assert engine.detect_primary_intent("कपास का मंडी भाव कितना है") == FarmerIntent.MARKET_PRICE
+    assert engine.detect_primary_intent("कपास में ड्रिप सिंचाई से पानी कब दें") == FarmerIntent.IRRIGATION
+    assert engine.detect_primary_intent("कपास की बुवाई का समय और बीज उपचार") == FarmerIntent.SOWING
+    assert engine.detect_primary_intent("कपास की फसल कटाई का समय और तुड़ाई") == FarmerIntent.HARVESTING
+    assert engine.detect_primary_intent("यूरिया खाद की दुकान कहाँ मिलेगी") == FarmerIntent.SHOPS
+
+
+def test_bengali_vs_assamese_intent_routing_regression():
+    """Verify Bengali and Assamese specific agricultural queries route cleanly."""
+    engine = get_decision_engine()
+
+    # Assamese specific terms
+    assert engine.detect_primary_intent("কপাহৰ বজাৰ দৰ কিমান") == FarmerIntent.MARKET_PRICE
+    assert engine.detect_primary_intent("কাইলৈ বৰষুণ হ'ব নেকি বতৰৰ খবৰ") == FarmerIntent.WEATHER
+    assert engine.detect_primary_intent("শস্য বীমা চৰকাৰী সাহায্য আঁচনি") == FarmerIntent.GOVERNMENT_SCHEMES
+    assert engine.detect_primary_intent("টোপাল জলসিঞ্চন কেতিয়া পানী দিব লাগে") == FarmerIntent.IRRIGATION
+    assert engine.detect_primary_intent("বীজ সিঁচা আৰু পুলি ৰোপণৰ সময়") == FarmerIntent.SOWING
+
+    # Bengali specific terms
+    assert engine.detect_primary_intent("তুলার বাজার দর কত") == FarmerIntent.MARKET_PRICE
+    assert engine.detect_primary_intent("কাল কি বৃষ্টি হবে আবহাওয়া কেমন") == FarmerIntent.WEATHER
+    assert engine.detect_primary_intent("কৃষক বন্ধু সরকারি অনুদান প্রকল্প") == FarmerIntent.GOVERNMENT_SCHEMES
+    assert engine.detect_primary_intent("ড্রিপ সেচ দিয়ে কখন পানি দিতে হবে") == FarmerIntent.IRRIGATION
+    assert engine.detect_primary_intent("বীজ বপনের সময় ও চারা রোপণ পদ্ধতি") == FarmerIntent.SOWING
+
+
+def test_telugu_and_tanglish_intent_routing_regression():
+    """Verify Telugu native and Tanglish romanized queries route reliably without degradation."""
+    engine = get_decision_engine()
+
+    # Telugu native
+    assert engine.detect_primary_intent("వరంగల్లో ఈరోజు పత్తి ధర ఎంత") == FarmerIntent.MARKET_PRICE
+    assert engine.detect_primary_intent("రేపు వర్షం పడుతుందా") == FarmerIntent.WEATHER
+    assert engine.detect_primary_intent("రైతు భరోసా పథకం అర్హత ఏమిటి") == FarmerIntent.GOVERNMENT_SCHEMES
+    assert engine.detect_primary_intent("పత్తి పంటలో ఆకుముడత నివారణ") == FarmerIntent.CROP_HEALTH
+    assert engine.detect_primary_intent("వరి పంటకు ఏ ఎరువు వేయాలి") == FarmerIntent.FERTILIZER
+    assert engine.detect_primary_intent("విత్తనాల విత్తే సమయం ఎప్పుడు") == FarmerIntent.SOWING
+    assert engine.detect_primary_intent("పత్తి కోత సమయం ఎప్పుడు") == FarmerIntent.HARVESTING
+    assert engine.detect_primary_intent("నాకు స్ప్రే గుర్తు చేయండి") == FarmerIntent.REMINDERS
+
+    # Tanglish romanized
+    assert engine.detect_primary_intent("cotton market rate entha undi") == FarmerIntent.MARKET_PRICE
+    assert engine.detect_primary_intent("repu varsham paduthunda") == FarmerIntent.WEATHER
+    assert engine.detect_primary_intent("rythu bharosa pathakam details") == FarmerIntent.GOVERNMENT_SCHEMES
+    assert engine.detect_primary_intent("purugula mandu spray cheyali") == FarmerIntent.CROP_HEALTH
+    assert engine.detect_primary_intent("urea fertilizer dose entha") == FarmerIntent.FERTILIZER
+    assert engine.detect_primary_intent("neeru eppudu pettali") == FarmerIntent.IRRIGATION
+    assert engine.detect_primary_intent("vithanala vithadam time") == FarmerIntent.SOWING
+    assert engine.detect_primary_intent("panta kotha time eppudu") == FarmerIntent.HARVESTING
+    assert engine.detect_primary_intent("remind cheyandi irrigation kosam") == FarmerIntent.REMINDERS
+
+
+def test_mixed_language_intent_routing():
+    """Verify mixed-language queries (English words embedded in Indic context) route correctly."""
+    engine = get_decision_engine()
+
+    assert engine.detect_primary_intent("Cotton crop lo leaf spot ki ఏ మందు వాడాలి?") == FarmerIntent.CROP_HEALTH
+    assert engine.detect_primary_intent("Warangal mandi lo cotton rate ఎంత ఉంది?") == FarmerIntent.MARKET_PRICE
+    assert engine.detect_primary_intent("Urea fertilizer kitna daalna hai?") == FarmerIntent.FERTILIZER
+    assert engine.detect_primary_intent("PM Kisan yojana apply kaise kare?") == FarmerIntent.GOVERNMENT_SCHEMES

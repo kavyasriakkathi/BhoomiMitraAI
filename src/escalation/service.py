@@ -62,44 +62,11 @@ _PHYSICAL_INSPECTION_TE = {
 }
 
 # ---------------------------------------------------------------------------
-# Multilingual Formatting Labels
-# ---------------------------------------------------------------------------
+from src.ai.formatting import get_escalation_labels
 
-_EN_LABELS = {
-    "header":          "👨‍🌾 Krishi Officer Escalation Ticket: #{ticket_id}",
-    "status":          "✅ Status",
-    "status_assigned": "Assigned to District Agriculture Officer",
-    "status_pending":  "Queued for Next Available Officer",
-    "specialist":      "👤 Specialist",
-    "region":          "📍 Region",
-    "contact":         "📞 Officer Contact",
-    "callback":        "⏱️ Expected Callback Window",
-    "callback_time":   "Within 30–60 minutes",
-    "helpline_title":  "🚨 Government Kisan Call Centre (Toll-Free)",
-    "helpline_number": "📞 1800-180-1551 (6:00 AM - 10:00 PM, Daily)",
-    "existing_ticket": "ℹ️ You already have an active escalation ticket (#{ticket_id}). Our officer is reviewing your case.",
-    "no_local_expert": "ℹ️ No local officer is currently on duty. Your ticket has been logged and our team will connect with you.",
-    "hazard_warning":  "⚠️ **URGENT SAFETY CAUTION**: The query involves hazardous/banned chemicals or immediate toxicity. Please do not handle unsafe substances without protective gear. Contact medical or agriculture authorities immediately.",
-    "inspection_note": "🌾 **Field Inspection Request Logged**: An agricultural officer has been notified for regional on-field assessment.",
-}
-
-_TE_LABELS = {
-    "header":          "👨‍🌾 వ్యవసాయ అధికారి సంప్రదింపు టికెట్: #{ticket_id}",
-    "status":          "✅ స్థితి",
-    "status_assigned": "జిల్లా వ్యవసాయ అధికారికి కేటాయించబడింది",
-    "status_pending":  "అధికారి కేటాయింపు కోసం వేచి ఉంది",
-    "specialist":      "👤 నిపుణుడు",
-    "region":          "📍 ప్రాంతం",
-    "contact":         "📞 అధికారి ఫోన్",
-    "callback":        "⏱️ కాల్ బ్యాక్ సమయం",
-    "callback_time":   "30–60 నిమిషాలలోపు",
-    "helpline_title":  "🚨 జాతీయ కిసాన్ కాల్ సెంటర్ (ఉచిత నంబర్)",
-    "helpline_number": "📞 1800-180-1551 (ఉదయం 6:00 - రాత్రి 10:00)",
-    "existing_ticket": "ℹ️ మీకు ఇప్పటికే ఒక యాక్టివ్ సంప్రదింపు టికెట్ (#{ticket_id}) ఉంది. మా అధికారి మీ సమస్యను పరిశీలిస్తున్నారు.",
-    "no_local_expert": "ℹ️ ప్రస్తుతం స్థానిక అధికారి అందుబాటులో లేరు. మీ టికెట్ నమోదు చేయబడింది, మా బృందం మిమ్మల్ని సంప్రదిస్తుంది.",
-    "hazard_warning":  "⚠️ **ముఖ్యమైన భద్రతా హెచ్చరిక**: ఇది ప్రమాదకరమైన/నిషేధిత రసాయనాలకు సంబంధించినది. సురక్షితమైన జాగ్రత్తలు పాటించండి మరియు వెంటనే అధికారులను సంప్రదించండి.",
-    "inspection_note": "🌾 **క్షేత్ర పరిశీలన అభ్యర్థన నమోదు చేయబడింది**: మీ పంట పరిశీలన కోసం వ్యవసాయ అధికారికి సమాచారం అందించబడింది.",
-}
+# Backward-compatible references
+_TE_LABELS = get_escalation_labels("te")
+_EN_LABELS = get_escalation_labels("en")
 
 _LABELS_BY_LANG = {
     "te": _TE_LABELS,
@@ -514,10 +481,10 @@ async def enrich_response_with_escalation(
         return ai_response
 
     reason = force_reason or trigger_reason or "explicit"
+    farmer_lang = getattr(farmer, "preferred_language", "en") or "en"
     from src.language.detector import detect_language
-    pref_lang = getattr(farmer, "preferred_language", "en") or "en"
-    language = detect_language(query_text, fallback=pref_lang)
-    labels = _LABELS_BY_LANG.get(language, _EN_LABELS if language == "en" else _TE_LABELS)
+    language = detect_language(query_text, fallback=farmer_lang)
+    labels = get_escalation_labels(language)
     farmer_id = getattr(farmer, "id", None)
 
     try:

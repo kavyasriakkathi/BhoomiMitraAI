@@ -186,43 +186,55 @@ _ROMANIZED_LEXICONS: Dict[str, Set[str]] = {
         "vellam", "valam", "kedu", "marunnu", "vilavu", "enthannu", "vilayil",
         "mazha", "karshakan", "nattil", "eppol", "cheyyannam", "krishikaran",
         "vithu", "koythu", "choodu", "thottam", "puzhu", "keedangal",
+        "nel", "pacha", "ila", "krishi", "eruvam", "keedanashini",
+        "enganeya", "enthukondu", "ethra", "innu", "nale", "vilkkan", "kittaam",
     },
     "mr": {
         # Marathi in Latin
         "kapus", "kiti", "pahije", "khat", "sheti", "aushadh", "rogh", "tannashak",
         "paus", "kasa", "ahe", "shatkari", "kay", "sang", "lagwad", "bajarbhav",
         "favarni", "favarani", "kadhi", "kuthe", "bhetel", "pika", "shashan",
+        "soyabean", "kide", "tambda", "aushadha", "kase", "kashi",
+        "dyaave", "karave", "vikri", "shasan", "anudan", "nuksan", "dar",
     },
     "bn": {
         # Bengali in Latin
         "dhan", "jol", "koto", "sar", "poka", "osudh", "lagbe", "kamon", "krishak",
         "bristi", "chas", "foshol", "ki", "kivabe", "dite", "hobe",
         "dam", "bij", "poriman",
+        "rogo", "kitnashak", "jomi", "ajke", "kal", "pata", "shosha", "aloo",
+        "bajar", "bazar", "kothay", "pabo",
     },
     "gu": {
         # Gujarati in Latin
         "ketlu", "khatar", "khedut", "varsad", "joiye", "kem", "kyare",
         "aavshe", "bhav", "malashe", "biyarano", "vavetar", "kapi",
+        "dava", "jantu", "chuntani", "rok", "aaj", "kale",
+        "kyan", "male", "kheduto", "subsidio",
     },
     "or": {
         # Odia in Latin
         "dhana", "kete", "sara", "oushadha", "dara", "chasa", "barsha", "krushaka",
         "fasala", "kemiti", "milba", "kariba", "biha",
+        "roga", "patra", "aaji", "kali", "kouthi", "debi", "upaya",
     },
     "pa": {
         # Punjabi in Latin
         "kanak", "kinna", "khad", "dawai", "barsaat", "jhotta", "kiddan", "kadon",
         "chahida", "daso", "kareye",
+        "fasal", "bha", "kisaan", "aaj", "kive", "kithe", "mileygi", "sundi",
     },
     "as": {
         # Assamese in Latin
         "kiman", "puk", "boroxun", "krixok", "kenekoi", "lagibo", "karibo",
         "khetir",
+        "xar", "aaji", "kiba", "ketia", "upai", "ketiok", "khetit",
     },
     "ur": {
         # Urdu in Latin
-        "keere", "zaroorat", "barish", "tariqa", "kijiye", "bataiye",
-        "malumat", "nuskha", "ilaj",
+        "keere", "keedon", "zaroorat", "zarurat", "barish", "tariqa", "kijiye", "bataiye",
+        "bataen", "malumat", "maloomat", "nuskha", "ilaj", "mashwara", "tadbeer",
+        "chhidkaw", "qeemat", "mandee", "hukumat", "fasal", "dawa", "kahan", "milegi",
     },
 }
 
@@ -268,6 +280,22 @@ def _classify_romanized_text(text: str) -> Tuple[Optional[str], float]:
         scores["kn"] += 3
     if " ku thanni " in lowered or " thanni eppadi " in lowered or " uram podanum " in lowered:
         scores["ta"] += 3
+    if " ethra valam " in lowered or " engane cheyyam " in lowered or " mazha peyyumo " in lowered or " marunnu thalikkan " in lowered:
+        scores["ml"] += 3
+    if " kiti pani " in lowered or " kasa karaycha " in lowered or " kadhi favarni " in lowered or " bajarbhav kiti " in lowered or " kapus pikavar " in lowered:
+        scores["mr"] += 3
+    if " koto sar " in lowered or " kivabe debo " in lowered or " bristi hobe " in lowered or " poka lagle " in lowered:
+        scores["bn"] += 3
+    if " ketlu pani " in lowered or " kem vaparvu " in lowered or " varsad aavshe " in lowered or " bhav ketlo " in lowered:
+        scores["gu"] += 3
+    if " kete sara " in lowered or " kemiti debi " in lowered or " barsha heba " in lowered or " dara kete " in lowered:
+        scores["or"] += 3
+    if " kinna khad " in lowered or " kive spray " in lowered or " barsaat aavegi " in lowered or " mandi bha " in lowered:
+        scores["pa"] += 3
+    if " kiman xar " in lowered or " kenekoi dim " in lowered or " boroxun hobo " in lowered or " kiba upai " in lowered:
+        scores["as"] += 3
+    if " zaroorat " in lowered or " zarurat " in lowered or " ilaj bataiye " in lowered or " mashwara " in lowered or " maloomat " in lowered or " malumat " in lowered:
+        scores["ur"] += 4
 
     # Find highest Indian language score
     best_lang, best_score = max(scores.items(), key=lambda x: x[1])

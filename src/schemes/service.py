@@ -190,43 +190,11 @@ _CROP_KEYWORDS: dict = {
     "turmeric": "Turmeric", "పసుపు": "Turmeric",
 }
 
-# ---------------------------------------------------------------------------
-# Static WhatsApp Response Labels
-# ---------------------------------------------------------------------------
+from src.ai.formatting import get_schemes_labels
 
-_TE_LABELS = {
-    "title":       "🏛️ మీకు వర్తించే ప్రభుత్వ పథకాలు ({count} పథకాలు)",
-    "benefits":    "💰 ప్రయోజనాలు",
-    "eligibility": "✅ అర్హత",
-    "documents":   "📄 అవసరమైన పత్రాలు",
-    "deadline":    "📅 దరఖాస్తు గడువు",
-    "portal":      "🔗 అధికారిక పోర్టల్",
-    "no_portal":   "సమీప మీసేవా / CSC కేంద్రాన్ని సంప్రదించండి",
-    "disclaimer":  (
-        "⚠️ గమనిక: దరఖాస్తు చేసే ముందు అధికారిక పోర్టల్‌లో "
-        "తాజా వివరాలు మరియు అర్హత నిబంధనలు నిర్ధారించుకోండి. "
-        "ప్రభుత్వ నిబంధనలు ఎప్పుడైనా మారవచ్చు."
-    ),
-    "more":        "మరిన్ని పథకాల కోసం: /schemes",
-    "crop_note":   "(మీరు పేర్కొన్న పంట: {crop})",
-    "unavailable": "ప్రస్తుతం ప్రభుత్వ పథకాల సమాచారం అందుబాటులో లేదు. దయచేసి సమీప రైతు వేదిక లేదా https://myscheme.gov.in పోర్టల్‌ని చూడండి.",
-}
-_EN_LABELS = {
-    "title":       "🏛️ Government Schemes Available For You ({count} schemes)",
-    "benefits":    "💰 Benefits",
-    "eligibility": "✅ Eligibility",
-    "documents":   "📄 Required Documents",
-    "deadline":    "📅 Application Deadline",
-    "portal":      "🔗 Official Portal",
-    "no_portal":   "Contact your nearest Meeseva / CSC centre",
-    "disclaimer":  (
-        "⚠️ Note: Please verify scheme details, amounts and deadlines at the "
-        "official portal before applying. Government rules may change at any time."
-    ),
-    "more":        "See all schemes at: /schemes",
-    "crop_note":   "(Crop you mentioned: {crop})",
-    "unavailable": "Government schemes information is currently unavailable. Please check https://myscheme.gov.in or your local agriculture office.",
-}
+# Backward-compatible references
+_TE_LABELS = get_schemes_labels("te")
+_EN_LABELS = get_schemes_labels("en")
 
 _LABELS_BY_LANG = {
     "te": _TE_LABELS,
@@ -436,10 +404,7 @@ def _format_scheme_block(scheme, labels: dict, language: str) -> str:
 
             date_fmt = deadline_dt.strftime("%d %b %Y")
             if is_past:
-                if language == "te":
-                    deadline_str = f"{date_fmt} (గడువు ముగిసింది - తదుపరి సైకిల్ త్వరలో)"
-                else:
-                    deadline_str = f"{date_fmt} (Deadline Closed - Next cycle opening soon)"
+                deadline_str = labels.get("deadline_closed", "{date} (Closed)").format(date=date_fmt)
             else:
                 deadline_str = date_fmt
         except Exception:
@@ -497,10 +462,9 @@ async def enrich_response_with_schemes(
 
     # Step 3: Resolve farmer location for state filtering
     farmer_state: Optional[str] = None
+    farmer_lang = getattr(farmer, "preferred_language", "en") or "en"
     from src.language.detector import detect_language
-    pref_lang = getattr(farmer, "preferred_language", "en") or "en"
-    language = detect_language(query_text, fallback=pref_lang)
-    labels = _LABELS_BY_LANG.get(language, _EN_LABELS if language == "en" else _TE_LABELS)
+    language = detect_language(query_text, fallback=farmer_lang)
 
     try:
         import inspect
@@ -541,7 +505,7 @@ async def enrich_response_with_schemes(
     top = ranked[:3]
 
     # Step 7: Format WhatsApp reply block
-    labels = _TE_LABELS if language == "te" else _EN_LABELS
+    labels = get_schemes_labels(language)
     header = labels["title"].format(count=len(top))
     if mentioned_crop:
         header += "\n" + labels["crop_note"].format(crop=mentioned_crop)

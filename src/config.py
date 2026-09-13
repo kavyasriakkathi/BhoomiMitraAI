@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     stt_default_language: str = Field(default="te-IN")
     stt_api_timeout_seconds: float = Field(default=10.0)
 
+    # Text-to-Speech
+    enable_voice_responses: bool = Field(default=False)
+    tts_provider: str = Field(default="google")
+    tts_voice_type: str = Field(default="Standard")
+    tts_api_timeout_seconds: float = Field(default=10.0)
+    tts_max_text_chars: int = Field(default=3500)
+
     # Expert Escalation
     expert_whatsapp_group_id: str = Field(default="")
     escalation_timeout_minutes: int = Field(default=30)
