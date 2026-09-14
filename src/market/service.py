@@ -126,9 +126,9 @@ PRICE_INTENT_KEYWORDS_EN = {
     "how much", "selling price", "market rate", "crop price",
 }
 PRICE_INTENT_KEYWORDS_TE = {
-    "ధర", "ధరలు", "మండి", "రేటు", "రేట్లు", "ఎంత", "నేటి ధర", "మార్కెట్ ధర",
-    "మార్కెట్ ధరలు", "మండి ధర", "మండి ధరలు", "ఎంత ధర", "అమ్మకం ధర",
-    "క్వింటాల్", "క్వింటాలు", "ఖరీదు", "మార్కెట్", "మార్కెట్లో", "ధర ఎంత",
+    "ధర", "ధరలు", "మండి", "రేటు", "రేట్లు", "నేటి ధర", "మార్కెట్ ధర",
+    "మార్కెట్ ధరలు", "మండి ధర", "మండి ధరలు", "ఎంత ధర", "ధర ఎంత", "రేటు ఎంత", "అమ్మకం ధర",
+    "క్వింటాల్", "క్వింటాలు", "ఖరీదు", "మార్కెట్", "మార్కెట్లో",
 }
 PRICE_INTENT_KEYWORDS_MULTILINGUAL = {
     "भाव", "मंडी", "बाजार भाव", "दर", "दाम", "रेट", "ਕੀਮਤ", "ਭਾਅ", "দাম", "দর", "ભાવ", "ଦର", "விலை", "மண்டி", "ಬೆಲೆ", "ದರ", "വില",
@@ -777,12 +777,17 @@ async def enrich_response_with_market_prices(
     """
     query_lower = query_text.lower()
 
-    # Step 1: Detect price intent
-    has_price_intent = any(kw in query_lower for kw in PRICE_INTENT_KEYWORDS_EN)
+    # Step 1: Detect price intent (strictly checked via AIDecisionEngine)
+    from src.ai.decision_engine import AIDecisionEngine, FarmerIntent
+    intents = AIDecisionEngine.detect_all_intents(query_text)
+    has_price_intent = FarmerIntent.MARKET_PRICE in intents
+
     if not has_price_intent:
-        has_price_intent = any(kw in query_text for kw in PRICE_INTENT_KEYWORDS_TE)
-    if not has_price_intent:
-        has_price_intent = any(kw in query_text for kw in PRICE_INTENT_KEYWORDS_MULTILINGUAL)
+        has_price_intent = any(kw in query_lower for kw in PRICE_INTENT_KEYWORDS_EN)
+        if not has_price_intent:
+            has_price_intent = any(kw in query_text for kw in PRICE_INTENT_KEYWORDS_TE)
+        if not has_price_intent:
+            has_price_intent = any(kw in query_text for kw in PRICE_INTENT_KEYWORDS_MULTILINGUAL)
 
     logger.info(
         f"[MARKET ENRICH] Diagnostic check -> query='{query_text}' | "

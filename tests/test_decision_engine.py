@@ -728,4 +728,34 @@ def test_mixed_language_intent_routing():
     assert engine.detect_primary_intent("Cotton crop lo leaf spot ki ఏ మందు వాడాలి?") == FarmerIntent.CROP_HEALTH
     assert engine.detect_primary_intent("Warangal mandi lo cotton rate ఎంత ఉంది?") == FarmerIntent.MARKET_PRICE
     assert engine.detect_primary_intent("Urea fertilizer kitna daalna hai?") == FarmerIntent.FERTILIZER
+
+
+def test_telugu_pest_query_does_not_trigger_weather():
+    """Verify Telugu pest query with 'పురుగు పడుతుంది' does NOT detect Weather intent."""
+    engine = get_decision_engine()
+    intents = engine.detect_all_intents("వరి పంటలో పురుగు పడుతుంది, ఏం మందు కొట్టాలి?")
+    assert FarmerIntent.WEATHER not in intents
+    assert FarmerIntent.CROP_HEALTH in intents
+
+
+def test_telugu_dosage_query_does_not_trigger_market():
+    """Verify Telugu dosage query with 'ఎంత' does NOT detect Market Price intent."""
+    engine = get_decision_engine()
+    intents = engine.detect_all_intents("వరి పంటలో మందు ఎంత మోతాదు పిచికారీ చేయాలి?")
+    assert FarmerIntent.MARKET_PRICE not in intents
+
+
+def test_explicit_telugu_weather_query_triggers_weather():
+    """Verify explicit Telugu weather query 'వర్షం పడుతుందా' detects Weather intent."""
+    engine = get_decision_engine()
+    intents = engine.detect_all_intents("రేపు వరంగల్లో వర్షం పడుతుందా?")
+    assert FarmerIntent.WEATHER in intents
+
+
+def test_explicit_telugu_price_query_triggers_market():
+    """Verify explicit Telugu market query 'వరి ధర ఎంత' detects Market Price intent."""
+    engine = get_decision_engine()
+    intents = engine.detect_all_intents("ఈరోజు వరంగల్లో వరి ధర ఎంత?")
+    assert FarmerIntent.MARKET_PRICE in intents
+
     assert engine.detect_primary_intent("PM Kisan yojana apply kaise kare?") == FarmerIntent.GOVERNMENT_SCHEMES
