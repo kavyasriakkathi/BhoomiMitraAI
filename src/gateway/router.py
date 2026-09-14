@@ -288,9 +288,26 @@ def _extract_message(msg, sender_name: str = None) -> ParsedIncomingMessage | No
         body = msg.text.body if msg.text else ""
         return ParsedIncomingMessage(**base, text_content=body)
 
-    elif raw_type == "audio":
-        media_id = msg.audio.id if msg.audio else None
-        media_mime = msg.audio.mime_type if msg.audio else None
+    elif raw_type in ["audio", "voice"]:
+        audio_obj = None
+        if raw_type == "voice":
+            audio_obj = getattr(msg, "voice", None)
+            if audio_obj is None:
+                audio_obj = getattr(msg, "audio", None)
+        else:
+            audio_obj = getattr(msg, "audio", None)
+
+        media_id = None
+        media_mime = None
+        if audio_obj is not None:
+            raw_id = audio_obj.get("id") if isinstance(audio_obj, dict) else getattr(audio_obj, "id", None)
+            raw_mime = audio_obj.get("mime_type") if isinstance(audio_obj, dict) else getattr(audio_obj, "mime_type", None)
+            if isinstance(raw_id, str):
+                media_id = raw_id
+            if isinstance(raw_mime, str):
+                media_mime = raw_mime
+
+        base["message_type"] = "audio"
         return ParsedIncomingMessage(
             **base,
             media_id=media_id,

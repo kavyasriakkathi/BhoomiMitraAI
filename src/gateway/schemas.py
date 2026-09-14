@@ -59,6 +59,7 @@ class WhatsAppMessage(BaseModel):
 
     text: Optional[WhatsAppTextPayload] = None
     audio: Optional[WhatsAppAudioPayload] = None
+    voice: Optional[WhatsAppAudioPayload] = None
     image: Optional[WhatsAppImagePayload] = None
 
     model_config = {"extra": "ignore", "populate_by_name": True}

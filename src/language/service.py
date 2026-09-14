@@ -68,24 +68,35 @@ class LanguageService:
         try:
             audio = speech.RecognitionAudio(content=audio_bytes)
             
-            # WhatsApp predominantly uses OGG/OPUS for voice notes
-            # Explicitly declaring the encoding ensures Google STT parses it accurately.
-            # For OGG_OPUS, sample_rate_hertz is not specified so Google STT reads it natively from the container header.
-            encoding = speech.RecognitionConfig.AudioEncoding.OGG_OPUS
+            # Map MIME type to appropriate Google STT audio encoding.
+            # WhatsApp predominantly uses OGG/OPUS for voice notes, but users may also upload MP3, AMR, WAV, or M4A/AAC.
+            clean_mime = (mime_type or "").lower().strip()
+            if "ogg" in clean_mime or "opus" in clean_mime:
+                encoding = speech.RecognitionConfig.AudioEncoding.OGG_OPUS
+            elif "mp3" in clean_mime or "mpeg" in clean_mime:
+                encoding = speech.RecognitionConfig.AudioEncoding.MP3
+            elif "amr-wb" in clean_mime:
+                encoding = speech.RecognitionConfig.AudioEncoding.AMR_WB
+            elif "amr" in clean_mime:
+                encoding = speech.RecognitionConfig.AudioEncoding.AMR
+            elif "wav" in clean_mime or "wave" in clean_mime:
+                encoding = speech.RecognitionConfig.AudioEncoding.LINEAR16
+            else:
+                encoding = speech.RecognitionConfig.AudioEncoding.ENCODING_UNSPECIFIED
 
-            # Support multi-lingual alternatives for Indian languages
-            alt_codes = [
-                "te-IN", "hi-IN", "en-IN", "ta-IN", "kn-IN", "ml-IN",
-                "mr-IN", "bn-IN", "gu-IN", "pa-IN", "ur-IN", "or-IN", "as-IN"
-            ]
-            default_lang = self.settings.stt_default_language
-            filtered_alts = [c for c in alt_codes if c != default_lang]
+            # Support multi-lingual alternatives for Indian languages.
+            # CRITICAL: Google Cloud Speech-to-Text v1 strictly allows at most 3 alternative language codes.
+            default_lang = self.settings.stt_default_language or "te-IN"
+            candidate_alts = ["te-IN", "hi-IN", "en-IN", "ta-IN"]
+            filtered_alts = [c for c in candidate_alts if c != default_lang][:3]
 
-            config = speech.RecognitionConfig(
-                encoding=encoding,
-                language_code=default_lang,
-                alternative_language_codes=filtered_alts,
-            )
+            config_kwargs = {
+                "encoding": encoding,
+                "language_code": default_lang,
+                "alternative_language_codes": filtered_alts,
+            }
+
+            config = speech.RecognitionConfig(**config_kwargs)
 
             call_res = self.google_client.recognize(config=config, audio=audio)
             if inspect.isawaitable(call_res):

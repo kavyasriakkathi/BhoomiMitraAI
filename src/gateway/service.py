@@ -242,11 +242,15 @@ async def process_message_pipeline(
                             audio_bytes, mime_type = media_result
                             lang_service = get_language_service()
                             transcription = await lang_service.transcribe_audio(audio_bytes, mime_type)
-                            parsed.text_content = transcription.transcription_text
-                            conversation.user_message = parsed.text_content
-                            db.add(conversation)
-                            await db.commit()
-                            logger.info(f"STAGE 4: Audio transcribed successfully: '{parsed.text_content[:100]}...'")
+                            if not transcription or not transcription.transcription_text or not transcription.transcription_text.strip():
+                                logger.warning(f"STAGE 4: Empty or unparseable audio transcript for farmer {farmer.id}")
+                                ai_response = get_voice_fallback_response(pref_lang)
+                            else:
+                                parsed.text_content = transcription.transcription_text.strip()
+                                conversation.user_message = parsed.text_content
+                                db.add(conversation)
+                                await db.commit()
+                                logger.info(f"STAGE 4: Audio transcribed successfully: '{parsed.text_content[:100]}...'")
                     except Exception as stt_err:
                         logger.exception(f"[PIPELINE STAGE FAILED: Stage 4 - Audio STT] Media ID: {parsed.media_id}, Error: {stt_err}")
                         ai_response = get_voice_fallback_response(pref_lang)
