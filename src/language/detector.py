@@ -91,6 +91,9 @@ _MARATHI_DISTINCT_WORDS = {
     "पिकांवर", "औषध", "कापूस", "सोयाबीन", "तणनाशक", "झाले", "द्यावे", "करावे", "आहेत",
     "काय", "मिळेल", "शेती", "योजना", "फवारणी", "पाणी", "सांगा", "माहिती", "भाव",
     "कीड", "रोग", "किती", "लागवड", "पिकाचे", "खते", "अनुदान", "दर", "नुकसान",
+    "धान", "पिकावर", "पिकाला", "कोणती", "कोणता", "कोणते",
+    "उपाय", "करू", "करावा", "करावी", "फवारावी", "फवारावा",
+    "पडली", "झाली",
 }
 
 _HINDI_DISTINCT_WORDS = {
@@ -115,12 +118,16 @@ _BENGALI_DISTINCT_WORDS = {
 
 def _disambiguate_devanagari(text: str) -> str:
     """Disambiguate Devanagari script between Hindi ('hi') and Marathi ('mr')."""
+    # 'ळ' (\u0933) is unique to Marathi in Devanagari script
+    if "ळ" in text:
+        return "mr"
+
     words = set(re.findall(r"[\u0900-\u097F]+", text))
     mr_score = len(words.intersection(_MARATHI_DISTINCT_WORDS))
     hi_score = len(words.intersection(_HINDI_DISTINCT_WORDS))
-    # Check for Marathi suffixes/inflections (e.g. -चे, -च्या, -तील, -मध्ये, -साठी)
+    # Check for Marathi suffixes/inflections (e.g. -चे, -च्या, -तील, -मध्ये, -साठी, -वर, -ावर, -ाला, -ावी, -ावा)
     for w in words:
-        if any(w.endswith(sfx) for sfx in ["साठी", "मध्ये", "वरील", "नुसार", "च्या", "चे", "तील", "तात"]):
+        if any(w.endswith(sfx) for sfx in ["साठी", "मध्ये", "वरील", "नुसार", "च्या", "चे", "तील", "तात", "वर", "ावर", "ाला", "ावी", "ावा"]):
             mr_score += 1
 
     if mr_score > hi_score:

@@ -109,6 +109,13 @@ def test_detect_language_native_scripts(text, expected_lang):
     assert detected == expected_lang
 
 
+def test_marathi_paddy_pest_query_language_detection():
+    """Verify Marathi paddy pest query in Devanagari is detected as Marathi ('mr') instead of Hindi."""
+    text = "धान पिकावर कीड पडली आहे, कोणती औषध फवारावी?"
+    assert detect_language(text) == "mr"
+
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. Romanized / Transliterated Indian Language Detection
 # ─────────────────────────────────────────────────────────────────────────────
