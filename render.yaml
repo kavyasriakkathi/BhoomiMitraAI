@@ -24,6 +24,8 @@ services:
         sync: false
       - key: DEMO_SHOP_OWNER_SEED
         value: "false"
+      - key: ENABLE_VOICE_RESPONSES
+        value: "true"
       - key: RAZORPAY_KEY_ID
         sync: false
       - key: RAZORPAY_KEY_SECRET
