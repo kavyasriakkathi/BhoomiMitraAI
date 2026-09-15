@@ -259,6 +259,13 @@ async def process_message_pipeline(
                                 await db.commit()
                                 logger.info(f"STAGE 4: Audio transcribed successfully: '{parsed.text_content[:100]}...'")
                     except Exception as stt_err:
+                        underlying_cause = getattr(stt_err, "__cause__", None) or stt_err
+                        cause_type = type(underlying_cause).__name__
+                        cause_reason = str(underlying_cause).strip()
+                        logger.error(
+                            f"[PIPELINE STAGE FAILED: Stage 4 - Audio STT] Media ID: {parsed.media_id} | "
+                            f"Cause: {cause_type} | Reason: {cause_reason}"
+                        )
                         logger.exception(f"[PIPELINE STAGE FAILED: Stage 4 - Audio STT] Media ID: {parsed.media_id}, Error: {stt_err}")
                         ai_response = get_voice_fallback_response(pref_lang)
                 t_stt = time.time() - t_stt_start

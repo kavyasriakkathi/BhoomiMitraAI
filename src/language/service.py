@@ -337,6 +337,12 @@ class LanguageService:
             logger.warning(f"Google STT API timed out after {getattr(self.settings, 'stt_api_timeout_seconds', 10.0)}s: {te}")
             raise BhoomiMitraException("Google STT API timed out.", status_code=504) from te
         except Exception as e:
+            err_type = type(e).__name__
+            err_code = getattr(e, "code", None) or getattr(e, "grpc_status_code", None) or getattr(e, "status_code", None) or "N/A"
+            err_details = str(e).strip()
+            logger.error(
+                f"[GOOGLE STT ERROR] Type: {err_type} | Code: {err_code} | Details: {err_details}"
+            )
             logger.exception("Google STT API call failed.")
             raise BhoomiMitraException("Failed to transcribe audio with Google STT.", status_code=502) from e
 
