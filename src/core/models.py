@@ -29,6 +29,7 @@ class Farmer(Base):
     order_requests = relationship("OrderRequest", back_populates="farmer", cascade="all, delete-orphan")
     scheme_applications = relationship("SchemeApplication", back_populates="farmer", cascade="all, delete-orphan")
     stock_alerts = relationship("StockAlert", back_populates="farmer", cascade="all, delete-orphan")
+    push_tokens = relationship("FarmerPushToken", back_populates="farmer", cascade="all, delete-orphan")
 
 
 class FarmerProfile(Base):
@@ -385,3 +386,26 @@ class StockAlert(Base):
 
     # Relationships
     farmer = relationship("Farmer", back_populates="stock_alerts")
+
+
+class FarmerPushToken(Base):
+    """Stores FCM / push notification device registration tokens for farmers."""
+    __tablename__ = "farmer_push_tokens"
+    __table_args__ = (
+        Index("idx_farmer_push_tokens_lookup", "farmer_id", "is_active"),
+        Index("idx_farmer_push_tokens_token", "token"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    farmer_id = Column(UUID(as_uuid=True), ForeignKey("farmers.id", ondelete="CASCADE"), index=True, nullable=False)
+    token = Column(String(512), unique=True, nullable=False)
+    platform = Column(String(20), default="android", nullable=False)
+    device_model = Column(String(100), nullable=True)
+    is_active = Column(Boolean, default=True, index=True, nullable=False)
+    last_used_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    # Relationships
+    farmer = relationship("Farmer", back_populates="push_tokens")

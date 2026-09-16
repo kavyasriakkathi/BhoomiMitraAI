@@ -239,6 +239,7 @@ def create_app() -> FastAPI:
     from src.escalation.router import router as escalation_router
     from src.payments.router import router as payments_router
     from src.analytics.router import router as analytics_router
+    from src.notifications.router import router as notifications_router
 
     app.include_router(auth_router, prefix="/auth", tags=["Authentication & RBAC"])
     app.include_router(gateway_router, prefix="/webhook", tags=["WhatsApp"])
@@ -260,6 +261,7 @@ def create_app() -> FastAPI:
     app.include_router(weather_router, prefix="/weather", tags=["Weather Forecast"])
     app.include_router(escalation_router, prefix="/escalation", tags=["Expert Escalation"])
     app.include_router(analytics_router, prefix="/analytics", tags=["Startup Pilot Analytics"])
+    app.include_router(notifications_router)
     app.include_router(ai_router)
 
 

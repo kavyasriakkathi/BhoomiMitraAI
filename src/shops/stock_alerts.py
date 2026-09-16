@@ -572,6 +572,24 @@ async def trigger_stock_alert_notifications(
                 f"{updated_time_str} UTC",
             ]
 
+            # Dispatch Phone-Level FCM Stock Siren notification (Fail-soft alongside WhatsApp)
+            try:
+                from src.notifications.service import dispatch_fcm_stock_siren_notification
+                await dispatch_fcm_stock_siren_notification(
+                    db=db,
+                    farmer=farmer,
+                    product_name=product_name,
+                    shop=shop,
+                    new_quantity=new_quantity,
+                    unit=unit,
+                    brand=brand,
+                    updated_time_str=updated_time_str,
+                )
+            except Exception as fcm_dispatch_err:
+                logger.warning(
+                    f"[STOCK SIREN FCM] Push dispatch to farmer {farmer.id} skipped/failed soft: {fcm_dispatch_err}"
+                )
+
             wa_msg_id = None
             used_template = False
 

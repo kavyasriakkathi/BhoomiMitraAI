@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     google_cloud_project_id: str = Field(default="")
     google_application_credentials: str = Field(default="")
 
+    # Firebase Cloud Messaging (FCM)
+    firebase_credentials_json: str = Field(default="")
+    firebase_credentials_path: str = Field(default="")
+    firebase_project_id: str = Field(default="")
+
     # Speech-to-Text
     stt_provider: str = Field(default="google")
     stt_default_language: str = Field(default="te-IN")
