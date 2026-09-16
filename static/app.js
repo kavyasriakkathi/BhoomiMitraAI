@@ -980,7 +980,63 @@ async function loadNearbyShops() {
 
     container.innerHTML = cards.join('');
   } catch (err) {
-    container.innerHTML = `<p style="color:red;">Error loading shops: ${err.message}</p>`;
+    console.warn("Could not load live nearby shops from server, displaying demo preview fallback:", err);
+    container.innerHTML = `
+      <div class="card">
+        <div class="card-title">
+          <span>BhoomiMitra Agro Center <span class="badge badge-accepted" style="font-size:0.75rem;">(Demo)</span></span>
+          <span class="badge badge-open">Open</span>
+        </div>
+        <p><strong>Owner:</strong> Ramesh Kumar (Demo Dealer)</p>
+        <p><strong>Phone:</strong> +91 9876543210</p>
+        <p><strong>Address:</strong> Main Road, Jagtial Center</p>
+        <p><strong>Distance:</strong> 📍 0.5 km</p>
+        <div style="margin-top: 0.5rem;"><span class="badge badge-completed">Delivery Available</span></div>
+        <div style="margin: 0.75rem 0; padding: 0.75rem; background: var(--bg-main); border-radius: var(--radius-sm);">
+          <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--primary);">📦 Pesticides & Farm Stock:</div>
+          <div style="padding: 0.4rem 0; border-bottom: 1px dashed var(--border-color); font-size: 0.85rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span><strong>DAP</strong> (Coromandel)</span>
+              <span style="font-weight:600;">₹1350</span>
+            </div>
+            <div style="margin-top: 0.25rem;">
+              <span class="stock-status-in">🟢 In Stock: 30 Bags</span>
+            </div>
+          </div>
+          <div style="padding: 0.4rem 0; border-bottom: 1px dashed var(--border-color); font-size: 0.85rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span><strong>Imidacloprid 17.8 SL</strong> (Bayer)</span>
+              <span style="font-weight:600;">₹420</span>
+            </div>
+            <div style="margin-top: 0.25rem;">
+              <span class="stock-status-in">🟢 In Stock: 15 Bottles</span>
+            </div>
+          </div>
+          <div style="padding: 0.4rem 0; border-bottom: 1px dashed var(--border-color); font-size: 0.85rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span><strong>Neem Oil</strong> (Organic)</span>
+              <span style="font-weight:600;">₹350</span>
+            </div>
+            <div style="margin-top: 0.25rem;">
+              <span class="stock-status-in">🟢 In Stock: 20 Bottles</span>
+            </div>
+          </div>
+          <div style="padding: 0.4rem 0; font-size: 0.85rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span><strong>Urea</strong> (IFFCO)</span>
+              <span style="font-weight:600;">₹295</span>
+            </div>
+            <div style="margin-top: 0.25rem;">
+              <span class="stock-status-out">🔴 Out of stock</span>
+            </div>
+          </div>
+        </div>
+        <div style="display: flex; gap: 0.5rem; margin-top: 0.75rem;">
+          <button class="btn btn-secondary btn-sm" style="flex:1;" disabled title="Demo preview mode">📞 Call Shop (Demo)</button>
+          <button class="btn btn-primary btn-sm" style="flex:1;" disabled title="Demo preview mode">🗺️ Directions (Demo)</button>
+        </div>
+      </div>
+    `;
   }
 }
 
