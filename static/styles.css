@@ -1002,6 +1002,35 @@ textarea.form-control {
 .badge-cancelled { background: #fee2e2; color: #991b1b; }
 .badge-open { background: #d1fae5; color: #065f46; }
 .badge-closed { background: #fee2e2; color: #991b1b; }
+.badge-in-stock { background: #d1fae5; color: #065f46; border: 1px solid #a7f3d0; }
+.badge-out-of-stock { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+
+.stock-status-in {
+  color: #16a34a;
+  font-weight: 600;
+  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.stock-status-out {
+  color: #dc2626;
+  font-weight: 600;
+  font-size: 0.82rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.empty-shops-card {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  background: var(--bg-card);
+  border: 1px dashed var(--border-color);
+  border-radius: var(--radius-md);
+}
 
 /* Alert Banner */
 .alert-banner {

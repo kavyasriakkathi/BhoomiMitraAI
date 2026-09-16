@@ -858,34 +858,72 @@ async function loadNearbyShops() {
   container.innerHTML = '<p>Loading nearby shops...</p>';
 
   try {
-    const res = await fetch('/shops/nearby?latitude=18.8206&longitude=78.7119&max_radius_km=50');
+    let lat = 18.8206;
+    let lon = 78.7119;
+    if (typeof navigator !== 'undefined' && navigator.geolocation) {
+      try {
+        const pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, {
+            timeout: 5000,
+            enableHighAccuracy: true,
+          });
+        });
+        if (pos && pos.coords) {
+          lat = pos.coords.latitude;
+          lon = pos.coords.longitude;
+        }
+      } catch (geoErr) {
+        console.warn("Geolocation unavailable or denied, using fallback coordinates:", geoErr);
+      }
+    }
+
+    const res = await fetch(`/shops/nearby?latitude=${lat}&longitude=${lon}&max_radius_km=5.0`);
     if (!res.ok) throw new Error('Failed to fetch nearby shops');
     const shops = await res.json();
 
     if (shops.length === 0) {
-      container.innerHTML = '<p>No nearby shops found.</p>';
+      container.innerHTML = `
+        <div class="empty-shops-card">
+          <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">📍</div>
+          <h4 style="margin-bottom: 0.35rem; color: var(--text-main);">No Shops Found Within 5 km</h4>
+          <p style="color: var(--text-muted); font-size: 0.88rem; max-width: 420px; margin: 0 auto;">
+            There are currently no registered agricultural or pesticide shops within 5 km of your location. Please check back as local dealers are onboarded or verify your GPS coordinates.
+          </p>
+        </div>
+      `;
       return;
     }
 
     const cards = await Promise.all(shops.map(async (s) => {
-      const mapsUrl = s.google_maps_link || `https://www.google.com/maps/search/?api=1&query=${s.latitude || 18.8206},${s.longitude || 78.7119}`;
+      const mapsUrl = s.google_maps_link || `https://www.google.com/maps/search/?api=1&query=${s.latitude || lat},${s.longitude || lon}`;
       const statusBadge = s.status === 'active' ? '<span class="badge badge-open">Open</span>' : '<span class="badge badge-closed">Closed</span>';
       const deliveryBadge = s.delivery_available ? '<span class="badge badge-completed">Delivery Available</span>' : '<span class="badge badge-pending">Pick Up Only</span>';
 
-      let productsHtml = '<p style="font-size:0.85rem; color:var(--text-muted);">No products listed</p>';
+      let productsHtml = '<p style="font-size:0.85rem; color:var(--text-muted); margin: 0.5rem 0;">No products or pesticides currently listed</p>';
       try {
         const invRes = await fetch(`/inventory/shop/${s.id}`);
         if (invRes.ok) {
           const invData = await invRes.json();
           if (invData.items && invData.items.length > 0) {
             productsHtml = `<div style="margin: 0.75rem 0; padding: 0.75rem; background: var(--bg-main); border-radius: var(--radius-sm);">
-              <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.35rem; color: var(--primary);">📦 Live Inventory:</div>
-              ${invData.items.map(item => `
-                <div style="display:flex; justify-content:space-between; font-size: 0.85rem; padding: 0.25rem 0; border-bottom: 1px dashed var(--border-color);">
-                  <span><strong>${escapeHtml(item.product_name)}</strong> (${escapeHtml(item.brand)})</span>
-                  <span>₹${item.price} | <strong>${item.quantity_in_stock} ${item.unit}s</strong></span>
+              <div style="font-size: 0.85rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--primary);">📦 Pesticides & Farm Stock:</div>
+              ${invData.items.map(item => {
+                const inStock = item.available && (item.quantity_in_stock > 0);
+                const stockStatusHtml = inStock
+                  ? `<span class="stock-status-in">🟢 In Stock: ${item.quantity_in_stock} ${escapeHtml(item.unit || 'unit')}</span>`
+                  : `<span class="stock-status-out">🔴 Out of stock</span>`;
+                return `
+                <div style="padding: 0.4rem 0; border-bottom: 1px dashed var(--border-color); font-size: 0.85rem;">
+                  <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <span><strong>${escapeHtml(item.product_name)}</strong> ${item.brand ? `(${escapeHtml(item.brand)})` : ''}</span>
+                    <span style="font-weight:600;">₹${item.price}</span>
+                  </div>
+                  <div style="margin-top: 0.25rem;">
+                    ${stockStatusHtml}
+                  </div>
                 </div>
-              `).join('')}
+              `;
+              }).join('')}
             </div>`;
           }
         }
