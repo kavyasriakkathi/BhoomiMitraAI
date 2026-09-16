@@ -1006,18 +1006,26 @@ textarea.form-control {
 .badge-out-of-stock { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
 
 .stock-status-in {
-  color: #16a34a;
+  background: #dcfce7;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+  padding: 2px 8px;
+  border-radius: 9999px;
   font-weight: 600;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;
 }
 
 .stock-status-out {
-  color: #dc2626;
+  background: #fee2e2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  padding: 2px 8px;
+  border-radius: 9999px;
   font-weight: 600;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   display: inline-flex;
   align-items: center;
   gap: 0.25rem;

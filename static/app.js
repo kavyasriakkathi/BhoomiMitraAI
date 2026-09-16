@@ -982,7 +982,7 @@ async function executeFarmerProductSearch() {
         </div>
         <p><strong>Brand:</strong> ${escapeHtml(r.brand)}</p>
         <p><strong>Available at:</strong> ${escapeHtml(r.shop_name)}</p>
-        <p><strong>Stock:</strong> ${r.quantity_in_stock} ${r.unit}s</p>
+        <p><strong>Stock:</strong> ${r.quantity_in_stock > 0 ? `<span class="stock-status-in">🟢 In Stock: ${r.quantity_in_stock} ${escapeHtml(r.unit || 'unit')}s</span>` : `<span class="stock-status-out">🔴 Out of stock</span>`}</p>
         <p><strong>Distance:</strong> 📍 ${r.distance_km || '2.1'} km</p>
         <p><strong>Phone:</strong> ${escapeHtml(r.phone_number)}</p>
         <button class="btn btn-accent btn-sm" style="width: 100%; margin-top: 0.75rem;" onclick="openOrderModal('${r.shop_id}', '${escapeHtml(r.product_name)}', '${r.price}')">
