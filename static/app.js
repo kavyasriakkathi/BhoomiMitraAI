@@ -10,6 +10,33 @@
    Voice Shopping, Voice Order Tracking, Voice Scanner, and DB Sync
    ========================================================================== */
 
+// ==========================================================================
+// CENTRALIZED API BASE URL & FETCH HELPER
+// Automatically routes API calls to the backend when running on Static Site.
+// ==========================================================================
+const API_BASE = (typeof window !== 'undefined' && window.location && window.location.hostname.includes('bhoomimitra-frontend'))
+  ? 'https://bhoomimitra-ai-whatsapp.onrender.com'
+  : '';
+
+if (typeof window !== 'undefined' && window.fetch) {
+  const _nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    let url = input;
+    if (typeof url === 'string') {
+      if (url.startsWith('/') && !url.startsWith('//')) {
+        url = `${API_BASE}${url}`;
+      }
+    } else if (url instanceof Request) {
+      if (url.url.startsWith('/') || (API_BASE && url.url.startsWith(window.location.origin))) {
+        const targetUrl = url.url.replace(window.location.origin, API_BASE);
+        input = new Request(targetUrl, url);
+        return _nativeFetch(input);
+      }
+    }
+    return _nativeFetch(url, init);
+  };
+}
+
 let currentRole = 'farmer';
 let currentLanguage = 'en';
 let currentUser = null;
