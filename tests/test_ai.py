@@ -270,9 +270,10 @@ async def test_gemini_primary_timeout_is_15_seconds(monkeypatch):
     monkeypatch.setattr(gemini_module, "_initialized", True)
 
     captured_timeouts = []
-    original_wait_for = asyncio.wait_for
 
     async def mock_wait_for(fut, timeout):
+        if hasattr(fut, "close"):
+            fut.close()
         captured_timeouts.append(timeout)
         mock_resp = MagicMock()
         mock_resp.text = "Success with 15s timeout"
@@ -283,7 +284,9 @@ async def test_gemini_primary_timeout_is_15_seconds(monkeypatch):
     def mock_generative_model(model_name, **kwargs):
         mock_instance = MagicMock()
         mock_chat = MagicMock()
-        mock_chat.send_message_async = AsyncMock()
+        mock_resp = MagicMock()
+        mock_resp.text = "Success with 15s timeout"
+        mock_chat.send_message = MagicMock(return_value=mock_resp)
         mock_instance.start_chat.return_value = mock_chat
         return mock_instance
 
@@ -303,7 +306,7 @@ async def test_gemini_primary_timeout_is_15_seconds(monkeypatch):
 @pytest.mark.asyncio
 async def test_gemini_fallback_timeout_is_bounded_to_10_seconds(monkeypatch):
     """Verify that fallback Gemini model attempts receive a bounded 10.0s timeout."""
-    from unittest.mock import MagicMock, AsyncMock
+    from unittest.mock import MagicMock
     import asyncio
     import src.ai.gemini_client as gemini_module
 
@@ -312,6 +315,8 @@ async def test_gemini_fallback_timeout_is_bounded_to_10_seconds(monkeypatch):
     captured_timeouts = []
 
     async def mock_wait_for(fut, timeout):
+        if hasattr(fut, "close"):
+            fut.close()
         captured_timeouts.append(timeout)
         if len(captured_timeouts) == 1:
             # First attempt (primary) fails with timeout
@@ -326,7 +331,9 @@ async def test_gemini_fallback_timeout_is_bounded_to_10_seconds(monkeypatch):
     def mock_generative_model(model_name, **kwargs):
         mock_instance = MagicMock()
         mock_chat = MagicMock()
-        mock_chat.send_message_async = AsyncMock()
+        mock_resp = MagicMock()
+        mock_resp.text = "Fallback success with 10s timeout"
+        mock_chat.send_message = MagicMock(return_value=mock_resp)
         mock_instance.start_chat.return_value = mock_chat
         return mock_instance
 
@@ -347,7 +354,7 @@ async def test_gemini_fallback_timeout_is_bounded_to_10_seconds(monkeypatch):
 @pytest.mark.asyncio
 async def test_gemini_timeout_ceiling_aborts_without_infinite_loop(monkeypatch):
     """Verify that after 2 timeouts, the retry ceiling aborts and raises TimeoutError cleanly."""
-    from unittest.mock import MagicMock, AsyncMock
+    from unittest.mock import MagicMock
     import asyncio
     import src.ai.gemini_client as gemini_module
 
@@ -356,6 +363,8 @@ async def test_gemini_timeout_ceiling_aborts_without_infinite_loop(monkeypatch):
     captured_attempts = []
 
     async def mock_wait_for(fut, timeout):
+        if hasattr(fut, "close"):
+            fut.close()
         captured_attempts.append(timeout)
         raise asyncio.TimeoutError()
 
@@ -364,7 +373,7 @@ async def test_gemini_timeout_ceiling_aborts_without_infinite_loop(monkeypatch):
     def mock_generative_model(model_name, **kwargs):
         mock_instance = MagicMock()
         mock_chat = MagicMock()
-        mock_chat.send_message_async = AsyncMock()
+        mock_chat.send_message = MagicMock()
         mock_instance.start_chat.return_value = mock_chat
         return mock_instance
 

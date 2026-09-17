@@ -37,7 +37,7 @@ def mock_market_service():
     service = AsyncMock(spec=MarketService)
     app.dependency_overrides[get_market_service] = lambda: service
     yield service
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_market_service, None)
 
 
 def _mock_price_response(**kwargs) -> MarketPriceResponse:
@@ -1178,6 +1178,7 @@ async def test_warangal_farmer_wins_over_live_out_of_state_records():
         assert results[0].market_name == "Warangal Mandi"
         assert results[0].district == "Warangal"
         assert results[0].state == "Telangana"
+    await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -1236,6 +1237,7 @@ async def test_warangal_farmer_latest_local_district_wins_when_no_recent_distric
         assert len(results) > 0
         assert results[0].market_name == "Enumamula Mandi"
         assert results[0].state == "Telangana"
+    await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -1294,6 +1296,7 @@ async def test_warangal_farmer_telangana_rows_win_when_no_district_rows():
         assert len(results) > 0
         assert results[0].market_name == "Karimnagar Mandi"
         assert results[0].state == "Telangana"
+    await engine.dispose()
 
 
 def test_only_national_rows_clearly_labeled_with_actual_state():

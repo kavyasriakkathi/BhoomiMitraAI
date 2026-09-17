@@ -22,7 +22,7 @@ def mock_memory_service():
     service = AsyncMock(spec=FarmerMemoryService)
     app.dependency_overrides[get_memory_service] = lambda: service
     yield service
-    app.dependency_overrides.clear()
+    app.dependency_overrides.pop(get_memory_service, None)
 
 
 def test_get_farmer_memory_success(mock_memory_service):
@@ -384,13 +384,14 @@ async def test_trigger_background_memory_extraction_non_blocking():
 
     farmer_id = uuid4()
 
-    # Trigger with valid event loop
-    task = trigger_background_memory_extraction(
-        farmer_id=farmer_id,
-        user_message="5 acres in Warangal",
-        ai_response="Advice"
-    )
+    with patch("src.memory.service.FarmerMemoryService.extract_and_update_memory", new_callable=AsyncMock):
+        # Trigger with valid event loop
+        task = trigger_background_memory_extraction(
+            farmer_id=farmer_id,
+            user_message="5 acres in Warangal",
+            ai_response="Advice"
+        )
 
-    assert task is not None
-    # Await background task completion to ensure no unhandled exceptions
-    await task
+        assert task is not None
+        # Await background task completion to ensure no unhandled exceptions
+        await task
