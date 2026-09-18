@@ -18,8 +18,8 @@ async def generate_ai_response(
     summary="AI Provider Health Check", description="Check the availability of the configured LLM provider.")
 async def check_ai_health():
     settings = get_settings()
-    # If the API key is not configured, the service is unavailable
-    if not settings.google_gemini_api_key:
+    # If neither Gemini API key nor GCP Project ID is configured, the service is unavailable
+    if not (settings.google_gemini_api_key or getattr(settings, "google_cloud_project_id", None)):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, 
             detail="AI Provider is not configured."

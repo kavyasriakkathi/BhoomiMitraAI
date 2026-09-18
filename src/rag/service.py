@@ -722,7 +722,7 @@ class RAGService:
 
         mem_repo = FarmerMemoryRepository(self.repository.session)
         mem_service = FarmerMemoryService(mem_repo)
-        farmer_mem_dict = await mem_service.get_farmer_memory(farmer_id)
+        farmer_mem_dict = await mem_service.get_memory_response(farmer_id)
         memory_context = await mem_service.format_memory_for_system_prompt(farmer_id)
 
         profile_context = f"Crop: {crop or 'General'}, State: {state or 'All India'}, District: {profile.district if profile else 'Not set'}"

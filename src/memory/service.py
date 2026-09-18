@@ -40,6 +40,8 @@ class FarmerMemoryService:
         memory = await self.get_memory(farmer_id)
         return FarmerMemoryResponse.model_validate(memory)
 
+    get_farmer_memory = get_memory_response
+
     async def update_memory(self, farmer_id: UUID, data: FarmerMemoryUpdate) -> FarmerMemoryResponse:
         """Manual / Expert update of Farmer Memory profile."""
         memory = await self.get_memory(farmer_id)

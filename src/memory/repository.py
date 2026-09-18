@@ -1,5 +1,5 @@
 from typing import Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from src.memory.models import FarmerMemory
@@ -22,6 +22,7 @@ class FarmerMemoryRepository:
         if not memory:
             logger.info(f"Creating default FarmerMemory record for farmer {farmer_id}")
             memory = FarmerMemory(
+                id=uuid4(),
                 farmer_id=farmer_id,
                 primary_crops=[],
                 secondary_crops=[],
