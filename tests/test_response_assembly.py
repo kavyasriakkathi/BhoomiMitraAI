@@ -1231,22 +1231,17 @@ async def test_whatsapp_reply_uses_gemini_36_flash_as_primary(monkeypatch):
     from src.ai.schemas import AIGenerateRequest
     from src.core.models import Farmer, Conversation
 
-    monkeypatch.setattr(gemini_module, "_initialized", True)
-
     models_called = []
 
-    def mock_generative_model(model_name, **kwargs):
-        models_called.append(model_name)
-        mock_instance = MagicMock()
-        mock_chat = MagicMock()
+    mock_client = MagicMock()
+    async def mock_generate_content(model, contents, config=None):
+        models_called.append(model)
         mock_resp = MagicMock()
         mock_resp.text = "పత్తి పంటలో పురుగుల నివారణకు సరైన పురుగుమందు పిచికారీ చేయాలి."
-        mock_chat.send_message_async = AsyncMock(return_value=mock_resp)
-        mock_chat.send_message.return_value = mock_resp
-        mock_instance.start_chat.return_value = mock_chat
-        return mock_instance
+        return mock_resp
 
-    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
     db_mock = AsyncMock()
     farmer_id = uuid4()

@@ -272,24 +272,34 @@ class RAGService:
         """
         Generates embedding vector using Gemini API or deterministic local fallback.
         """
-        settings = get_settings()
-        if settings.google_gemini_api_key:
-            try:
-                import google.generativeai as genai
-                genai.configure(api_key=settings.google_gemini_api_key)
-                res = genai.embed_content(
-                    model="models/gemini-embedding-2",
-                    content=text,
-                    task_type="retrieval_document"
-                )
-                if res and "embedding" in res:
-                    vec = res["embedding"]
+        try:
+            from src.ai.gemini_client import _ensure_initialized
+            from google.genai import types
+
+            client = _ensure_initialized()
+
+            result = client.models.embed_content(
+                model="gemini-embedding-2",
+                contents=text,
+                config=types.EmbedContentConfig(output_dimensionality=dimension),
+            )
+
+            if result and result.embeddings:
+                vec = result.embeddings[0].values
+
+                if vec:
                     norm = math.sqrt(sum(x * x for x in vec))
+
                     if norm > 0:
                         vec = [x / norm for x in vec]
+
                     return vec
-            except Exception as err:
-                logger.warning(f"Gemini Embeddings API call failed, using deterministic local embedding: {err}")
+
+        except Exception as err:
+            logger.warning(
+                f"Gemini Embeddings API call failed, "
+                f"using deterministic local embedding: {err}"
+            )
 
         # Local Deterministic Cosine-compatible Feature Hashing Embedding Vector
         vec = [0.0] * dimension

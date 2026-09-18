@@ -783,7 +783,7 @@ async def process_image_message(
         )
 
         if is_non_crop:
-            reply_text = get_non_crop_image_response(img_lang_code)
+            reply_text = get_non_crop_image_response(getattr(farmer, "preferred_language", "te") or "te")
             conversation.ai_response = reply_text
             db.add(conversation)
             await db.commit()

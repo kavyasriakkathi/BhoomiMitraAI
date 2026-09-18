@@ -95,41 +95,60 @@ def test_gemini_fallback_models_order():
     ]
 
 
-def test_gemini_initialization_configures_rest_transport(monkeypatch):
+def test_gemini_initialization_configures_client(monkeypatch):
     from unittest.mock import MagicMock
     import src.ai.gemini_client as gemini_module
 
-    monkeypatch.setattr(gemini_module, "_initialized", False)
-    mock_configure = MagicMock()
-    monkeypatch.setattr(gemini_module.genai, "configure", mock_configure)
+    monkeypatch.setattr(gemini_module, "_client", None)
+    mock_client_class = MagicMock()
+    monkeypatch.setattr(gemini_module.genai, "Client", mock_client_class)
+    monkeypatch.setattr(
+        "src.ai.gemini_client.get_settings",
+        lambda: type("Settings", (), {"google_cloud_project_id": "test-project-123"})(),
+    )
 
-    gemini_module._ensure_initialized()
+    client = gemini_module._ensure_initialized()
 
-    assert mock_configure.called
-    assert mock_configure.call_args.kwargs.get("transport") == "rest"
+    assert mock_client_class.called
+    assert mock_client_class.call_args.kwargs == {
+        "vertexai": True,
+        "project": "test-project-123",
+        "location": "global",
+    }
+    assert client == mock_client_class.return_value
+
+
+def test_gemini_initialization_missing_project_raises(monkeypatch):
+    import src.ai.gemini_client as gemini_module
+
+    monkeypatch.setattr(gemini_module, "_client", None)
+    monkeypatch.setattr(
+        "src.ai.gemini_client.get_settings",
+        lambda: type("Settings", (), {"google_cloud_project_id": ""})(),
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        gemini_module._ensure_initialized()
+
+    assert "Google Cloud project ID is not configured" in str(exc_info.value)
 
 
 @pytest.mark.asyncio
 async def test_gemini_generate_response_primary_model_is_gemini_36_flash(monkeypatch):
-    from unittest.mock import MagicMock
+    from unittest.mock import MagicMock, AsyncMock
     import src.ai.gemini_client as gemini_module
 
-    monkeypatch.setattr(gemini_module, "_initialized", True)
-
+    mock_client = MagicMock()
     attempts = []
 
-    def mock_generative_model(model_name, **kwargs):
-        attempts.append(model_name)
-        mock_instance = MagicMock()
-        mock_chat = MagicMock()
+    async def mock_generate_content(model, contents, config=None):
+        attempts.append(model)
         mock_resp = MagicMock()
         mock_resp.text = "Gemini 3.6 Flash natural language response"
-        mock_chat.send_message_async = AsyncMock(return_value=mock_resp)
-        mock_chat.send_message.return_value = mock_resp
-        mock_instance.start_chat.return_value = mock_chat
-        return mock_instance
+        return mock_resp
 
-    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
     response = await gemini_module.generate_response(
         system_prompt="Test prompt",
@@ -147,28 +166,21 @@ async def test_gemini_generate_response_fallback_on_error(monkeypatch):
     from unittest.mock import MagicMock, AsyncMock
     import src.ai.gemini_client as gemini_module
 
-    monkeypatch.setattr(gemini_module, "_initialized", True)
-
+    mock_client = MagicMock()
     attempts = []
 
-    def mock_generative_model(model_name, **kwargs):
-        attempts.append(model_name)
-        mock_instance = MagicMock()
-        mock_chat = MagicMock()
-        if model_name == "gemini-3.6-flash":
+    async def mock_generate_content(model, contents, config=None):
+        attempts.append(model)
+        if model == "gemini-3.6-flash":
             # Primary attempt fails
-            mock_chat.send_message_async = AsyncMock(side_effect=Exception("Service Unavailable 503"))
-            mock_chat.send_message.side_effect = Exception("Service Unavailable 503")
-        else:
-            # Fallback attempt succeeds
-            mock_resp = MagicMock()
-            mock_resp.text = "Fallback model response"
-            mock_chat.send_message_async = AsyncMock(return_value=mock_resp)
-            mock_chat.send_message.return_value = mock_resp
-        mock_instance.start_chat.return_value = mock_chat
-        return mock_instance
+            raise Exception("Service Unavailable 503")
+        # Fallback attempt succeeds
+        mock_resp = MagicMock()
+        mock_resp.text = "Fallback model response"
+        return mock_resp
 
-    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
     response = await gemini_module.generate_response(
         system_prompt="Test prompt",
@@ -187,22 +199,17 @@ async def test_gemini_generate_response_max_output_tokens_is_1024(monkeypatch):
     from unittest.mock import MagicMock, AsyncMock
     import src.ai.gemini_client as gemini_module
 
-    monkeypatch.setattr(gemini_module, "_initialized", True)
-
+    mock_client = MagicMock()
     captured_configs = []
 
-    def mock_generative_model(model_name, **kwargs):
-        captured_configs.append(kwargs.get("generation_config"))
-        mock_instance = MagicMock()
-        mock_chat = MagicMock()
+    async def mock_generate_content(model, contents, config=None):
+        captured_configs.append(config)
         mock_resp = MagicMock()
         mock_resp.text = "Valid test response"
-        mock_chat.send_message_async = AsyncMock(return_value=mock_resp)
-        mock_chat.send_message.return_value = mock_resp
-        mock_instance.start_chat.return_value = mock_chat
-        return mock_instance
+        return mock_resp
 
-    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
     response = await gemini_module.generate_response(
         system_prompt="Test prompt",
@@ -214,11 +221,7 @@ async def test_gemini_generate_response_max_output_tokens_is_1024(monkeypatch):
     assert response == "Valid test response"
     assert len(captured_configs) > 0
     gen_config = captured_configs[0]
-    # Check max_output_tokens on genai.GenerationConfig
-    token_limit = getattr(gen_config, "max_output_tokens", None)
-    if token_limit is None and hasattr(gen_config, "_max_output_tokens"):
-        token_limit = gen_config._max_output_tokens
-    assert token_limit == 1024
+    assert getattr(gen_config, "max_output_tokens", None) == 1024
 
 
 @pytest.mark.asyncio
@@ -227,8 +230,6 @@ async def test_gemini_telugu_response_regression_no_artificial_truncation(monkey
     from unittest.mock import MagicMock, AsyncMock
     import src.ai.gemini_client as gemini_module
 
-    monkeypatch.setattr(gemini_module, "_initialized", True)
-
     long_telugu_response = (
         "నమస్తే రైతు సోదరా! మీ పంట సాగులో సరైన యాజమాన్య పద్ధతులు పాటించడం ఎంతో ముఖ్యం. "
         "పొలంలో నీటి పారుదల మరియు మురుగు నీటి సౌకర్యం సక్రమంగా ఉండేలా చూసుకోవాలి. "
@@ -236,17 +237,11 @@ async def test_gemini_telugu_response_regression_no_artificial_truncation(monkey
         "క్షేత్రస్థాయిలో ఏవైనా సమస్యలు లేదా సందేహాలు ఉంటే స్థానిక వ్యవసాయ అధికారిని సంప్రదించండి."
     )
 
-    def mock_generative_model(model_name, **kwargs):
-        mock_instance = MagicMock()
-        mock_chat = MagicMock()
-        mock_resp = MagicMock()
-        mock_resp.text = long_telugu_response
-        mock_chat.send_message_async = AsyncMock(return_value=mock_resp)
-        mock_chat.send_message.return_value = mock_resp
-        mock_instance.start_chat.return_value = mock_chat
-        return mock_instance
-
-    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+    mock_client = MagicMock()
+    mock_resp = MagicMock()
+    mock_resp.text = long_telugu_response
+    mock_client.aio.models.generate_content = AsyncMock(return_value=mock_resp)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
     response = await gemini_module.generate_response(
         system_prompt="Test prompt",
@@ -263,11 +258,9 @@ async def test_gemini_telugu_response_regression_no_artificial_truncation(monkey
 @pytest.mark.asyncio
 async def test_gemini_primary_timeout_is_15_seconds(monkeypatch):
     """Verify that primary Gemini attempt receives a 15.0 second timeout by default."""
-    from unittest.mock import MagicMock
+    from unittest.mock import MagicMock, AsyncMock
     import asyncio
     import src.ai.gemini_client as gemini_module
-
-    monkeypatch.setattr(gemini_module, "_initialized", True)
 
     captured_timeouts = []
 
@@ -281,16 +274,9 @@ async def test_gemini_primary_timeout_is_15_seconds(monkeypatch):
 
     monkeypatch.setattr(gemini_module.asyncio, "wait_for", mock_wait_for)
 
-    def mock_generative_model(model_name, **kwargs):
-        mock_instance = MagicMock()
-        mock_chat = MagicMock()
-        mock_resp = MagicMock()
-        mock_resp.text = "Success with 15s timeout"
-        mock_chat.send_message = MagicMock(return_value=mock_resp)
-        mock_instance.start_chat.return_value = mock_chat
-        return mock_instance
-
-    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+    mock_client = MagicMock()
+    mock_client.aio.models.generate_content = AsyncMock()
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
     response = await gemini_module.generate_response(
         system_prompt="Test prompt",
@@ -306,11 +292,9 @@ async def test_gemini_primary_timeout_is_15_seconds(monkeypatch):
 @pytest.mark.asyncio
 async def test_gemini_fallback_timeout_is_bounded_to_10_seconds(monkeypatch):
     """Verify that fallback Gemini model attempts receive a bounded 10.0s timeout."""
-    from unittest.mock import MagicMock
+    from unittest.mock import MagicMock, AsyncMock
     import asyncio
     import src.ai.gemini_client as gemini_module
-
-    monkeypatch.setattr(gemini_module, "_initialized", True)
 
     captured_timeouts = []
 
@@ -328,16 +312,9 @@ async def test_gemini_fallback_timeout_is_bounded_to_10_seconds(monkeypatch):
 
     monkeypatch.setattr(gemini_module.asyncio, "wait_for", mock_wait_for)
 
-    def mock_generative_model(model_name, **kwargs):
-        mock_instance = MagicMock()
-        mock_chat = MagicMock()
-        mock_resp = MagicMock()
-        mock_resp.text = "Fallback success with 10s timeout"
-        mock_chat.send_message = MagicMock(return_value=mock_resp)
-        mock_instance.start_chat.return_value = mock_chat
-        return mock_instance
-
-    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+    mock_client = MagicMock()
+    mock_client.aio.models.generate_content = AsyncMock()
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
     response = await gemini_module.generate_response(
         system_prompt="Test prompt",
@@ -354,11 +331,9 @@ async def test_gemini_fallback_timeout_is_bounded_to_10_seconds(monkeypatch):
 @pytest.mark.asyncio
 async def test_gemini_timeout_ceiling_aborts_without_infinite_loop(monkeypatch):
     """Verify that after 2 timeouts, the retry ceiling aborts and raises TimeoutError cleanly."""
-    from unittest.mock import MagicMock
+    from unittest.mock import MagicMock, AsyncMock
     import asyncio
     import src.ai.gemini_client as gemini_module
-
-    monkeypatch.setattr(gemini_module, "_initialized", True)
 
     captured_attempts = []
 
@@ -370,14 +345,9 @@ async def test_gemini_timeout_ceiling_aborts_without_infinite_loop(monkeypatch):
 
     monkeypatch.setattr(gemini_module.asyncio, "wait_for", mock_wait_for)
 
-    def mock_generative_model(model_name, **kwargs):
-        mock_instance = MagicMock()
-        mock_chat = MagicMock()
-        mock_chat.send_message = MagicMock()
-        mock_instance.start_chat.return_value = mock_chat
-        return mock_instance
-
-    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", mock_generative_model)
+    mock_client = MagicMock()
+    mock_client.aio.models.generate_content = AsyncMock()
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
     with pytest.raises(TimeoutError) as exc_info:
         await gemini_module.generate_response(
@@ -1225,393 +1195,334 @@ def test_is_quota_exhausted_error_helper():
 
 
 @pytest.mark.asyncio
-async def test_gemini_429_quota_exhaustion_aborts_fallback_chain():
+async def test_gemini_429_quota_exhaustion_aborts_fallback_chain(monkeypatch):
     """A. Main text generation: Primary raises confirmed 429 quota error -> only ONE model call, fallback not called."""
-    from src.ai.gemini_client import generate_response
-    from unittest.mock import patch, MagicMock
+    import src.ai.gemini_client as gemini_module
+    from unittest.mock import MagicMock, AsyncMock
 
     call_count = 0
     models_attempted = []
 
-    def fake_generative_model(model_name, **kwargs):
-        models_attempted.append(model_name)
-        mock_model = MagicMock()
-        mock_chat = MagicMock()
+    mock_client = MagicMock()
+    async def mock_generate_content(model, contents, config=None):
+        nonlocal call_count
+        call_count += 1
+        models_attempted.append(model)
+        raise RuntimeError("429 Resource has been exhausted (quota_exceeded for metric generate_content_free_tier_requests)")
 
-        def fake_send_message(user_msg, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            raise RuntimeError("429 Resource has been exhausted (quota_exceeded for metric generate_content_free_tier_requests)")
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
-        mock_chat.send_message = MagicMock(side_effect=fake_send_message)
-        mock_model.start_chat.return_value = mock_chat
-        return mock_model
-
-    with patch("src.ai.gemini_client._ensure_initialized"), \
-         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
-
-        with pytest.raises(RuntimeError) as exc_info:
-            await generate_response(
-                system_prompt="Test system prompt",
-                conversation_history=[],
-                user_message="వరి సాగు సలహా",
-                timeout_seconds=5.0,
-                allow_fallback=True,
-            )
-
-        assert "429" in str(exc_info.value)
-        # MUST abort on first model attempt without calling fallback models
-        assert call_count == 1
-        assert len(models_attempted) == 1
-        assert models_attempted == ["gemini-3.6-flash"]
-
-
-@pytest.mark.asyncio
-async def test_gemini_multimodal_429_quota_exhaustion_aborts_fallback_chain():
-    """B. Multimodal generation: Primary raises confirmed 429 quota error -> only ONE model call, fallback not called."""
-    from src.ai.gemini_client import generate_multimodal_response
-    from unittest.mock import patch, MagicMock
-
-    call_count = 0
-    models_attempted = []
-
-    def fake_generative_model(model_name, **kwargs):
-        models_attempted.append(model_name)
-        mock_model = MagicMock()
-        mock_chat = MagicMock()
-
-        def fake_send_message(parts, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            raise RuntimeError("HTTP 429: TooManyRequests - Quota exceeded for project")
-
-        mock_chat.send_message = MagicMock(side_effect=fake_send_message)
-        mock_model.start_chat.return_value = mock_chat
-        return mock_model
-
-    with patch("src.ai.gemini_client._ensure_initialized"), \
-         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
-
-        with pytest.raises(RuntimeError) as exc_info:
-            await generate_multimodal_response(
-                system_prompt="Test vision system prompt",
-                conversation_history=[],
-                image_bytes=b"fake_image",
-                mime_type="image/jpeg",
-                user_message="Diagnose crop",
-                timeout_seconds=5,
-            )
-
-        assert "429" in str(exc_info.value)
-        assert call_count == 1
-        assert len(models_attempted) == 1
-        assert models_attempted == ["gemini-3.6-flash"]
-
-
-@pytest.mark.asyncio
-async def test_gemini_transient_error_continues_fallback():
-    """C. Non-quota transient failure: Primary raises normal transient exception -> fallback chain continues unchanged."""
-    from src.ai.gemini_client import generate_response
-    from unittest.mock import patch, MagicMock
-
-    models_attempted = []
-
-    def fake_generative_model(model_name, **kwargs):
-        models_attempted.append(model_name)
-        mock_model = MagicMock()
-        mock_chat = MagicMock()
-        if model_name == "gemini-3.6-flash":
-            # Primary fails with transient connection error
-            mock_chat.send_message = MagicMock(side_effect=ConnectionError("Transient network failure 503"))
-        else:
-            # Fallback succeeds
-            mock_resp = MagicMock()
-            mock_resp.text = "Fallback model success answer."
-            mock_chat.send_message = MagicMock(return_value=mock_resp)
-        mock_model.start_chat.return_value = mock_chat
-        return mock_model
-
-    with patch("src.ai.gemini_client._ensure_initialized"), \
-         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
-
-        resp = await generate_response(
+    with pytest.raises(RuntimeError) as exc_info:
+        await gemini_module.generate_response(
             system_prompt="Test system prompt",
             conversation_history=[],
-            user_message="Test message",
+            user_message="వరి సాగు సలహా",
             timeout_seconds=5.0,
             allow_fallback=True,
         )
 
-        assert resp == "Fallback model success answer."
-        # Primary was tried, failed transients, then fallback was tried and succeeded
-        assert models_attempted[0] == "gemini-3.6-flash"
-        assert models_attempted[1] == "gemini-3.5-flash"
+    assert "429" in str(exc_info.value)
+    # MUST abort on first model attempt without calling fallback models
+    assert call_count == 1
+    assert len(models_attempted) == 1
+    assert models_attempted == ["gemini-3.6-flash"]
 
 
 @pytest.mark.asyncio
-async def test_gemini_timeout_error_continues_fallback():
+async def test_gemini_multimodal_429_quota_exhaustion_aborts_fallback_chain(monkeypatch):
+    """B. Multimodal generation: Primary raises confirmed 429 quota error -> only ONE model call, fallback not called."""
+    import src.ai.gemini_client as gemini_module
+    from unittest.mock import MagicMock, AsyncMock
+
+    call_count = 0
+    models_attempted = []
+
+    mock_client = MagicMock()
+    async def mock_generate_content(model, contents, config=None):
+        nonlocal call_count
+        call_count += 1
+        models_attempted.append(model)
+        raise RuntimeError("HTTP 429: TooManyRequests - Quota exceeded for project")
+
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await gemini_module.generate_multimodal_response(
+            system_prompt="Test vision system prompt",
+            conversation_history=[],
+            image_bytes=b"fake_image",
+            mime_type="image/jpeg",
+            user_message="Diagnose crop",
+            timeout_seconds=5,
+        )
+
+    assert "429" in str(exc_info.value)
+    assert call_count == 1
+    assert len(models_attempted) == 1
+    assert models_attempted == ["gemini-3.6-flash"]
+
+
+@pytest.mark.asyncio
+async def test_gemini_transient_error_continues_fallback(monkeypatch):
+    """C. Non-quota transient failure: Primary raises normal transient exception -> fallback chain continues unchanged."""
+    import src.ai.gemini_client as gemini_module
+    from unittest.mock import MagicMock, AsyncMock
+
+    models_attempted = []
+
+    mock_client = MagicMock()
+    async def mock_generate_content(model, contents, config=None):
+        models_attempted.append(model)
+        if model == "gemini-3.6-flash":
+            # Primary fails with transient connection error
+            raise ConnectionError("Transient network failure 503")
+        # Fallback succeeds
+        mock_resp = MagicMock()
+        mock_resp.text = "Fallback model success answer."
+        return mock_resp
+
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
+
+    resp = await gemini_module.generate_response(
+        system_prompt="Test system prompt",
+        conversation_history=[],
+        user_message="Test message",
+        timeout_seconds=5.0,
+        allow_fallback=True,
+    )
+
+    assert resp == "Fallback model success answer."
+    # Primary was tried, failed transients, then fallback was tried and succeeded
+    assert models_attempted[0] == "gemini-3.6-flash"
+    assert models_attempted[1] == "gemini-3.5-flash"
+
+
+@pytest.mark.asyncio
+async def test_gemini_timeout_error_continues_fallback(monkeypatch):
     """D. Timeout behavior: Primary model times out -> fallback model is attempted."""
     import asyncio
-    from src.ai.gemini_client import generate_response
-    from unittest.mock import patch, MagicMock
+    import src.ai.gemini_client as gemini_module
+    from unittest.mock import MagicMock, AsyncMock
 
     models_attempted = []
 
-    def fake_generative_model(model_name, **kwargs):
-        models_attempted.append(model_name)
-        mock_model = MagicMock()
-        mock_chat = MagicMock()
-        if model_name == "gemini-3.6-flash":
+    mock_client = MagicMock()
+    async def mock_generate_content(model, contents, config=None):
+        models_attempted.append(model)
+        if model == "gemini-3.6-flash":
             # Primary model times out
-            mock_chat.send_message = MagicMock(side_effect=asyncio.TimeoutError("Gemini model timed out"))
-        else:
-            # Fallback succeeds
-            mock_resp = MagicMock()
-            mock_resp.text = "Fallback response after primary timeout."
-            mock_chat.send_message = MagicMock(return_value=mock_resp)
-        mock_model.start_chat.return_value = mock_chat
-        return mock_model
+            raise asyncio.TimeoutError("Gemini model timed out")
+        # Fallback succeeds
+        mock_resp = MagicMock()
+        mock_resp.text = "Fallback response after primary timeout."
+        return mock_resp
 
-    with patch("src.ai.gemini_client._ensure_initialized"), \
-         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
-        resp = await generate_response(
-            system_prompt="Test system prompt",
-            conversation_history=[],
-            user_message="Test timeout query",
-            timeout_seconds=5.0,
-            allow_fallback=True,
-        )
+    resp = await gemini_module.generate_response(
+        system_prompt="Test system prompt",
+        conversation_history=[],
+        user_message="Test timeout query",
+        timeout_seconds=5.0,
+        allow_fallback=True,
+    )
 
-        assert resp == "Fallback response after primary timeout."
-        assert models_attempted[0] == "gemini-3.6-flash"
-        assert models_attempted[1] == "gemini-3.5-flash"
+    assert resp == "Fallback response after primary timeout."
+    assert models_attempted[0] == "gemini-3.6-flash"
+    assert models_attempted[1] == "gemini-3.5-flash"
 
 
 @pytest.mark.asyncio
-async def test_gemini_requests_read_timeout_triggers_model_fallback_and_ceiling():
+async def test_gemini_requests_read_timeout_triggers_model_fallback_and_ceiling(monkeypatch):
     """Verify that requests.exceptions.ReadTimeout triggers fallback and respects two-timeout ceiling."""
     import requests.exceptions
-    from src.ai.gemini_client import generate_response
-    from unittest.mock import patch, MagicMock
+    import src.ai.gemini_client as gemini_module
+    from unittest.mock import MagicMock, AsyncMock
 
     models_attempted = []
 
-    def fake_generative_model(model_name, **kwargs):
-        models_attempted.append(model_name)
-        mock_model = MagicMock()
-        mock_chat = MagicMock()
+    mock_client = MagicMock()
+    async def mock_generate_content(model, contents, config=None):
+        models_attempted.append(model)
         # Simulate socket ReadTimeout on all models
-        mock_chat.send_message = MagicMock(
-            side_effect=requests.exceptions.ReadTimeout("HTTPSConnectionPool(host='generativelanguage.googleapis.com', port=443): Read timed out. (read timeout=10.0)")
-        )
-        mock_model.start_chat.return_value = mock_chat
-        return mock_model
+        raise requests.exceptions.ReadTimeout("HTTPSConnectionPool(host='generativelanguage.googleapis.com', port=443): Read timed out. (read timeout=10.0)")
 
-    with patch("src.ai.gemini_client._ensure_initialized"), \
-         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
-        with pytest.raises(TimeoutError) as exc_info:
-            await generate_response(
-                system_prompt="Test prompt",
-                conversation_history=[],
-                user_message="వరి పంటలో పిలకలు బాగా రావడానికి ఏం చేయాలి?",
-                timeout_seconds=15.0,
-                allow_fallback=True,
-            )
-
-        assert "Gemini API timed out" in str(exc_info.value)
-        # Should stop after exactly 2 attempts due to timeout ceiling
-        assert len(models_attempted) == 2
-        assert models_attempted == ["gemini-3.6-flash", "gemini-3.5-flash"]
-
-
-@pytest.mark.asyncio
-async def test_gemini_429_returns_localized_safe_fallback_in_gateway():
-    """E. Existing AI fallback response behavior: Localized safe fallback returned when Gemini is unavailable due to 429."""
-    from src.ai.prompts import get_fallback_response
-    from src.ai.gemini_client import generate_response
-    from unittest.mock import patch, MagicMock
-
-    def fake_send_message(user_msg, *args, **kwargs):
-        raise RuntimeError("429 Resource has been exhausted (quota_exceeded)")
-
-    mock_chat = MagicMock()
-    mock_chat.send_message = MagicMock(side_effect=fake_send_message)
-    mock_model = MagicMock()
-    mock_model.start_chat.return_value = mock_chat
-
-    with patch("src.ai.gemini_client._ensure_initialized"), \
-         patch("google.generativeai.GenerativeModel", return_value=mock_model):
-
-        try:
-            await generate_response(
-                system_prompt="Test prompt",
-                conversation_history=[],
-                user_message="వరి సాగు సలహా",
-                timeout_seconds=5.0,
-                allow_fallback=True,
-            )
-            response_text = None
-        except Exception:
-            # Emulate gateway/decision engine error fallback handling
-            response_text = get_fallback_response("te")
-
-        assert response_text is not None
-        assert response_text == get_fallback_response("te")
-        assert "క్షమించండి" in response_text or "సమస్య" in response_text
-
-
-@pytest.mark.asyncio
-async def test_gemini_auth_error_aborts_fallback_chain():
-    """F. Authentication/permission failure: Primary raises 401/403/PermissionDenied -> aborts immediately without trying fallback."""
-    from src.ai.gemini_client import generate_response
-    from unittest.mock import patch, MagicMock
-
-    call_count = 0
-    models_attempted = []
-
-    def fake_generative_model(model_name, **kwargs):
-        models_attempted.append(model_name)
-        mock_model = MagicMock()
-        mock_chat = MagicMock()
-
-        def fake_send_message(user_msg, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            raise RuntimeError("API_KEY_INVALID: 403 Forbidden - The caller does not have permission")
-
-        mock_chat.send_message = MagicMock(side_effect=fake_send_message)
-        mock_model.start_chat.return_value = mock_chat
-        return mock_model
-
-    with patch("src.ai.gemini_client._ensure_initialized"), \
-         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
-
-        with pytest.raises(RuntimeError) as exc_info:
-            await generate_response(
-                system_prompt="Test prompt",
-                conversation_history=[],
-                user_message="వరి సాగు సలహా",
-                timeout_seconds=5.0,
-                allow_fallback=True,
-            )
-
-        assert "API_KEY_INVALID" in str(exc_info.value)
-        assert call_count == 1
-        assert len(models_attempted) == 1
-        assert models_attempted == ["gemini-3.6-flash"]
-
-
-@pytest.mark.asyncio
-async def test_gemini_sdk_request_options_timeout_primary_and_fallback():
-    """Verify that chat.send_message receives SDK-level request_options with 15.0s on primary and 10.0s on fallback."""
-    from src.ai.gemini_client import generate_response
-    from unittest.mock import patch, MagicMock
-
-    captured_timeouts = {}
-
-    def fake_generative_model(model_name, **kwargs):
-        mock_model = MagicMock()
-        mock_chat = MagicMock()
-
-        def fake_send_message(user_msg, **inner_kwargs):
-            req_opt = inner_kwargs.get("request_options")
-            captured_timeouts[model_name] = req_opt.get("timeout") if isinstance(req_opt, dict) else getattr(req_opt, "timeout", None)
-            if model_name == "gemini-3.6-flash":
-                raise ConnectionError("Primary network error to trigger fallback")
-            mock_resp = MagicMock()
-            mock_resp.text = "Fallback success response"
-            return mock_resp
-
-        mock_chat.send_message = MagicMock(side_effect=fake_send_message)
-        mock_model.start_chat.return_value = mock_chat
-        return mock_model
-
-    with patch("src.ai.gemini_client._ensure_initialized"), \
-         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
-
-        resp = await generate_response(
+    with pytest.raises(TimeoutError) as exc_info:
+        await gemini_module.generate_response(
             system_prompt="Test prompt",
             conversation_history=[],
-            user_message="వరి పంట సలహా",
+            user_message="వరి పంటలో పిలకలు బాగా రావడానికి ఏం చేయాలి?",
             timeout_seconds=15.0,
             allow_fallback=True,
         )
 
-        assert resp == "Fallback success response"
-        # Primary gets 15.0s timeout
-        assert captured_timeouts["gemini-3.6-flash"] == 15.0
-        # Fallback gets 10.0s capped timeout
-        assert captured_timeouts["gemini-3.5-flash"] == 10.0
+    assert "Gemini API timed out" in str(exc_info.value)
+    # Should stop after exactly 2 attempts due to timeout ceiling
+    assert len(models_attempted) == 2
+    assert models_attempted == ["gemini-3.6-flash", "gemini-3.5-flash"]
 
 
 @pytest.mark.asyncio
-async def test_gemini_multimodal_sdk_request_options_timeout():
-    """Verify that multimodal chat.send_message receives SDK-level request_options with expected timeout."""
-    from src.ai.gemini_client import generate_multimodal_response
-    from unittest.mock import patch, MagicMock
+async def test_gemini_429_returns_localized_safe_fallback_in_gateway(monkeypatch):
+    """E. Existing AI fallback response behavior: Localized safe fallback returned when Gemini is unavailable due to 429."""
+    from src.ai.prompts import get_fallback_response
+    import src.ai.gemini_client as gemini_module
+    from unittest.mock import MagicMock, AsyncMock
+
+    mock_client = MagicMock()
+    async def mock_generate_content(model, contents, config=None):
+        raise RuntimeError("429 Resource has been exhausted (quota_exceeded)")
+
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
+
+    try:
+        await gemini_module.generate_response(
+            system_prompt="Test prompt",
+            conversation_history=[],
+            user_message="వరి సాగు సలహా",
+            timeout_seconds=5.0,
+            allow_fallback=True,
+        )
+        response_text = None
+    except Exception:
+        # Emulate gateway/decision engine error fallback handling
+        response_text = get_fallback_response("te")
+
+    assert response_text is not None
+    assert response_text == get_fallback_response("te")
+    assert "క్షమించండి" in response_text or "సమస్య" in response_text
+
+
+@pytest.mark.asyncio
+async def test_gemini_auth_error_aborts_fallback_chain(monkeypatch):
+    """F. Authentication/permission failure: Primary raises 401/403/PermissionDenied -> aborts immediately without trying fallback."""
+    import src.ai.gemini_client as gemini_module
+    from unittest.mock import MagicMock, AsyncMock
+
+    call_count = 0
+    models_attempted = []
+
+    mock_client = MagicMock()
+    async def mock_generate_content(model, contents, config=None):
+        nonlocal call_count
+        call_count += 1
+        models_attempted.append(model)
+        raise RuntimeError("API_KEY_INVALID: 403 Forbidden - The caller does not have permission")
+
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        await gemini_module.generate_response(
+            system_prompt="Test prompt",
+            conversation_history=[],
+            user_message="వరి సాగు సలహా",
+            timeout_seconds=5.0,
+            allow_fallback=True,
+        )
+
+    assert "API_KEY_INVALID" in str(exc_info.value)
+    assert call_count == 1
+    assert len(models_attempted) == 1
+    assert models_attempted == ["gemini-3.6-flash"]
+
+
+@pytest.mark.asyncio
+async def test_gemini_sdk_request_options_timeout_primary_and_fallback(monkeypatch):
+    """Verify that generate_response applies 15.0s on primary and 10.0s on fallback via asyncio.wait_for."""
+    import src.ai.gemini_client as gemini_module
+    from unittest.mock import MagicMock, AsyncMock
+
+    captured_timeouts = {}
+
+    async def mock_wait_for(fut, timeout):
+        if hasattr(fut, "close"):
+            fut.close()
+        if "gemini-3.6-flash" not in captured_timeouts:
+            captured_timeouts["gemini-3.6-flash"] = timeout
+            raise ConnectionError("Primary network error to trigger fallback")
+        else:
+            captured_timeouts["gemini-3.5-flash"] = timeout
+            mock_resp = MagicMock()
+            mock_resp.text = "Fallback success response"
+            return mock_resp
+
+    monkeypatch.setattr(gemini_module.asyncio, "wait_for", mock_wait_for)
+
+    mock_client = MagicMock()
+    mock_client.aio.models.generate_content = AsyncMock()
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
+
+    resp = await gemini_module.generate_response(
+        system_prompt="Test prompt",
+        conversation_history=[],
+        user_message="వరి పంట సలహా",
+        timeout_seconds=15.0,
+        allow_fallback=True,
+    )
+
+    assert resp == "Fallback success response"
+    # Primary gets 15.0s timeout
+    assert captured_timeouts["gemini-3.6-flash"] == 15.0
+    # Fallback gets 10.0s capped timeout
+    assert captured_timeouts["gemini-3.5-flash"] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_gemini_multimodal_sdk_request_options_timeout(monkeypatch):
+    """Verify that multimodal generate_multimodal_response passes expected timeout to wait_for."""
+    import src.ai.gemini_client as gemini_module
+    from unittest.mock import MagicMock, AsyncMock
 
     captured_timeout = None
 
-    def fake_generative_model(model_name, **kwargs):
-        mock_model = MagicMock()
-        mock_chat = MagicMock()
+    async def mock_wait_for(fut, timeout):
+        nonlocal captured_timeout
+        if hasattr(fut, "close"):
+            fut.close()
+        captured_timeout = timeout
+        mock_resp = MagicMock()
+        mock_resp.text = '{"disease": "healthy"}'
+        return mock_resp
 
-        def fake_send_message(parts, **inner_kwargs):
-            nonlocal captured_timeout
-            req_opt = inner_kwargs.get("request_options")
-            captured_timeout = req_opt.get("timeout") if isinstance(req_opt, dict) else getattr(req_opt, "timeout", None)
-            mock_resp = MagicMock()
-            mock_resp.text = '{"disease": "healthy"}'
-            return mock_resp
+    monkeypatch.setattr(gemini_module.asyncio, "wait_for", mock_wait_for)
 
-        mock_chat.send_message = MagicMock(side_effect=fake_send_message)
-        mock_model.start_chat.return_value = mock_chat
-        return mock_model
+    mock_client = MagicMock()
+    mock_client.aio.models.generate_content = AsyncMock()
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
-    with patch("src.ai.gemini_client._ensure_initialized"), \
-         patch("google.generativeai.GenerativeModel", side_effect=fake_generative_model):
+    resp = await gemini_module.generate_multimodal_response(
+        system_prompt="Vision prompt",
+        conversation_history=[],
+        image_bytes=b"image_bytes",
+        mime_type="image/jpeg",
+        user_message="Diagnose crop",
+        timeout_seconds=15,
+    )
 
-        resp = await generate_multimodal_response(
-            system_prompt="Vision prompt",
-            conversation_history=[],
-            image_bytes=b"image_bytes",
-            mime_type="image/jpeg",
-            user_message="Diagnose crop",
-            timeout_seconds=15,
-        )
-
-        assert '{"disease": "healthy"}' in resp
-        assert captured_timeout == 15.0
+    assert '{"disease": "healthy"}' in resp
+    assert captured_timeout == 15.0
 
 
 @pytest.mark.asyncio
-async def test_gemini_blocking_rest_calls_offloaded_via_to_thread(monkeypatch):
-    """Verify that synchronous REST Gemini generation offloads blocking calls to worker threads via asyncio.to_thread."""
-    from unittest.mock import MagicMock
+async def test_gemini_async_client_nonblocking_invocation(monkeypatch):
+    """Verify that generation calls client.aio.models.generate_content asynchronously."""
     import src.ai.gemini_client as gemini_module
+    from unittest.mock import MagicMock, AsyncMock
 
-    monkeypatch.setattr(gemini_module, "_initialized", True)
-
-    to_thread_invocations = []
-    real_to_thread = gemini_module.asyncio.to_thread
-
-    async def tracking_to_thread(func, *args, **kwargs):
-        to_thread_invocations.append((func, args, kwargs))
-        return await real_to_thread(func, *args, **kwargs)
-
-    monkeypatch.setattr(gemini_module.asyncio, "to_thread", tracking_to_thread)
-
-    mock_chat = MagicMock()
+    mock_client = MagicMock()
     mock_resp = MagicMock()
-    mock_resp.text = "Thread pool offloaded response"
-    mock_chat.send_message.return_value = mock_resp
-
-    mock_model = MagicMock()
-    mock_model.start_chat.return_value = mock_chat
-
-    monkeypatch.setattr(gemini_module.genai, "GenerativeModel", MagicMock(return_value=mock_model))
+    mock_resp.text = "Async response"
+    mock_client.aio.models.generate_content = AsyncMock(return_value=mock_resp)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
 
     resp = await gemini_module.generate_response(
         system_prompt="System prompt",
@@ -1620,9 +1531,7 @@ async def test_gemini_blocking_rest_calls_offloaded_via_to_thread(monkeypatch):
         timeout_seconds=15.0,
     )
 
-    assert resp == "Thread pool offloaded response"
-    assert len(to_thread_invocations) == 1
-    func, args, kwargs = to_thread_invocations[0]
-    assert func == mock_chat.send_message
-    assert args == ("Test query",)
-    assert kwargs.get("request_options") == {"timeout": 15.0}
+    assert resp == "Async response"
+    assert mock_client.aio.models.generate_content.called
+    call_kwargs = mock_client.aio.models.generate_content.call_args.kwargs
+    assert call_kwargs["model"] == "gemini-3.6-flash"

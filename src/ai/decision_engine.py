@@ -454,7 +454,7 @@ INTENT_KEYWORDS: Dict[FarmerIntent, Dict[str, List[str]]] = {
             "how much fertilizer", "apply fertilizer", "manure", "compost", "dosage of urea", "dap dose",
         ],
         "te": [
-            "ఎరువు", "ఎరువులు", "ఏ ఎరువు వేయాలి", "ఎరువుల యాజమాన్యం", "పోషకాలు", "నత్రజని",
+            "ఎరువు", "ఎరువులు", "యూరియా", "డిఎపి", "ఎన్పీకే", "ఏ ఎరువు వేయాలి", "ఎరువుల యాజమాన్యం", "పోషకాలు", "నత్రజని",
             "భాస్వరం", "పొటాష్", "సూక్ష్మ పోషకాలు", "ఎరువుల మోతాదు", "జింక్ లోపం", "ఎరువు వాడాలి",
             "బాస్వరం", "యూరియా మోతాదు",
         ],
@@ -1063,23 +1063,19 @@ class AIDecisionEngine:
         except Exception as fmt_err:
             logger.warning(f"Multi-intent formatting warning: {fmt_err}")
 
-        # 6. Fallback Protection for Single Intent / Missing Responses
+        # 6. Fallback Protection for Missing / Incomplete Responses
         ai_response_text = ai_response_text.strip() if ai_response_text else ""
-        is_single_intent = len(intents) == 1
 
-        if is_single_intent:
-            if primary_intent == FarmerIntent.MARKET_PRICE and not any(k in ai_response_text for k in ["📊", "⚠️"]):
-                ai_response_text = get_market_fallback_response(language)
-            elif primary_intent == FarmerIntent.GOVERNMENT_SCHEMES and "🏛️" not in ai_response_text:
-                ai_response_text = get_schemes_fallback_response(language)
-            elif primary_intent == FarmerIntent.WEATHER and not any(w in ai_response_text for w in ["🌡️", "🌤️", "🌦️"]):
-                ai_response_text = get_weather_fallback_response(language)
-            elif primary_intent == FarmerIntent.SHOPS and "🏬" not in ai_response_text:
-                ai_response_text = get_shops_fallback_response(language)
-            elif primary_intent == FarmerIntent.STOCK_ALERT and not any(s in ai_response_text for s in ["🔔", "🏬", "✅", "ℹ️"]):
-                ai_response_text = "🔔 యూరియా స్టాక్ అలర్ట్ యాక్టివ్ అయింది." if language == "te" else "🔔 Stock alert has been registered."
-            elif not ai_response_text:
-                ai_response_text = get_fallback_response(language)
+        if primary_intent == FarmerIntent.MARKET_PRICE and not any(k in ai_response_text for k in ["📊", "⚠️"]):
+            ai_response_text = get_market_fallback_response(language)
+        elif primary_intent == FarmerIntent.GOVERNMENT_SCHEMES and "🏛️" not in ai_response_text:
+            ai_response_text = get_schemes_fallback_response(language)
+        elif primary_intent == FarmerIntent.WEATHER and not any(w in ai_response_text for w in ["🌡️", "🌤️", "🌦️"]):
+            ai_response_text = get_weather_fallback_response(language)
+        elif primary_intent == FarmerIntent.SHOPS and "🏬" not in ai_response_text:
+            ai_response_text = get_shops_fallback_response(language)
+        elif primary_intent == FarmerIntent.STOCK_ALERT and not any(s in ai_response_text for s in ["🔔", "🏬", "✅", "ℹ️"]):
+            ai_response_text = "🔔 యూరియా స్టాక్ అలర్ట్ యాక్టివ్ అయింది." if language == "te" else "🔔 Stock alert has been registered."
         elif not ai_response_text:
             ai_response_text = get_fallback_response(language)
 
