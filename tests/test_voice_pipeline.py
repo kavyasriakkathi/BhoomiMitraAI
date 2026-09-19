@@ -362,3 +362,112 @@ async def test_telugu_voice_dosage_query_triggers_safety_gate_when_ungrounded():
 
         # Must be in Telugu and mention AEO / KVK
         assert "AEO" in resp.response_text or "KVK" in resp.response_text or "వ్యవసాయ విస్తరణ అధికారి" in resp.response_text
+
+
+# =============================================================================
+# 5. Meta WhatsApp Media Download & Pipeline Edge Case Tests
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_download_media_bytes_missing_token_returns_none():
+    """Verify download_media_bytes fails safely and returns None when WHATSAPP_API_TOKEN is unconfigured."""
+    from src.gateway.whatsapp_client import download_media_bytes
+
+    with patch("src.gateway.whatsapp_client.get_settings") as mock_settings:
+        mock_settings.return_value.whatsapp_api_token = ""
+        result = await download_media_bytes("media_test_123")
+        assert result is None
+
+
+@pytest.mark.asyncio
+async def test_download_media_bytes_metadata_404_returns_none():
+    """Verify download_media_bytes handles Meta metadata 404 cleanly."""
+    from src.gateway.whatsapp_client import download_media_bytes
+    import httpx
+
+    with patch("src.gateway.whatsapp_client.get_settings") as mock_settings:
+        mock_settings.return_value.whatsapp_api_token = "mock_token"
+        mock_settings.return_value.whatsapp_api_timeout_seconds = 5.0
+        mock_settings.return_value.max_media_download_bytes = 15_000_000
+
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 404
+        mock_resp.text = '{"error": {"message": "Not Found"}}'
+
+        with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+            result = await download_media_bytes("media_missing_404")
+            assert result is None
+
+
+@pytest.mark.asyncio
+async def test_download_media_bytes_successful_resolution_and_download():
+    """Verify download_media_bytes resolves URL and returns bytes with correct MIME type."""
+    from src.gateway.whatsapp_client import download_media_bytes
+    import httpx
+
+    with patch("src.gateway.whatsapp_client.get_settings") as mock_settings:
+        mock_settings.return_value.whatsapp_api_token = "mock_token"
+        mock_settings.return_value.whatsapp_api_timeout_seconds = 5.0
+        mock_settings.return_value.max_media_download_bytes = 15_000_000
+
+        mock_meta_resp = MagicMock(spec=httpx.Response)
+        mock_meta_resp.status_code = 200
+        mock_meta_resp.json.return_value = {
+            "url": "https://lookaside.fbsbx.com/whatsapp_business/attachments/audio.ogg",
+            "mime_type": "audio/ogg; codecs=opus",
+        }
+
+        mock_bin_resp = MagicMock(spec=httpx.Response)
+        mock_bin_resp.status_code = 200
+        mock_bin_resp.content = b"OggS_mock_audio_content"
+
+        async def mock_get(url, headers=None, **kwargs):
+            if "lookaside" in url:
+                return mock_bin_resp
+            return mock_meta_resp
+
+        with patch("httpx.AsyncClient.get", side_effect=mock_get):
+            res = await download_media_bytes("media_valid_123")
+            assert res is not None
+            raw_bytes, mime = res
+            assert raw_bytes == b"OggS_mock_audio_content"
+            assert mime == "audio/ogg; codecs=opus"
+
+
+@pytest.mark.asyncio
+async def test_voice_pipeline_missing_media_id_triggers_voice_fallback():
+    """Verify that an audio message with no media_id returns the voice fallback immediately."""
+    mock_db = AsyncMock()
+    mock_db_cm = MagicMock()
+    mock_db_cm.__aenter__.return_value = mock_db
+    mock_db_cm.__aexit__.return_value = None
+
+    mock_farmer = MagicMock(spec=Farmer)
+    mock_farmer.id = uuid4()
+    mock_farmer.phone_number = "919876543210"
+    mock_farmer.preferred_language = "te"
+
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543210",
+        message_id="wamid.NO_MEDIA_ID_01",
+        timestamp="1700000000",
+        message_type="audio",
+        media_id=None,
+    )
+
+    sent_message_text = None
+
+    async def mock_send(to_phone, message_text, **kwargs):
+        nonlocal sent_message_text
+        sent_message_text = message_text
+        return "wamid.OUT_NO_MEDIA_OK"
+
+    with patch("src.gateway.service.AsyncSessionLocal", return_value=mock_db_cm), \
+         patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=False), \
+         patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock, return_value=mock_farmer), \
+         patch("src.gateway.service.send_text_message", side_effect=mock_send), \
+         patch("src.gateway.service.mark_message_as_read", new_callable=AsyncMock):
+
+        await process_message_pipeline(parsed)
+
+        assert sent_message_text == VOICE_FAILURE_RESPONSES["te"]

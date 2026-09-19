@@ -73,7 +73,7 @@ async def get_or_create_farmer(
         return farmer
 
     # New farmer — create Farmer + empty Profile
-    farmer = Farmer(phone_number=phone_number)
+    farmer = Farmer(phone_number=phone_number, preferred_language="te")
     db.add(farmer)
     try:
         await db.commit()
@@ -82,7 +82,6 @@ async def get_or_create_farmer(
         profile = FarmerProfile(
             farmer_id=farmer.id,
             full_name=sender_name,
-            preferred_language="te",  # Default to Telugu
         )
         db.add(profile)
         await db.commit()
@@ -235,18 +234,28 @@ async def process_message_pipeline(
             # ── STAGE 4: Audio STT (if needed) ────────────────────────
             if parsed.message_type == "audio":
                 t_stt_start = time.time()
+                logger.info(
+                    f"[VOICE PIPELINE START] msg_id={parsed.message_id} "
+                    f"media_id={parsed.media_id} mime_type={parsed.media_mime_type}"
+                )
                 if not parsed.media_id:
                     logger.warning(f"STAGE 4: Audio message received with missing media_id for farmer {farmer.id}")
                     ai_response = get_voice_fallback_response(pref_lang)
                 else:
-                    logger.info("STAGE 4: Audio download and STT transcription started")
+                    logger.info(f"[VOICE MEDIA DOWNLOAD START] media_id={parsed.media_id}")
                     try:
                         media_result = await download_media_bytes(parsed.media_id)
                         if not media_result:
+                            logger.error(f"[VOICE MEDIA DOWNLOAD FAILED] media_id={parsed.media_id}")
                             logger.error(f"[PIPELINE STAGE FAILED: Stage 4 - Audio Download] Failed to download media ID: {parsed.media_id}")
                             ai_response = get_voice_fallback_response(pref_lang)
                         else:
                             audio_bytes, mime_type = media_result
+                            logger.info(
+                                f"[VOICE MEDIA DOWNLOAD SUCCESS] media_id={parsed.media_id} "
+                                f"bytes={len(audio_bytes)} mime_type={mime_type}"
+                            )
+                            logger.info("[VOICE STT START]")
                             lang_service = get_language_service()
                             transcription = await lang_service.transcribe_audio(audio_bytes, mime_type)
                             if not transcription or not transcription.transcription_text or not transcription.transcription_text.strip():
@@ -257,11 +266,20 @@ async def process_message_pipeline(
                                 conversation.user_message = parsed.text_content
                                 db.add(conversation)
                                 await db.commit()
+                                logger.info(
+                                    f"[VOICE STT SUCCESS] language={transcription.detected_language} "
+                                    f"confidence={transcription.confidence} "
+                                    f"transcript_length={len(parsed.text_content)}"
+                                )
                                 logger.info(f"STAGE 4: Audio transcribed successfully: '{parsed.text_content[:100]}...'")
                     except Exception as stt_err:
                         underlying_cause = getattr(stt_err, "__cause__", None) or stt_err
                         cause_type = type(underlying_cause).__name__
                         cause_reason = str(underlying_cause).strip()
+                        logger.error(
+                            f"[VOICE STT FAILED] exception_type={cause_type} "
+                            f"status={getattr(stt_err, 'status_code', 'N/A')} reason={cause_reason}"
+                        )
                         logger.error(
                             f"[PIPELINE STAGE FAILED: Stage 4 - Audio STT] Media ID: {parsed.media_id} | "
                             f"Cause: {cause_type} | Reason: {cause_reason}"
@@ -277,6 +295,7 @@ async def process_message_pipeline(
 
             if not ai_response:
                 t_ai_start = time.time()
+                logger.info(f"[VOICE AI START] Language={active_lang}")
                 logger.info(f"STAGE 5: Generating AI response (Language: {active_lang})")
                 try:
                     if parsed.message_type == "image":
@@ -308,8 +327,12 @@ async def process_message_pipeline(
                         logger.warning(f"STAGE 5: AI generated no text response for farmer {farmer.id}. Using safe fallback.")
                         ai_response = get_fallback_response(active_lang)
                     else:
+                        if parsed.message_type == "audio":
+                            logger.info(f"[VOICE AI SUCCESS] Response length={len(ai_response)} chars")
                         logger.info(f"STAGE 5: AI response generated ({len(ai_response)} chars): {ai_response[:120]}...")
                 except Exception as ai_err:
+                    if parsed.message_type == "audio":
+                        logger.error(f"[VOICE AI FAILED] error={ai_err}")
                     logger.exception(
                         f"[PIPELINE STAGE FAILED: Stage 5 - AI Processing] "
                         f"Farmer ID: {farmer.id}, Message Type: {parsed.message_type}, Text: '{parsed.text_content}', Error: {ai_err}"
@@ -417,6 +440,11 @@ async def process_message_pipeline(
 
             total_pipeline_time = time.time() - pipeline_start
             logger.info("=" * 80)
+            if parsed.message_type == "audio":
+                logger.info(
+                    f"[VOICE PIPELINE COMPLETE] msg_id={parsed.message_id} "
+                    f"total={total_pipeline_time:.2f}s (stt={t_stt:.2f}s ai={t_ai:.2f}s outbound={t_outbound:.2f}s)"
+                )
             logger.info(
                 f"[PIPELINE TIMING] msg={parsed.message_id} phone={mask_phone_number(parsed.phone_number)} "
                 f"total={total_pipeline_time:.2f}s (db={t_db:.2f}s stt={t_stt:.2f}s ai={t_ai:.2f}s outbound={t_outbound:.2f}s)"

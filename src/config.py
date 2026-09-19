@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # Speech-to-Text
     stt_provider: str = Field(default="google")
     stt_default_language: str = Field(default="te-IN")
-    stt_api_timeout_seconds: float = Field(default=10.0)
+    stt_api_timeout_seconds: float = Field(default=15.0)
 
     # Text-to-Speech
     enable_voice_responses: bool = Field(default=False)

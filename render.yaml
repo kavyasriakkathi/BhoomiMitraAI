@@ -26,6 +26,8 @@ services:
         value: "false"
       - key: ENABLE_VOICE_RESPONSES
         value: "true"
+      - key: STT_API_TIMEOUT_SECONDS
+        value: "15.0"
       - key: RAZORPAY_KEY_ID
         sync: false
       - key: RAZORPAY_KEY_SECRET

@@ -299,7 +299,7 @@ class LanguageService:
 
             call_res = self.google_client.recognize(config=config, audio=audio)
             if inspect.isawaitable(call_res):
-                stt_timeout = float(getattr(self.settings, "stt_api_timeout_seconds", 10.0))
+                stt_timeout = float(getattr(self.settings, "stt_api_timeout_seconds", 15.0))
                 response = await asyncio.wait_for(call_res, timeout=stt_timeout)
             else:
                 response = call_res
@@ -334,7 +334,7 @@ class LanguageService:
         except BhoomiMitraException:
             raise
         except (asyncio.TimeoutError, TimeoutError) as te:
-            logger.warning(f"Google STT API timed out after {getattr(self.settings, 'stt_api_timeout_seconds', 10.0)}s: {te}")
+            logger.warning(f"Google STT API timed out after {getattr(self.settings, 'stt_api_timeout_seconds', 15.0)}s: {te}")
             raise BhoomiMitraException("Google STT API timed out.", status_code=504) from te
         except Exception as e:
             err_type = type(e).__name__

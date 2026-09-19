@@ -428,11 +428,15 @@ async def download_media_bytes(media_id: str) -> Optional[tuple[bytes, str]]:
     wa_timeout = float(getattr(settings, "whatsapp_api_timeout_seconds", 15.0))
     max_media_bytes = int(getattr(settings, "max_media_download_bytes", 15_728_640))
 
+    logger.info(f"[WHATSAPP MEDIA START] media_id={media_id}")
+
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             async with httpx.AsyncClient(timeout=wa_timeout) as client:
                 response = await client.get(resolve_url, headers=headers)
                 
+            logger.info(f"[WHATSAPP MEDIA] media_id={media_id} metadata request status={response.status_code}")
+
             if response.status_code == 200:
                 data = response.json()
                 media_url = data.get("url")
@@ -440,7 +444,7 @@ async def download_media_bytes(media_id: str) -> Optional[tuple[bytes, str]]:
                 break
                 
             if response.status_code == 404:
-                logger.error(f"Media {media_id} not found or expired.")
+                logger.error(f"[WHATSAPP MEDIA] Media {media_id} not found or expired (HTTP 404).")
                 return None
                 
             if response.status_code == 429:
@@ -448,7 +452,7 @@ async def download_media_bytes(media_id: str) -> Optional[tuple[bytes, str]]:
                 await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
                 continue
                 
-            logger.error(f"Failed to resolve media {media_id}: HTTP {response.status_code} - {response.text}")
+            logger.error(f"[WHATSAPP MEDIA] Failed to resolve media {media_id}: HTTP {response.status_code} - {response.text}")
             return None
             
         except httpx.TimeoutException:
@@ -458,11 +462,11 @@ async def download_media_bytes(media_id: str) -> Optional[tuple[bytes, str]]:
                 continue
             return None
         except Exception as e:
-            logger.exception(f"Unexpected error resolving media {media_id}: {e}")
+            logger.exception(f"[WHATSAPP MEDIA] Unexpected error resolving media {media_id}: {e}")
             return None
 
     if not media_url:
-        logger.error(f"Failed to resolve media URL for {media_id} after {MAX_RETRIES} attempts.")
+        logger.error(f"[WHATSAPP MEDIA] Failed to resolve media URL for {media_id} after {MAX_RETRIES} attempts.")
         return None
 
     # Step 2: Download Binary Data
@@ -473,15 +477,20 @@ async def download_media_bytes(media_id: str) -> Optional[tuple[bytes, str]]:
                 # Meta requires the Bearer token even for the direct media URL download
                 media_response = await client.get(media_url, headers=headers)
                 
+            logger.info(f"[WHATSAPP MEDIA] media_id={media_id} media download status={media_response.status_code}")
+
             if media_response.status_code == 200:
                 payload_len = len(media_response.content)
                 if payload_len > max_media_bytes:
                     logger.warning(
-                        f"Media payload size ({payload_len} bytes) exceeds configured safety limit "
+                        f"[WHATSAPP MEDIA] Media payload size ({payload_len} bytes) exceeds configured safety limit "
                         f"({max_media_bytes} bytes) for media {media_id}. Aborting download."
                     )
                     return None
-                logger.info(f"Successfully downloaded media {media_id} ({payload_len} bytes)")
+                logger.info(
+                    f"[WHATSAPP MEDIA SUCCESS] media_id={media_id} "
+                    f"downloaded_bytes={payload_len} mime_type={mime_type}"
+                )
                 return media_response.content, mime_type
                 
             if media_response.status_code == 429:
@@ -489,7 +498,7 @@ async def download_media_bytes(media_id: str) -> Optional[tuple[bytes, str]]:
                 await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
                 continue
                 
-            logger.error(f"Failed to download media bytes for {media_id}: HTTP {media_response.status_code}")
+            logger.error(f"[WHATSAPP MEDIA] Failed to download media bytes for {media_id}: HTTP {media_response.status_code}")
             return None
             
         except httpx.TimeoutException:
@@ -499,10 +508,10 @@ async def download_media_bytes(media_id: str) -> Optional[tuple[bytes, str]]:
                 continue
             return None
         except Exception as e:
-            logger.exception(f"Unexpected error downloading media {media_id}: {e}")
+            logger.exception(f"[WHATSAPP MEDIA] Unexpected error downloading media {media_id}: {e}")
             return None
 
-    logger.error(f"Failed to download media bytes for {media_id} after {MAX_RETRIES} attempts.")
+    logger.error(f"[WHATSAPP MEDIA] Failed to download media bytes for {media_id} after {MAX_RETRIES} attempts.")
     return None
 
 

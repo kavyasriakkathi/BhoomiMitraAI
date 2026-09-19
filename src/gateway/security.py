@@ -58,13 +58,10 @@ async def verify_webhook_signature(request: Request, body_bytes: bytes = None) -
     if hmac.compare_digest(signature_header, expected_signature):
         logger.info("Webhook X-Hub-Signature-256 verified successfully.")
         return True
-    else:
-        logger.error(
-            f"[SECURITY ERROR] Webhook signature verification FAILED!\n"
-            f"  Client IP         : {client_ip}\n"
-            f"  Received Header   : {signature_header}\n"
-            f"  Expected Signature: {expected_signature}"
-        )
-        return False
+
+    logger.error(
+        f"[SECURITY ERROR] Webhook signature verification FAILED! Signature mismatch from IP {client_ip}."
+    )
+    return False
 
     
