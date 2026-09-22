@@ -5,6 +5,7 @@ FastAPI dependency injection utilities for authentication and Role-Based Access 
 from typing import Callable, Optional
 from uuid import UUID
 from fastapi import Depends, Request
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.constants import UserRole
@@ -14,6 +15,8 @@ from src.config import get_settings
 from src.core.database import get_db
 from src.core.exceptions import BhoomiMitraException
 from src.core.models import UserAccount
+
+security = HTTPBearer(auto_error=False)
 
 
 def get_auth_repository(db: AsyncSession = Depends(get_db)) -> AuthRepository:
@@ -28,21 +31,15 @@ def get_auth_service(
     return AuthService(repo)
 
 
-def get_token_from_request(request: Request) -> Optional[str]:
-    """
-    Extract authentication token from Authorization Bearer header or HttpOnly cookie.
-    Bearer header takes precedence for API clients; cookie is used for web browser sessions.
-    """
+def get_token_from_request(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Optional[str]:
+    """Extract authentication token from Bearer header or HttpOnly cookie."""
+    if credentials:
+        return credentials.credentials
+
     settings = get_settings()
-
-    # Check Authorization header: "Bearer <token>"
-    auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header[7:].strip()
-        if token:
-            return token
-
-    # Check HttpOnly cookie
     cookie_token = request.cookies.get(settings.auth_cookie_name)
     if cookie_token:
         return cookie_token
