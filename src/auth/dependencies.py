@@ -36,7 +36,7 @@ def get_token_from_request(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> Optional[str]:
     """Extract authentication token from Bearer header or HttpOnly cookie."""
-    if credentials:
+    if isinstance(credentials, HTTPAuthorizationCredentials):
         return credentials.credentials
 
     settings = get_settings()
