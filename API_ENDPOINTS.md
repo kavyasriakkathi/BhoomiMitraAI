@@ -1,5 +1,17 @@
 # BhoomiMitra AI — API Endpoints
 
+## API Statistics
+
+| Method | Count |
+|--------|------:|
+| GET | 63 |
+| POST | 27 |
+| PUT | 11 |
+| DELETE | 11 |
+| PATCH | 3 |
+| HEAD | 3 |
+| **Total** | **118** |
+
 ## Authentication
 - POST /auth/register
 - POST /auth/login
@@ -53,7 +65,7 @@
 - GET /advisories/{advisory_id}
 - PUT /advisories/{advisory_id}
 - DELETE /advisories/{advisory_id}
-
+cc
 ## Shops
 - POST /shops
 - GET /shops
