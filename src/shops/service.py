@@ -727,10 +727,9 @@ async def enrich_response_with_shops(
     language = detect_language(query_text, fallback=farmer_lang)
     labels = get_shops_labels(language)
 
-    # Step 4: Fetch matching shops from DB (auto-seed defaults if empty)
+    # Step 4: Fetch matching shops from DB (no auto-seeding in production)
     try:
         shop_repo = ShopRepository(db)
-        await shop_repo.seed_default_shops_if_empty()
         matches = await shop_repo.search_shops_by_product(matched_product, only_available=False)
     except Exception as db_err:
         logger.warning(f"[ENRICH SHOPS] DB query failed: {db_err}")
@@ -837,8 +836,8 @@ async def enrich_response_with_shops(
         ]
         if getattr(item, "last_updated", None):
             v_date = item.last_updated.strftime("%d-%m-%Y")
-            verified_label = labels.get("verified_on", "Verified")
-            lines.append(f"  🕒 {verified_label}: {v_date}")
+            updated_label = labels.get("last_updated", "Last updated")
+            lines.append(f"  🕒 {updated_label}: {v_date}")
         shop_entries.append("\n".join(lines))
 
     header_parts = [labels["title"]]
