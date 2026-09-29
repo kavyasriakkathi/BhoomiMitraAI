@@ -660,3 +660,128 @@ async def test_farmer_voice_korutla_stock_query_end_to_end():
         mock_upload.assert_awaited_once_with(b"OggS_grounded_stock_audio", mime_type="audio/ogg")
         mock_send_audio.assert_awaited_once_with("919848099887", "meta_audio_korutla")
 
+
+@pytest.mark.asyncio
+async def test_voice_message_generates_text_and_audio_with_default_settings():
+    """Verify voice message generates text AND audio out-of-the-box with default application Settings."""
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543220",
+        message_id="wamid.VOICE_DEF_01",
+        timestamp="1700000000",
+        message_type="audio",
+        media_id="audio_media_def",
+    )
+    mock_farmer = Farmer(id=uuid4(), phone_number="919876543220", preferred_language="te")
+    mock_conv = Conversation(id=uuid4(), farmer_id=mock_farmer.id, message_id=parsed.message_id, user_message=None, user_message_type="audio")
+    mock_db_cm = _setup_voice_mocks(mock_farmer, mock_conv)
+
+    with patch("src.gateway.service.AsyncSessionLocal", return_value=mock_db_cm), \
+         patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=False), \
+         patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock, return_value=mock_farmer), \
+         patch("src.gateway.service.store_incoming_message", new_callable=AsyncMock, return_value=mock_conv), \
+         patch("src.gateway.service.download_media_bytes", new_callable=AsyncMock, return_value=(b"audio_bytes", "audio/ogg")), \
+         patch("src.gateway.service.get_language_service") as mock_lang_svc, \
+         patch("src.gateway.service.process_text_message", new_callable=AsyncMock, return_value="వరి సలహా సమాధానం"), \
+         patch("src.gateway.service.send_text_message", new_callable=AsyncMock, return_value="wamid.OUT_TEXT_DEF") as mock_send_text, \
+         patch("src.gateway.service.upload_media_bytes", new_callable=AsyncMock, return_value="meta_audio_def") as mock_upload, \
+         patch("src.gateway.service.send_audio_message", new_callable=AsyncMock, return_value="wamid.OUT_AUDIO_DEF") as mock_send_audio, \
+         patch("src.gateway.service.mark_message_as_read", new_callable=AsyncMock):
+
+        mock_lang_svc.return_value.transcribe_audio = AsyncMock(
+            return_value=TranscriptionResponse(provider_used="google", transcription_text="వరి గురించి చెప్పండి", detected_language="te")
+        )
+        mock_lang_svc.return_value.synthesize_speech = AsyncMock(return_value=[b"OggS_default_audio"])
+
+        # No mock on get_settings: uses default Settings()
+        await process_message_pipeline(parsed)
+
+        # Both text and audio must be dispatched
+        mock_send_text.assert_awaited_once_with(to_phone="919876543220", message_text="వరి సలహా సమాధానం")
+        mock_lang_svc.return_value.synthesize_speech.assert_awaited_once_with("వరి సలహా సమాధానం", "te")
+        mock_upload.assert_awaited_once_with(b"OggS_default_audio", mime_type="audio/ogg")
+        mock_send_audio.assert_awaited_once_with("919876543220", "meta_audio_def")
+
+
+@pytest.mark.asyncio
+async def test_audio_upload_failure_preserves_text_delivery():
+    """If Meta media upload fails, text delivery must remain successful and fail-soft."""
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543221",
+        message_id="wamid.VOICE_FAIL_UPLOAD_01",
+        timestamp="1700000000",
+        message_type="audio",
+        media_id="audio_media_upload_fail",
+    )
+    mock_farmer = Farmer(id=uuid4(), phone_number="919876543221", preferred_language="te")
+    mock_conv = Conversation(id=uuid4(), farmer_id=mock_farmer.id, message_id=parsed.message_id, user_message=None, user_message_type="audio")
+    mock_db_cm = _setup_voice_mocks(mock_farmer, mock_conv)
+
+    with patch("src.gateway.service.AsyncSessionLocal", return_value=mock_db_cm), \
+         patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=False), \
+         patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock, return_value=mock_farmer), \
+         patch("src.gateway.service.store_incoming_message", new_callable=AsyncMock, return_value=mock_conv), \
+         patch("src.gateway.service.download_media_bytes", new_callable=AsyncMock, return_value=(b"audio_bytes", "audio/ogg")), \
+         patch("src.gateway.service.get_language_service") as mock_lang_svc, \
+         patch("src.gateway.service.process_text_message", new_callable=AsyncMock, return_value="సరైన మోతాదు సలహా"), \
+         patch("src.gateway.service.send_text_message", new_callable=AsyncMock, return_value="wamid.OUT_TEXT_DELIVERED") as mock_send_text, \
+         patch("src.gateway.service.upload_media_bytes", new_callable=AsyncMock, side_effect=RuntimeError("Meta media upload timeout")) as mock_upload, \
+         patch("src.gateway.service.send_audio_message", new_callable=AsyncMock) as mock_send_audio, \
+         patch("src.gateway.service.mark_message_as_read", new_callable=AsyncMock):
+
+        mock_lang_svc.return_value.transcribe_audio = AsyncMock(
+            return_value=TranscriptionResponse(provider_used="google", transcription_text="సలహా కావాలి", detected_language="te")
+        )
+        mock_lang_svc.return_value.synthesize_speech = AsyncMock(return_value=[b"OggS_audio_chunk"])
+
+        # Pipeline must not raise exception
+        await process_message_pipeline(parsed)
+
+        # Text was delivered successfully
+        mock_send_text.assert_awaited_once_with(to_phone="919876543221", message_text="సరైన మోతాదు సలహా")
+        mock_upload.assert_awaited_once()
+        mock_send_audio.assert_not_called()
+        # Conversation delivery status is sent because text was delivered
+        assert mock_conv.delivery_status == "sent"
+        assert mock_conv.outbound_message_id == "wamid.OUT_TEXT_DELIVERED"
+
+
+@pytest.mark.asyncio
+async def test_tts_does_not_call_gemini_again():
+    """Verify that the TTS stage does NOT call Gemini or generate another script."""
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543222",
+        message_id="wamid.VOICE_NO_EXTRA_GEMINI_01",
+        timestamp="1700000000",
+        message_type="audio",
+        media_id="audio_media_no_gemini",
+    )
+    mock_farmer = Farmer(id=uuid4(), phone_number="919876543222", preferred_language="te")
+    mock_conv = Conversation(id=uuid4(), farmer_id=mock_farmer.id, message_id=parsed.message_id, user_message=None, user_message_type="audio")
+    mock_db_cm = _setup_voice_mocks(mock_farmer, mock_conv)
+
+    with patch("src.gateway.service.AsyncSessionLocal", return_value=mock_db_cm), \
+         patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=False), \
+         patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock, return_value=mock_farmer), \
+         patch("src.gateway.service.store_incoming_message", new_callable=AsyncMock, return_value=mock_conv), \
+         patch("src.gateway.service.download_media_bytes", new_callable=AsyncMock, return_value=(b"audio_bytes", "audio/ogg")), \
+         patch("src.gateway.service.get_language_service") as mock_lang_svc, \
+         patch("src.gateway.service.process_text_message", new_callable=AsyncMock, return_value="వరి లో ఎరువుల మోతాదు వివరాలు") as mock_process_text, \
+         patch("src.gateway.service.send_text_message", new_callable=AsyncMock, return_value="wamid.OUT_TEXT_GEM") as mock_send_text, \
+         patch("src.gateway.service.upload_media_bytes", new_callable=AsyncMock, return_value="meta_audio_gem"), \
+         patch("src.gateway.service.send_audio_message", new_callable=AsyncMock, return_value="wamid.OUT_AUDIO_GEM"), \
+         patch("src.gateway.service.mark_message_as_read", new_callable=AsyncMock), \
+         patch("src.ai.service.AIService.generate_ai_response", new_callable=AsyncMock) as mock_gemini_call:
+
+        mock_lang_svc.return_value.transcribe_audio = AsyncMock(
+            return_value=TranscriptionResponse(provider_used="google", transcription_text="వరికి ఎరువుల సలహా", detected_language="te")
+        )
+        mock_lang_svc.return_value.synthesize_speech = AsyncMock(return_value=[b"OggS_tts_audio"])
+
+        await process_message_pipeline(parsed)
+
+        # process_text_message called once for the text response
+        assert mock_process_text.await_count == 1
+        # Gemini was NOT called during or after the text stage by TTS
+        mock_gemini_call.assert_not_called()
+        # TTS received the exact string from process_text_message
+        mock_lang_svc.return_value.synthesize_speech.assert_awaited_once_with("వరి లో ఎరువుల మోతాదు వివరాలు", "te")

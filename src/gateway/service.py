@@ -23,7 +23,7 @@ from src.gateway.whatsapp_client import (
     upload_media_bytes,
     send_audio_message,
 )
-from src.config import get_settings
+from src.config import get_settings, Settings
 from src.language.dependencies import get_language_service
 from src.ai.service import process_text_message, process_image_message, _finalize_whatsapp_response
 from src.ai.prompts import (
@@ -374,28 +374,82 @@ async def process_message_pipeline(
 
             # ── STAGE 6B: Outbound Voice Note Send (Voice-In -> Voice-Out) ──
             settings = get_settings()
-            if getattr(settings, "enable_voice_responses", False) and parsed.message_type == "audio":
-                logger.info(f"STAGE 6B: Voice response enabled for audio input. Synthesizing TTS (Language: {active_lang})")
+
+            # Voice responses are dispatched for incoming audio messages (Voice-In -> Voice-Out).
+            # Active by default unless explicitly disabled (enable_voice_responses=False).
+            voice_flag = getattr(settings, "enable_voice_responses", None)
+            is_explicitly_disabled = (
+                voice_flag is False
+                if not isinstance(settings, Settings)
+                else (
+                    "enable_voice_responses" in getattr(settings, "model_fields_set", set())
+                    and settings.enable_voice_responses is False
+                )
+            )
+            should_send_voice = (parsed.message_type == "audio") and not is_explicitly_disabled
+
+            if should_send_voice:
+                from src.language.languages import get_language
+                lang_meta = get_language(active_lang)
+                tts_lang_code = lang_meta.tts_code if lang_meta and lang_meta.tts_code else f"{active_lang}-IN"
+
+                logger.info(
+                    f"[VOICE TTS START]\n"
+                    f"  language={tts_lang_code}\n"
+                    f"  text_length={len(ai_response)}"
+                )
                 try:
                     lang_service = get_language_service()
+                    # Synthesize speech using the exact same ai_response already delivered as text
                     audio_chunks = await lang_service.synthesize_speech(ai_response, active_lang)
                     if audio_chunks:
-                        # Single-chunk or Option C fallback for multi-chunk:
-                        # Send primary audio chunk; do NOT raw-concatenate OGG bytes. Complete text was already delivered.
                         primary_audio_chunk = audio_chunks[0]
-                        media_id = await upload_media_bytes(primary_audio_chunk, mime_type="audio/ogg")
-                        if media_id:
-                            audio_msg_id = await send_audio_message(parsed.phone_number, media_id)
-                            if audio_msg_id:
-                                logger.info(f"STAGE 6B: Outbound voice note delivered successfully. Voice Meta ID = {audio_msg_id}")
+                        mime_type = "audio/ogg"
+                        logger.info(
+                            f"[VOICE TTS SUCCESS]\n"
+                            f"  audio_bytes={len(primary_audio_chunk)}\n"
+                            f"  mime_type={mime_type}"
+                        )
+
+                        logger.info("[VOICE AUDIO UPLOAD START]")
+                        try:
+                            media_id = await upload_media_bytes(primary_audio_chunk, mime_type=mime_type)
+                            if media_id:
+                                masked_media = media_id[:6] + "..." if len(media_id) > 6 else media_id
+                                logger.info(
+                                    f"[VOICE AUDIO UPLOAD SUCCESS]\n"
+                                    f"  media_id={masked_media}"
+                                )
+
+                                logger.info("[VOICE AUDIO SEND START]")
+                                audio_msg_id = await send_audio_message(parsed.phone_number, media_id)
+                                if audio_msg_id:
+                                    logger.info(f"[VOICE AUDIO SEND SUCCESS] audio_msg_id={audio_msg_id}")
+                                else:
+                                    logger.warning(
+                                        "[VOICE AUDIO FAIL-SOFT]\n"
+                                        "  reason=send_audio_message returned None; text response already delivered"
+                                    )
                             else:
-                                logger.warning("STAGE 6B: Audio message send returned None; text response already delivered.")
-                        else:
-                            logger.warning("STAGE 6B: Media upload returned None; text response already delivered.")
+                                logger.warning(
+                                    "[VOICE AUDIO FAIL-SOFT]\n"
+                                    "  reason=upload_media_bytes returned None; text response already delivered"
+                                )
+                        except Exception as upload_send_err:
+                            logger.warning(
+                                f"[VOICE AUDIO FAIL-SOFT]\n"
+                                f"  reason={upload_send_err}"
+                            )
                     else:
-                        logger.info(f"STAGE 6B: TTS returned no audio chunks (unsupported or fallback language '{active_lang}'); text response already delivered.")
-                except Exception as voice_err:
-                    logger.warning(f"STAGE 6B: Outbound voice note dispatch encountered safe failure: {voice_err}")
+                        logger.warning(
+                            f"[VOICE TTS FAIL-SOFT]\n"
+                            f"  reason=TTS returned no audio chunks for language '{active_lang}'; text response already delivered"
+                        )
+                except Exception as tts_err:
+                    logger.warning(
+                        f"[VOICE TTS FAIL-SOFT]\n"
+                        f"  reason={tts_err}"
+                    )
 
             # ── STAGE 7: Database Delivery Status Update ──────────────
             if conversation:
