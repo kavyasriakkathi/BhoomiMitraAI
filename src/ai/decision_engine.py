@@ -328,6 +328,8 @@ INTENT_KEYWORDS: Dict[FarmerIntent, Dict[str, List[str]]] = {
             "urea stock", "is urea in stock", "dap stock", "fertilizer stock", "stock undha",
             "stock unda", "stock undhi", "stock undi", "urea stock undi", "urea in stock",
             "in stock", "stock availability", "urea available", "stock available",
+            "is urea available", "is dap available", "is fertilizer available",
+            "available in", "is available", "available near", "where is urea available",
         ],
         "te": [
             "ఎక్కడ దొరుకుతుంది", "ఎక్కడ కొనాలి", "సమీప దుకాణాలు", "ఎరువుల దుకాణం", "మందుల షాపు",
@@ -335,18 +337,21 @@ INTENT_KEYWORDS: Dict[FarmerIntent, Dict[str, List[str]]] = {
             "దుకాణాలు", "షాపులు", "దొరికే చోటు",
             "యూరియా స్టాక్", "స్టాక్ ఉందా", "స్టాక్ ఉంది", "యూరియా ఉందా", "స్టాక్ లభ్యత", "లభ్యత", "ఎరువుల స్టాక్", "యూరియా లభిస్తుందా",
             "యూరియా దొరుకుతుందా", "యూరియా లభ్యం", "స్టాక్ లభ్యం",
+            "అందుబాటులో ఉందా", "అందుబాటులో ఉంది", "అందుబాటు", "లభ్యతగా ఉందా", "లభ్యత ఉందా",
+            "ఉందా లేదా", "యూరియా అందుబాటులో ఉందా", "యూరియా ఉందా లేదా", "లభిస్తుందా లేదా", "దొరుకుతుందా లేదా",
         ],
         "hi": [
             "दुकान", "कहाँ मिलेगा", "कहाँ से खरीदें", "खाद की दुकान", "दवा की दुकान", "डीलर",
             "कहाँ उपलब्ध", "बीज भंडार", "कृषि सेवा केंद्र", "दुकान कहाँ",
+            "उपलब्ध है या नहीं", "उपलब्ध है", "स्टॉक है या नहीं", "स्टॉक है", "यूरिया उपलब्ध है", "यूरिया स्टॉक",
         ],
         "ta": [
             "எங்கு கிடைக்கும்", "எங்கு வாங்கலாம்", "உரக்கடை", "மருந்துக்கடை", "அருகிலுள்ள கடை",
-            "டீலர்", "விற்பனை நிலையம்", "கடை எங்கு",
+            "டீலர்", "விற்பனை நிலையம்", "கடை எங்கு", "இருப்பில் உள்ளதா", "கிடைக்குமா",
         ],
         "kn": [
             "ಎಲ್ಲಿ ಸಿಗುತ್ತದೆ", "ಎಲ್ಲಿ ಖರೀದಿಸಬೇಕು", "ಗೊಬ್ಬರದ ಅಂಗಡಿ", "ಔಷಧಿ ಅಂಗಡಿ", "ಹತ್ತಿರದ ಅಂಗಡಿ",
-            "ಡೀಲರ್", "ಕೃಷಿ ಕೇಂದ್ರ", "ಅಂಗಡಿ ಎಲ್ಲಿ",
+            "ಡೀಲರ್", "ಕೃಷಿ ಕೇಂದ್ರ", "ಅಂಗಡಿ ಎಲ್ಲಿ", "ಲಭ್ಯವಿದೆಯೇ", "ಸ್ಟಾಕ್ ಇದೆಯೇ",
         ],
         "ml": [
             "എവിടെ ലഭിക്കും", "എവിടെ വാങ്ങാം", "വളക്കട", "കീടനാശിനി കട", "സമീപത്തെ കട",
@@ -391,6 +396,13 @@ INTENT_KEYWORDS: Dict[FarmerIntent, Dict[str, List[str]]] = {
             "stock vundha", "stock vunda", "stock vundi", "stock vundhi",
             "urea stock undi", "urea stock unda", "urea stock undha", "urea stock undhi",
             "urea stock vunda", "urea stock vundha", "urea stock vundi", "urea stock vundhi",
+            "available ga undha", "available ga unda", "available ga undhi", "available ga undi",
+            "available ga undha ledha", "available ga unda leda",
+            "available undha", "available unda", "available undhi", "available undi",
+            "available ga vundha", "available ga vunda", "available vundha", "available vunda",
+            "undha ledha", "unda leda", "vundha ledha", "vunda leda",
+            "urea available", "is urea available", "dap available", "is dap available",
+            "fertilizer available", "stock available", "available ga",
         ],
     },
     FarmerIntent.CROP_HEALTH: {
@@ -858,9 +870,18 @@ class AIDecisionEngine:
 
         detected: List[FarmerIntent] = []
 
+        # Check explicit stock query early
+        from src.shops.service import _is_explicit_stock_query
+        is_stock_avail = _is_explicit_stock_query(msg_original) or _is_explicit_stock_query(msg)
+
         # 0. Stock Alerts (prioritized if user asks for stock availability alert/cancellation/listing)
         if _matches_intent_keywords(msg, FarmerIntent.STOCK_ALERT):
             detected.append(FarmerIntent.STOCK_ALERT)
+
+        # Explicit stock availability query -> prioritize SHOPS intent first
+        if is_stock_avail and FarmerIntent.STOCK_ALERT not in detected:
+            if FarmerIntent.SHOPS not in detected:
+                detected.append(FarmerIntent.SHOPS)
 
         # 0.1. Reminders (prioritized if user asks to be reminded)
         if _matches_intent_keywords(msg, FarmerIntent.REMINDERS):
@@ -879,7 +900,7 @@ class AIDecisionEngine:
             detected.append(FarmerIntent.GOVERNMENT_SCHEMES)
 
         # 4. Shops / Input Availability
-        if _matches_intent_keywords(msg, FarmerIntent.SHOPS):
+        if _matches_intent_keywords(msg, FarmerIntent.SHOPS) and FarmerIntent.SHOPS not in detected:
             detected.append(FarmerIntent.SHOPS)
 
         # 5. Crop Health / Disease / Pest
@@ -888,7 +909,10 @@ class AIDecisionEngine:
 
         # 6. Fertilizer / Nutrients
         if _matches_intent_keywords(msg, FarmerIntent.FERTILIZER):
-            detected.append(FarmerIntent.FERTILIZER)
+            from src.ai.formatting import _FERTILIZER_ADVICE_WORDS
+            has_fert_advice = any(w in msg for w in _FERTILIZER_ADVICE_WORDS) or any(w in msg_original for w in _FERTILIZER_ADVICE_WORDS)
+            if not is_stock_avail or has_fert_advice:
+                detected.append(FarmerIntent.FERTILIZER)
 
         # 7. Irrigation
         if _matches_intent_keywords(msg, FarmerIntent.IRRIGATION):
@@ -981,7 +1005,22 @@ class AIDecisionEngine:
         # bypass general Gemini generation entirely to ensure zero hallucination of stock levels.
         from src.ai.service import _finalize_whatsapp_response
         from src.shops.service import _is_explicit_stock_query
+        from src.ai.formatting import _FERTILIZER_ADVICE_WORDS
         ai_response_text = ""
+
+        has_crop_advice = any(i in intents for i in [
+            FarmerIntent.CROP_ADVICE,
+            FarmerIntent.CROP_HEALTH,
+            FarmerIntent.IRRIGATION,
+            FarmerIntent.SOWING,
+            FarmerIntent.HARVESTING,
+            FarmerIntent.REMINDERS,
+        ])
+        if FarmerIntent.FERTILIZER in intents:
+            msg_l = user_message.lower()
+            if any(w in msg_l for w in _FERTILIZER_ADVICE_WORDS) or any(w in user_message for w in _FERTILIZER_ADVICE_WORDS):
+                has_crop_advice = True
+
         is_pure_stock_query = (
             _is_explicit_stock_query(user_message)
             and not has_crop_advice
@@ -1024,7 +1063,7 @@ class AIDecisionEngine:
                 logger.warning(f"Stock alert handling warning: {alert_err}")
 
         # A. Shops / Input Availability
-        if has_shops and not has_stock_alert:
+        if (has_shops or is_pure_stock_query) and not has_stock_alert:
             try:
                 from src.shops.service import enrich_response_with_shops
                 logger.info("[DECISION ENGINE] Routing to shops service")

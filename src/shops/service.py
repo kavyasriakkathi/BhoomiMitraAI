@@ -177,6 +177,13 @@ _SHOP_INTENT_KEYWORDS_EN = {
     "stock vundha", "stock vunda", "stock vundi", "stock vundhi",
     "urea stock undi", "urea stock unda", "urea stock undha", "urea stock undhi",
     "urea stock vunda", "urea stock vundha", "urea stock vundi", "urea stock vundhi",
+    "available ga undha", "available ga unda", "available ga undha ledha", "available ga unda leda",
+    "available undha", "available unda", "available undhi", "available undi",
+    "available ga vundha", "available ga vunda", "available vundha", "available vunda",
+    "undha ledha", "unda leda", "vundha ledha", "vunda leda",
+    "is urea available", "urea available", "is dap available", "dap available",
+    "is fertilizer available", "fertilizer available", "stock available",
+    "available in", "is available", "available ga",
 }
 
 _SHOP_INTENT_KEYWORDS_TE = {
@@ -184,7 +191,9 @@ _SHOP_INTENT_KEYWORDS_TE = {
     "దొరుకుతుంది", "దొరుకుతాయి", "అందుబాటు", "రేటు", "డీలర్",
     "దుకాణం", "దుకాణాలు", "ఎరువుల షాప్", "పురుగుమందుల షాప్",
     "స్టాక్ ఉందా", "స్టాక్ ఉంది", "యూరియా స్టాక్", "స్టాక్ లభ్యత",
-    "యూరియా ఉందా", "లభిస్తుందా",
+    "యూరియా ఉందా", "లభిస్తుందా", "అందుబాటులో ఉందా", "అందుబాటులో ఉంది",
+    "లభ్యతగా ఉందా", "లభ్యత ఉందా", "ఉందా లేదా", "యూరియా అందుబాటులో ఉందా",
+    "యూరియా ఉందా లేదా", "లభిస్తుందా లేదా", "దొరుకుతుందా లేదా",
 }
 
 # Known Telangana & Andhra Pradesh Districts/Cities for Query Extraction
@@ -426,33 +435,101 @@ _LABELS_BY_LANG = {
 }
 
 
+def _is_explicit_stock_query(message: Optional[str]) -> bool:
+    """
+    Check if query is specifically asking about inventory stock availability.
+    Detects Telugu, English, Tanglish, and Romanized queries asking whether
+    an input (e.g. Urea, DAP, Seeds) is in stock / available.
+    """
+    if not message or not isinstance(message, str):
+        return False
+    m = message.lower().strip()
+    if m in ("stock", "స్టాక్", "stocks"):
+        return True
+
+    # Check known stock availability phrases
+    stock_markers = [
+        # Telugu / Tanglish phrases
+        "available ga undha ledha", "available ga unda leda",
+        "available ga vundha ledha", "available ga vunda leda",
+        "available ga undha", "available ga unda", "available ga undhi", "available ga undi",
+        "available undha ledha", "available unda leda",
+        "available undha", "available unda", "available undhi", "available undi",
+        "available ga vundha", "available ga vunda", "available ga vundi", "available ga vundhi",
+        "available vundha", "available vunda",
+        "undha ledha", "unda leda", "vundha ledha", "vunda leda",
+        "stock undha", "stock unda", "stock undhi", "stock undi",
+        "stock vundha", "stock vunda", "stock vundi", "stock vundhi",
+        "urea stock undi", "urea stock unda", "urea stock undha", "urea stock undhi",
+        "urea stock vunda", "urea stock vundha", "urea stock vundi", "urea stock vundhi",
+        "urea undha", "urea unda", "urea undhi", "urea undi",
+        "urea vundha", "urea vunda", "urea vundi", "urea vundhi",
+        "dap undha", "dap unda", "fertilizer undha", "fertilizer unda",
+        "dorukuthunda ledha", "dorukutunda leda", "dorukutunda", "dorukuthunda",
+        "dorukuthundha", "dorukutundha",
+        # English phrases
+        "is urea available", "urea available", "is dap available", "dap available",
+        "is fertilizer available", "fertilizer available", "stock available",
+        "is urea in stock", "urea in stock", "is dap in stock", "dap in stock", "in stock",
+        "urea stock", "dap stock", "fertilizer stock", "stock availability",
+        "available in", "is available",
+        # Native Telugu script
+        "అందుబాటులో ఉందా లేదా", "అందుబాటులో ఉందా", "అందుబాటులో ఉంది", "అందుబాటు",
+        "లభ్యతగా ఉందా", "లభ్యత ఉందా", "స్టాక్ లభ్యత", "ఎరువుల స్టాక్",
+        "స్టాక్ ఉందా", "స్టాక్ ఉంది", "యూరియా స్టాక్",
+        "ఉందా లేదా", "యూరియా ఉందా", "డిఎపి ఉందా", "ఎరువు ఉందా",
+        "యూరియా అందుబాటులో ఉందా", "యూరియా ఉందా లేదా",
+        "లభిస్తుందా లేదా", "దొరుకుతుందా లేదా", "లభ్యం అవుతుందా", "లభ్యం",
+        "యూరియా లభిస్తుందా", "యూరియా దొరుకుతుందా",
+        # Multilingual phrases
+        "उपलब्ध है या नहीं", "उपलब्ध है", "स्टॉक है या नहीं", "स्टॉक है", "यूरिया उपलब्ध है", "यूरिया स्टॉक",
+        "இருப்பில் உள்ளதா", "கிடைக்குமா",
+        "ಲಭ್ಯವಿದೆಯೇ", "ಸ್ಟಾಕ್ ಇದೆಯೇ",
+    ]
+    if any(k in m for k in stock_markers):
+        return True
+
+    # Semantic check: query mentions an agricultural input product AND an availability word,
+    # without asking for agricultural dosage/disease advice
+    product_keywords = [
+        "urea", "dap", "potash", "fertilizer", "fertilizers", "pesticide", "pesticides",
+        "seed", "seeds", "mop", "zinc", "boron", "neem oil", "confidor", "coragen",
+        "roundup", "glyphosate", "యూరియా", "డిఎపి", "ఎరువు", "ఎరువులు", "విత్తనాలు",
+        "పురుగుమందు", "పురుగుల మందు", "కలుపు మందు", "यूरिया", "खाद", "डीएपी", "बीज",
+    ]
+    has_product = any(p in m for p in product_keywords)
+
+    availability_tokens = [
+        "available", "availabl", "stock", "stocks", "undha", "unda", "vundha", "vunda",
+        "dorukuthunda", "dorukutunda", "dorukutundha", "dorukuthundha",
+        "ఉందా", "లభ్యత", "అందుబాటు", "లభిస్తుందా", "దొరుకుతుందా",
+        "उपलब्ध", "स्टॉक", "இருப்பு", "ಲಭ್ಯ",
+    ]
+    has_avail = any(a in m for a in availability_tokens)
+
+    advice_words = [
+        "how much", "how to", "dosage", "schedule", "spray", "apply", "application",
+        "disease", "pest", "treatment", "cure", "prevent", "symptoms", "deficiency",
+        "మోతాదు", "ఎంత వేయాలి", "ఎలా వాడాలి", "పిచికారీ", "తెగులు", "పురుగు", "నివారణ",
+        "मात्रा", "कितना", "उपचार", "छिड़काव",
+    ]
+    has_advice = any(w in m for w in advice_words)
+
+    if has_product and has_avail and not has_advice:
+        return True
+
+    return False
+
+
 def _detect_shop_intent(query_lower: str, query_text: str) -> bool:
     """Detect if the query has shop or input purchase intent in English or Telugu."""
+    if _is_explicit_stock_query(query_text) or _is_explicit_stock_query(query_lower):
+        return True
     if any(kw in query_lower for kw in _SHOP_INTENT_KEYWORDS_EN):
         return True
     if any(kw in query_text for kw in _SHOP_INTENT_KEYWORDS_TE):
         return True
     return False
-
-
-def _is_explicit_stock_query(message: Optional[str]) -> bool:
-    """Check if query is specifically asking about inventory stock availability."""
-    if not message or not isinstance(message, str):
-        return False
-    m = message.lower()
-    if m.strip() in ("stock", "స్టాక్"):
-        return True
-    stock_markers = [
-        "stock undha", "stock unda", "stock undhi", "stock undi", "urea stock", "stock availability",
-        "is urea in stock", "in stock", "urea undha", "urea unda", "urea undhi", "urea undi",
-        "urea vundha", "urea vunda", "urea vundi", "urea vundhi",
-        "stock vundha", "stock vunda", "stock vundi", "stock vundhi",
-        "urea stock undi", "urea stock unda", "urea stock undha", "urea stock undhi",
-        "urea stock vunda", "urea stock vundha", "urea stock vundi", "urea stock vundhi",
-        "స్టాక్ ఉందా", "స్టాక్ ఉంది", "యూరియా స్టాక్", "స్టాక్ లభ్యత", "యూరియా ఉందా",
-        "యూరియా లభిస్తుందా", "యూరియా దొరుకుతుందా",
-    ]
-    return any(k in m for k in stock_markers)
 
 
 def _extract_district_from_query(query_text: Optional[str]) -> Optional[str]:
@@ -620,6 +697,10 @@ async def enrich_response_with_shops(
     query_lower = query_text.lower()
     logger.info(f"[ENRICH SHOPS] Called with query_text: '{query_text}' | ai_response length: {len(ai_response)}")
 
+    # For pure explicit stock queries, ALWAYS clear ai_response so no contradictory/speculative AI preamble is returned
+    if _is_explicit_stock_query(query_text):
+        ai_response = ""
+
     # Step 1: Detect intent (English or Telugu)
     has_intent = _detect_shop_intent(query_lower, query_text)
     if not has_intent:
@@ -754,6 +835,10 @@ async def enrich_response_with_shops(
             f"  {labels['contact']}: {shop.phone_number} | {status_str}{time_range}",
             f"  {labels['delivery']}: {delivery_str}",
         ]
+        if getattr(item, "last_updated", None):
+            v_date = item.last_updated.strftime("%d-%m-%Y")
+            verified_label = labels.get("verified_on", "Verified")
+            lines.append(f"  🕒 {verified_label}: {v_date}")
         shop_entries.append("\n".join(lines))
 
     header_parts = [labels["title"]]
