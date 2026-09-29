@@ -2,10 +2,10 @@
 
 **Production-Grade AI WhatsApp & Web Farming Assistant for Indian Farmers**
 
-[![Python Version](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.12.10-blue.svg)](https://www.python.org/downloads/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.109%2B-009688.svg)](https://fastapi.tiangolo.com)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](#license)
-[![Tests](https://img.shields.io/badge/tests-281%20passed-brightgreen.svg)](#testing)
+[![Tests](https://img.shields.io/badge/tests-1085%20passed-brightgreen.svg)](#testing)
 
 BhoomiMitra AI is an intelligent agricultural assistant tailored for Indian farmers. It operates directly through **WhatsApp** (text, voice audio, crop leaf photos) and an accompanying **Web Dashboard**, providing personalized agronomic guidance grounded in official agricultural research (ICAR, PJTSAU, ANGRAU).
 
@@ -15,6 +15,8 @@ BhoomiMitra AI is an intelligent agricultural assistant tailored for Indian farm
 
 - **Zero-Hallucination Chemical Safety**: Refuses to invent pesticide dosages or chemical combinations. Grounded in authentic university Packages of Practices.
 - **Multilingual Native Interaction**: Native support for **Telugu (తెలుగు)**, **Hindi (हिन्दी)**, and **English**, responding strictly in the farmer's language.
+- **Multilingual Voice Pipeline**: Seamless voice-note ingestion and native speech responses across 13 Indian languages and dialects (including Tanglish).
+- **Proactive Stock Siren**: Instant dual-channel alerts (phone-level audible FCM siren + direct WhatsApp notifications) when out-of-stock fertilizers or seeds are replenished at local dealers.
 - **Multimodal Visual Diagnosis**: Vision-assisted crop disease detection with cautious non-definitive diagnostics.
 - **Long-Term Farmer Memory**: Tracks soil type, acreage, crop cycles, disease history, and preferences across sessions.
 - **Live Mandi & Market Prices**: Real-time mandi commodity price intelligence with local database fallback.
@@ -74,13 +76,15 @@ BhoomiMitra AI is an intelligent agricultural assistant tailored for Indian farm
 
 | Layer | Technologies |
 | :--- | :--- |
-| **Backend Framework** | Python 3.11+, FastAPI, Uvicorn, Pydantic v2 |
+| **Backend Framework** | Python 3.12.10, FastAPI, Uvicorn, Pydantic v2 |
 | **Database & ORM** | PostgreSQL (Production) / SQLite (Testing), SQLAlchemy 2.0 (Asyncpg / Aiosqlite), Alembic |
 | **Caching & In-Memory** | Redis (Asyncio) |
-| **AI / Large Language Models** | Google Gemini 2.0 Flash / Gemini 1.5 Flash (`google-genai`), Multimodal Vision |
+| **AI / Large Language Models** | Google Gemini 3.6 Flash (`google-genai` SDK), Multimodal Vision |
+| **Speech Processing (STT / TTS)** | Google Cloud Speech-to-Text v2, Sarvam AI, Google Cloud Text-to-Speech |
+| **Push Notifications** | Firebase Cloud Messaging (FCM) High-Priority Stock Siren Alerts |
 | **RAG & Search** | Custom Hybrid Vector Engine (768-dim embeddings) + Keyword Frequency Matching + Metadata Scoring |
 | **PDF Extraction** | PyPDF 5.0+ with binary/compressed stream sanitization |
-| **Messaging & Gateway** | Meta WhatsApp Cloud API (Graph API v21.0), Webhooks, HMAC-SHA256 Verification |
+| **Messaging & Gateway** | Meta WhatsApp Cloud API (Graph API v20.0), Webhooks, HMAC-SHA256 Verification |
 | **Payments** | Razorpay Payment Gateway (Cryptographic HMAC Verification) |
 | **Web Frontend** | HTML5, Vanilla JavaScript, Responsive CSS3, Web Speech API |
 | **Deployment** | Render (`render.yaml`), Docker-ready |
@@ -101,7 +105,8 @@ BhoomiMitraAI/
 │   ├── mvp_definition.md
 │   ├── security_architecture.md
 │   ├── technical_implementation_plan.md
-│   └── vision_and_roadmap.md
+│   ├── vision_and_roadmap.md
+│   └── voice_and_stock_siren.md
 ├── migrations/                # Alembic database migration scripts
 │   └── versions/
 ├── scripts/                   # Utility & verification scripts
@@ -232,26 +237,95 @@ Every farmer message passes through a structured reasoning process:
 
 ## 📲 WhatsApp Gateway & Webhook Security
 
-- **Meta Cloud API (v21.0)**: Webhook endpoint receives incoming JSON payloads from WhatsApp.
+- **Meta Cloud API (v20.0)**: Webhook endpoint receives incoming JSON payloads from WhatsApp.
 - **HMAC-SHA256 Signature Verification**: Inbound requests are validated against `WHATSAPP_APP_SECRET` using `X-Hub-Signature-256`.
 - **Media Pipeline**: Ingests voice notes and camera photos via Meta media download endpoints.
 - **Idempotency**: `message_id` deduplication prevents reprocessing duplicate webhook deliveries.
-- **Contextual Specialized Enrichment**: Automatically appends available shops, mandi prices, weather forecasts, government schemes, or expert tickets based on query context.
+---
+
+## 🎙️ WhatsApp Voice Pipeline
+
+BhoomiMitra AI offers an end-to-end voice interface for smallholder farmers:
+
+```
+WhatsApp voice note (.ogg/.opus)
+       |
+       v
+Speech-to-Text (STT via Google Cloud / Sarvam AI / mock fallback)
+       |
+       v
+Language Detection & Preference (13 Indian languages + Tanglish / code-switching)
+       |
+       v
+Intent Classification (pure stock query, advisory, pest diagnosis, market price)
+       |
+       v
+RAG / Farmer Context Retrieval (ICAR/PJTSAU Package of Practices + farm memory)
+       |
+       v
+Gemini 3.6 Flash Agronomic Reasoning (Zero-hallucination dosage guardrails)
+       |
+       v
+Final Grounded Answer Formulation (native script & phrasing)
+       |
+       +------------------------------+
+       |                              |
+       v                              v
+Outbound WhatsApp Text        Text-to-Speech (TTS Audio Synthesis)
+       |                              |
+       |                              v
+       +--------------------> Outbound WhatsApp Audio Message
+```
+
+---
+
+## 🚨 Proactive Stock Siren
+
+The **Stock Siren** alerts waiting farmers the instant critical agricultural inputs (Urea, DAP, seeds) are replenished at local registered dealers:
+
+```
+Dealer Inventory Transition (quantity updated > 0)
+       |
+       v
+Trigger Stock Alert Event (scans active farmer alerts by product & district)
+       |
+       +------------------------------------------+
+       |                                          |
+       v                                          v
+Phone-Level FCM Siren Alert            WhatsApp Chat Notification
+(Audible alarm on Android devices)      (Direct WhatsApp restock message)
+       |                                          |
+       +--------------------+---------------------+
+                            |
+                            v
+               Fail-Soft Isolated Delivery
+```
+
+### Channel Distinction: Phone-Level FCM Siren vs. WhatsApp Notifications
+
+| Characteristic | Phone-Level FCM Siren | WhatsApp Stock Notification |
+| :--- | :--- | :--- |
+| **Channel** | Android Push Notification (`firebase-admin`) | Meta WhatsApp Cloud API (`Graph API v20.0`) |
+| **Audio Alert** | **Audible siren tone** (`sound="stock_siren"`, `channel_id="stock_siren"`) | Standard incoming WhatsApp notification chime |
+| **Priority** | Android High Priority (`priority="high"`, wake screen) | Background asynchronous message queue |
+| **User Action** | Launches app directly to restocked dealer details (`OPEN_STOCK_SIREN`) | Direct chat buttons to place orders or call shop |
+| **Data Payload** | Structured JSON payload (`product`, `qty`, `shop_id`, `district`) | Localized, human-readable message text |
+| **Fault Isolation** | Soft-fails on missing/invalid tokens; never halts WhatsApp flow | Soft-fails independently; never blocks FCM siren |
 
 ---
 
 ## 🧪 Testing
 
-BhoomiMitra AI includes a comprehensive regression and unit test suite covering end-to-end webhook flows, RAG extraction, dosage guardrails, shops, weather, market prices, escalation, and language preservation.
+BhoomiMitra AI includes a comprehensive regression and unit test suite covering end-to-end webhook flows, RAG extraction, dosage guardrails, shops, weather, market prices, escalation, language preservation, voice pipeline, and stock siren push alerts.
 
 ```powershell
 # Run the complete test suite
-.venv/bin/pytest -q
+pytest -v --tb=short
 ```
 
 **Latest Test Results**:
 ```text
-======================= 281 passed, 29 warnings in 1.30s =======================
+======================= 1085 passed, 772 warnings in 310.63s =======================
 ```
 
 ---
@@ -259,7 +333,7 @@ BhoomiMitra AI includes a comprehensive regression and unit test suite covering 
 ## ⚙️ Environment Setup & Local Installation
 
 ### Prerequisites
-- Python 3.11 or higher
+- Python 3.12.10
 - PostgreSQL (or local SQLite for development)
 - Google Gemini API Key
 
@@ -329,7 +403,9 @@ The project includes configuration for deploying on Render:
 
 ### ✅ Fully Implemented
 - WhatsApp Gateway & HMAC Security
-- AI Decision Engine & System Prompts
+- AI Decision Engine & System Prompts (Google Gemini 3.6 Flash via `google-genai` SDK)
+- WhatsApp Multilingual Voice Pipeline (STT, 13-language detection, Gemini reasoning, TTS audio reply)
+- Proactive Stock Siren (Phone-level audible FCM push + direct WhatsApp notifications)
 - Grounded RAG Pipeline & Reindexing
 - Multimodal Crop Health Diagnosis
 - Long-Term Farmer Memory & Voice State
@@ -342,9 +418,6 @@ The project includes configuration for deploying on Render:
 - JWT Authentication & Role-Based Access Control (RBAC)
 - Web Dashboard & Web Voice/Photo Scanner
 - Meta Compliance Pages (Privacy Policy, Terms, Data Deletion)
-
-### 🟡 Partially Implemented
-- **`src/language`**: Heuristics and prompts implemented; cloud streaming STT/TTS adapters utilize fallback stubs during testing.
 
 ### ⏳ Planned Features (Roadmap)
 - **WhatsApp Interactive UI**: Native WhatsApp list pickers and quick reply buttons for scheme applications.
