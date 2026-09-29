@@ -325,11 +325,16 @@ INTENT_KEYWORDS: Dict[FarmerIntent, Dict[str, List[str]]] = {
             "buy urea", "buy dap", "dealer", "dealers", "input availability", "available in shop",
             "fertilizer store", "pesticide store", "buy fertilizer", "buy pesticide", "buy seeds",
             "shops nearby", "store nearby", "agro agency",
+            "urea stock", "is urea in stock", "dap stock", "fertilizer stock", "stock undha",
+            "stock unda", "stock undhi", "stock undi", "urea stock undi", "urea in stock",
+            "in stock", "stock availability", "urea available", "stock available",
         ],
         "te": [
             "ఎక్కడ దొరుకుతుంది", "ఎక్కడ కొనాలి", "సమీప దుకాణాలు", "ఎరువుల దుకాణం", "మందుల షాపు",
             "కొనుగోలు", "దుకాణం", "షాపు", "లభిస్తుంది", "యూరియా దొరుకుతుందా", "డీలర్", "డీలర్లు",
             "దుకాణాలు", "షాపులు", "దొరికే చోటు",
+            "యూరియా స్టాక్", "స్టాక్ ఉందా", "స్టాక్ ఉంది", "యూరియా ఉందా", "స్టాక్ లభ్యత", "లభ్యత", "ఎరువుల స్టాక్", "యూరియా లభిస్తుందా",
+            "యూరియా దొరుకుతుందా", "యూరియా లభ్యం", "స్టాక్ లభ్యం",
         ],
         "hi": [
             "दुकान", "कहाँ मिलेगा", "कहाँ से खरीदें", "खाद की दुकान", "दवा की दुकान", "डीलर",
@@ -380,6 +385,12 @@ INTENT_KEYWORDS: Dict[FarmerIntent, Dict[str, List[str]]] = {
             "dap ekkada", "seeds ekkada", "fertilizer shop", "pesticide shop", "near shops",
             "daggara shop", "konadaniki", "dorukuthunda", "shops daggara", "dealer daggara",
             "dorukutundi", "konachu", "kahan milega", "kuthe bhetel",
+            "urea stock", "stock undha", "stock unda", "stock undhi", "stock undi",
+            "urea undha", "urea unda", "urea undhi", "urea undi", "is urea in stock",
+            "urea vundha", "urea vunda", "urea vundi", "urea vundhi",
+            "stock vundha", "stock vunda", "stock vundi", "stock vundhi",
+            "urea stock undi", "urea stock unda", "urea stock undha", "urea stock undhi",
+            "urea stock vunda", "urea stock vundha", "urea stock vundi", "urea stock vundhi",
         ],
     },
     FarmerIntent.CROP_HEALTH: {
@@ -960,32 +971,45 @@ class AIDecisionEngine:
             FarmerIntent.SOWING,
             FarmerIntent.HARVESTING,
             FarmerIntent.REMINDERS,
-            FarmerIntent.STOCK_ALERT,
             FarmerIntent.GENERAL_FARMING,
             FarmerIntent.UNKNOWN,
         ])
 
         # 3. AI Advisory Generation
+        # For pure explicit stock queries (asking specifically about inventory/stock availability
+        # without asking about crop advice, market prices, weather, schemes, or stock alerts),
+        # bypass general Gemini generation entirely to ensure zero hallucination of stock levels.
+        from src.ai.service import _finalize_whatsapp_response
+        from src.shops.service import _is_explicit_stock_query
         ai_response_text = ""
-        from src.ai.repository import AIRepository
-        from src.ai.service import AIService, _finalize_whatsapp_response
-        from src.ai.schemas import AIGenerateRequest
-
-        repo = AIRepository(db)
-        ai_service = AIService(repo)
-        request = AIGenerateRequest(
-            farmer_id=farmer.id,
-            conversation_id=conversation.id,
-            message=user_message,
+        is_pure_stock_query = (
+            _is_explicit_stock_query(user_message)
+            and not has_crop_advice
+            and not has_market
+            and not has_weather
+            and not has_schemes
+            and not has_stock_alert
         )
+        if not is_pure_stock_query:
+            from src.ai.repository import AIRepository
+            from src.ai.service import AIService
+            from src.ai.schemas import AIGenerateRequest
 
-        try:
-            response = await ai_service.generate_ai_response(request)
-            ai_response_text = response.response_text or ""
-            logger.info(f"[DECISION ENGINE] Raw Gemini response ({len(ai_response_text)} chars)")
-        except Exception as exc:
-            logger.warning(f"[DECISION ENGINE] AI generation unavailable: {exc}. Deferring to specialized modules.")
-            ai_response_text = ""
+            repo = AIRepository(db)
+            ai_service = AIService(repo)
+            request = AIGenerateRequest(
+                farmer_id=farmer.id,
+                conversation_id=conversation.id,
+                message=user_message,
+            )
+
+            try:
+                response = await ai_service.generate_ai_response(request)
+                ai_response_text = response.response_text or ""
+                logger.info(f"[DECISION ENGINE] Raw Gemini response ({len(ai_response_text)} chars)")
+            except Exception as exc:
+                logger.warning(f"[DECISION ENGINE] AI generation unavailable: {exc}. Deferring to specialized modules.")
+                ai_response_text = ""
 
         # 4. Authoritative Module Routing (Only call enrichments when intent is relevant)
         # A.0. Stock Availability Alerts

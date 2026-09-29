@@ -275,9 +275,8 @@ async def handle_stock_alert_query(
     """
     if not farmer:
         # Fallback if no farmer identity is linked
-        if language == "te":
-            return "🔔 స్టాక్ అలర్ట్ నమోదు చేయడానికి మీ ఫోన్ నంబర్ వివరాలు అవసరం."
-        return "🔔 Phone registration is required to set up stock availability alerts."
+        msg = "🔔 స్టాక్ అలర్ట్ నమోదు చేయడానికి మీ ఫోన్ నంబర్ వివరాలు అవసరం." if language == "te" else "🔔 Phone registration is required to set up stock availability alerts."
+        return f"{ai_response}\n\n{msg}".strip() if ai_response else msg
 
     action = detect_stock_alert_action(user_message)
     logger.info(f"[STOCK ALERT] Detected sub-action: '{action}' for farmer {farmer.id}")
@@ -290,33 +289,32 @@ async def handle_stock_alert_query(
     if action == "cancel":
         count = await cancel_alert(db, farmer, product_name=norm_product)
         if count > 0:
-            if language == "te":
-                return f"✅ మీ {product_display} స్టాక్ అలర్ట్ విజయవంతంగా రద్దు చేయబడింది."
-            return f"✅ Your {norm_product.title()} stock alert has been successfully cancelled."
+            msg = f"✅ మీ {product_display} స్టాక్ అలర్ట్ విజయవంతంగా రద్దు చేయబడింది." if language == "te" else f"✅ Your {norm_product.title()} stock alert has been successfully cancelled."
+            return f"{ai_response}\n\n{msg}".strip() if ai_response else msg
         else:
-            if language == "te":
-                return f"ℹ️ ప్రస్తుతం మీకు యాక్టివ్ {product_display} స్టాక్ అలర్ట్స్ ఏవీ లేవు."
-            return f"ℹ️ You do not have any active {norm_product.title()} stock alerts."
+            msg = f"ℹ️ ప్రస్తుతం మీకు యాక్టివ్ {product_display} స్టాక్ అలర్ట్స్ ఏవీ లేవు." if language == "te" else f"ℹ️ You do not have any active {norm_product.title()} stock alerts."
+            return f"{ai_response}\n\n{msg}".strip() if ai_response else msg
 
     # 2. LIST SUB-ACTION
     if action == "list":
         active_alerts = await list_farmer_alerts(db, farmer)
         if not active_alerts:
-            if language == "te":
-                return "ℹ️ ప్రస్తుతం మీకు యాక్టివ్ స్టాక్ అలర్ట్స్ లేవు."
-            return "ℹ️ You currently have no active stock alerts."
+            msg = "ℹ️ ప్రస్తుతం మీకు యాక్టివ్ స్టాక్ అలర్ట్స్ లేవు." if language == "te" else "ℹ️ You currently have no active stock alerts."
+            return f"{ai_response}\n\n{msg}".strip() if ai_response else msg
 
         if language == "te":
             lines = ["🔔 మీ యాక్టివ్ స్టాక్ అలర్ట్స్:\n"]
             for idx, a in enumerate(active_alerts, 1):
                 prod_te = "యూరియా" if a.product_name == "urea" else a.product_name.title()
                 lines.append(f"{idx}. {prod_te} — {a.district}\n   స్థితి: యాక్టివ్ (Active)")
-            return "\n".join(lines)
+            msg = "\n".join(lines)
+            return f"{ai_response}\n\n{msg}".strip() if ai_response else msg
         else:
             lines = ["🔔 Your Active Stock Alerts:\n"]
             for idx, a in enumerate(active_alerts, 1):
                 lines.append(f"{idx}. {a.product_name.title()} — {a.district}\n   Status: Active")
-            return "\n".join(lines)
+            msg = "\n".join(lines)
+            return f"{ai_response}\n\n{msg}".strip() if ai_response else msg
 
     # 3. SUBSCRIBE SUB-ACTION
     # Resolve location
@@ -357,7 +355,7 @@ async def handle_stock_alert_query(
             "Returning immediate shop availability rather than creating redundant future alert."
         )
         # Use existing shop lookup and formatting logic
-        shop_msg = await enrich_response_with_shops(db, user_message, "", farmer)
+        shop_msg = await enrich_response_with_shops(db, user_message, ai_response, farmer)
         if shop_msg and "🏬" in shop_msg:
             return shop_msg
 
@@ -383,17 +381,19 @@ async def handle_stock_alert_query(
         elif district.lower() == "nizamabad":
             district_display = "నిజామాబాద్"
 
-        return (
+        alert_msg = (
             f"🔔 {product_display} స్టాక్ అలర్ట్ యాక్టివ్ అయింది.\n\n"
             f"📍 ప్రాంతం: {district_display}\n"
             f"ℹ️ మీ ప్రాంతంలోని డీలర్ల వద్ద {product_display} స్టాక్ అందుబాటులోకి రాగానే WhatsApp ద్వారా మీకు వెంటనే సమాచారం అందిస్తాము."
         )
+        return f"{ai_response}\n\n{alert_msg}".strip() if ai_response else alert_msg
     else:
-        return (
+        alert_msg = (
             f"🔔 Your {norm_product.title()} stock alert is active.\n\n"
             f"📍 District: {district}\n"
             f"ℹ️ I will notify you on WhatsApp as soon as {norm_product.title()} becomes available at registered shops in your area."
         )
+        return f"{ai_response}\n\n{alert_msg}".strip() if ai_response else alert_msg
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ from typing import Optional, List, Tuple
 from uuid import UUID
 from fastapi import HTTPException, status
 from src.core.logging import logger
+from src.language.detector import detect_language
 from src.shops.repository import ShopRepository, haversine_distance
 from src.shops.schemas import (
     ShopCreate,
@@ -170,17 +171,29 @@ _SHOP_INTENT_KEYWORDS_EN = {
     "avail", "available", "availability", "price", "prices", "cost",
     "rate", "rates", "stock", "near", "nearby", "locate", "dealer",
     "dealers", "order", "get", "fertilizer shop", "pesticide shop",
+    "urea stock", "is urea in stock", "in stock", "stock availability",
+    "stock undha", "stock unda", "stock undhi", "stock undi", "urea undha", "urea unda",
+    "urea undhi", "urea undi", "urea vundha", "urea vunda", "urea vundi", "urea vundhi",
+    "stock vundha", "stock vunda", "stock vundi", "stock vundhi",
+    "urea stock undi", "urea stock unda", "urea stock undha", "urea stock undhi",
+    "urea stock vunda", "urea stock vundha", "urea stock vundi", "urea stock vundhi",
 }
 
 _SHOP_INTENT_KEYWORDS_TE = {
     "కొనాలి", "ఎక్కడ", "ధర", "ధరలు", "స్టాక్", "షాప్", "షాపులు",
     "దొరుకుతుంది", "దొరుకుతాయి", "అందుబాటు", "రేటు", "డీలర్",
     "దుకాణం", "దుకాణాలు", "ఎరువుల షాప్", "పురుగుమందుల షాప్",
+    "స్టాక్ ఉందా", "స్టాక్ ఉంది", "యూరియా స్టాక్", "స్టాక్ లభ్యత",
+    "యూరియా ఉందా", "లభిస్తుందా",
 }
 
 # Known Telangana & Andhra Pradesh Districts/Cities for Query Extraction
 _KNOWN_DISTRICTS = {
     # Telangana
+    "jagtial": "Jagtial",
+    "జగిత్యాల": "Jagtial",
+    "korutla": "Jagtial",
+    "కోరుట్ల": "Jagtial",
     "warangal": "Warangal",
     "hanamkonda": "Warangal",
     "వరంగల్": "Warangal",
@@ -422,6 +435,26 @@ def _detect_shop_intent(query_lower: str, query_text: str) -> bool:
     return False
 
 
+def _is_explicit_stock_query(message: Optional[str]) -> bool:
+    """Check if query is specifically asking about inventory stock availability."""
+    if not message or not isinstance(message, str):
+        return False
+    m = message.lower()
+    if m.strip() in ("stock", "స్టాక్"):
+        return True
+    stock_markers = [
+        "stock undha", "stock unda", "stock undhi", "stock undi", "urea stock", "stock availability",
+        "is urea in stock", "in stock", "urea undha", "urea unda", "urea undhi", "urea undi",
+        "urea vundha", "urea vunda", "urea vundi", "urea vundhi",
+        "stock vundha", "stock vunda", "stock vundi", "stock vundhi",
+        "urea stock undi", "urea stock unda", "urea stock undha", "urea stock undhi",
+        "urea stock vunda", "urea stock vundha", "urea stock vundi", "urea stock vundhi",
+        "స్టాక్ ఉందా", "స్టాక్ ఉంది", "యూరియా స్టాక్", "స్టాక్ లభ్యత", "యూరియా ఉందా",
+        "యూరియా లభిస్తుందా", "యూరియా దొరుకుతుందా",
+    ]
+    return any(k in m for k in stock_markers)
+
+
 def _extract_district_from_query(query_text: Optional[str]) -> Optional[str]:
     """Extract known district or city from farmer query in English or Telugu."""
     if not query_text or not isinstance(query_text, str):
@@ -462,13 +495,17 @@ def resolve_shop_district(
     if address and str(address).strip():
         cleaned_addr = str(address).strip()
         lower_addr = cleaned_addr.lower()
-        if lower_addr in _KNOWN_DISTRICTS:
-            return _KNOWN_DISTRICTS[lower_addr]
-        if cleaned_addr in _KNOWN_DISTRICTS:
-            return _KNOWN_DISTRICTS[cleaned_addr]
-        extracted = _extract_district_from_query(cleaned_addr)
-        if extracted:
-            return extracted
+        # For address fallback, do not treat sub-district towns/mandals (like Korutla) as districts.
+        # Address fallback only resolves true canonical districts from addresses (e.g. 'Main Bazar, Warangal')
+        town_aliases = {"korutla", "కోరుట్ల"}
+        if lower_addr not in town_aliases and cleaned_addr not in town_aliases:
+            if lower_addr in _KNOWN_DISTRICTS:
+                return _KNOWN_DISTRICTS[lower_addr]
+            if cleaned_addr in _KNOWN_DISTRICTS:
+                return _KNOWN_DISTRICTS[cleaned_addr]
+            for kw, dist_name in _KNOWN_DISTRICTS.items():
+                if kw not in town_aliases and kw in lower_addr:
+                    return dist_name
 
     # 3. Safe fallback: no curated district could be resolved
     return None
@@ -593,6 +630,9 @@ async def enrich_response_with_shops(
     matched_product = _detect_product_from_query(query_text, ai_response)
     if not matched_product:
         logger.info("[ENRICH SHOPS] Bypassing shop enrichment - No product keyword matched.")
+        if not ai_response:
+            lang = detect_language(query_text, fallback=getattr(farmer, "preferred_language", "en") or "en")
+            return get_shops_labels(lang)["no_local_dealers"]
         return ai_response
 
     # Step 3: Resolve farmer location and language (4-tier hierarchy)
@@ -603,7 +643,6 @@ async def enrich_response_with_shops(
         latitude, longitude, district, state = loc_res
 
     farmer_lang = getattr(farmer, "preferred_language", "en") or "en"
-    from src.language.detector import detect_language
     language = detect_language(query_text, fallback=farmer_lang)
     labels = get_shops_labels(language)
 
@@ -618,6 +657,8 @@ async def enrich_response_with_shops(
 
     if not matches:
         logger.info(f"[ENRICH SHOPS] No active shops found for product '{matched_product}'.")
+        if not ai_response:
+            return labels["no_local_dealers"]
         return ai_response
 
     # Step 5: Rank & Filter matches by location
@@ -681,7 +722,7 @@ async def enrich_response_with_shops(
             f"[ENRICH SHOPS] No local verified shops found within safe radius/district for product '{matched_product}' "
             f"(district: {district}, coords: ({latitude}, {longitude}))."
         )
-        return ai_response + "\n\n" + labels["no_local_dealers"]
+        return (ai_response + "\n\n" + labels["no_local_dealers"]).strip() if ai_response else labels["no_local_dealers"]
 
     scored_matches.sort(key=lambda x: x[0])
     top = scored_matches[:3]
@@ -734,6 +775,6 @@ async def enrich_response_with_shops(
         f"[ENRICH SHOPS] Appending {len(top)} shops for '{matched_product}' "
         f"(district: {district}, coords: ({latitude}, {longitude}))."
     )
-    return ai_response + "\n\n" + full_block
+    return (ai_response + "\n\n" + full_block).strip() if ai_response else full_block
 
 

@@ -291,7 +291,13 @@ async def process_message_pipeline(
             # ── STAGE 5: AI Processing (Gemini) ───────────────────────
             # Only run if not already set by voice fallback message
             from src.language.detector import detect_language
-            active_lang = detect_language(parsed.text_content, fallback=pref_lang) if parsed.text_content else pref_lang
+            stt_lang = (
+                transcription.detected_language[:2].lower()
+                if ("transcription" in locals() and transcription and getattr(transcription, "detected_language", None))
+                else None
+            )
+            effective_fallback = stt_lang or pref_lang
+            active_lang = detect_language(parsed.text_content, fallback=effective_fallback) if parsed.text_content else effective_fallback
 
             if not ai_response:
                 t_ai_start = time.time()

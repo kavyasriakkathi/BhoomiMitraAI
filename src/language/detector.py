@@ -164,6 +164,9 @@ _ROMANIZED_LEXICONS: Dict[str, Set[str]] = {
         "pasupuga", "mudatha", "thadi", "cheda", "daggara", "ekkada", "dorukuthundi",
         "konali", "ammukovali", "pathakam", "varsham", "paduthunda", "padtundha",
         "vasthunda", "eeroju", "repu", "nenu", "maaku", "meeru", "sahayam",
+        "undha", "unda", "undhi", "unnadi", "unnaya", "unnaaya", "lo",
+        "dorukutunda", "dorukutundha", "dorukuthunda", "dorukuthundha", "kavali",
+        "vundha", "vunda", "vundi", "vundhi",
     },
     "hi": {
         # Hinglish (Hindi)
@@ -278,8 +281,19 @@ def _classify_romanized_text(text: str) -> Tuple[Optional[str], float]:
                 scores[lang] += 2
 
     # Check multi-word phrase patterns
-    lowered = f" {text.lower()} "
-    if " em fertilizer " in lowered or " em vadali " in lowered or " ela vadali " in lowered or " rate entha " in lowered or " ela undi " in lowered or " vari ki " in lowered:
+    lowered = f" {' '.join(tokens)} "
+    raw_lowered = f" {text.lower()} "
+    if (
+        " em fertilizer " in lowered or " em vadali " in lowered or " ela vadali " in lowered
+        or " rate entha " in lowered or " ela undi " in lowered or " vari ki " in lowered
+        or " stock undha " in lowered or " stock unda " in lowered or " stock undhi " in lowered
+        or " stock undi " in lowered or " urea undha " in lowered or " urea unda " in lowered
+        or " urea undhi " in lowered or " urea undi " in lowered or " urea vundha " in lowered
+        or " urea vunda " in lowered or " urea vundi " in lowered or " urea vundhi " in lowered
+        or " stock vundha " in lowered or " stock vunda " in lowered or " stock vundi " in lowered
+        or " stock vundhi " in lowered or " lo urea " in lowered
+        or " em fertilizer " in raw_lowered or " em vadali " in raw_lowered
+    ):
         scores["te"] += 3
     if " kitna pani " in lowered or " kya kare " in lowered or " kitna khad " in lowered or " mandi bhav " in lowered or " ko kitna " in lowered:
         scores["hi"] += 3

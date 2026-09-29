@@ -67,6 +67,8 @@ _KNOWN_DISTRICTS = {
     "సూర్యాపేట": "Suryapet",
     "jagtial": "Jagtial",
     "జగిత్యాల": "Jagtial",
+    "korutla": "Jagtial",
+    "కోరుట్ల": "Jagtial",
     "mancherial": "Mancherial",
     "మంచిర్యాల": "Mancherial",
     "bhadradri": "Bhadradri Kothagudem",

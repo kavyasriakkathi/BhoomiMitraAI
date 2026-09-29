@@ -987,7 +987,7 @@ SHOPS_LABELS: Dict[str, Dict[str, str]] = {
         "delivery": "🚚 డెలివరీ",
         "dist_fmt": "{dist} కి.మీ దూరం",
         "dist_generic": "సమీపంలో",
-        "no_local_dealers": "🏬 సమీప వ్యవసాయ దుకాణాలు & లభ్యత:\nℹ️ మీ మండలం/జిల్లాలో ఈ ఉత్పత్తికి సంబంధించి ప్రస్తుతం నమోదిత లైసెన్స్ డీలర్లు అందుబాటులో లేరు.",
+        "no_local_dealers": "🏬 సమీప వ్యవసాయ దుకాణాలు & లభ్యత:\nℹ️ మీ మండలం/జిల్లాలో ఈ ఉత్పత్తికి సంబంధించి ప్రస్తుతం నమోదిత లైసెన్స్ డీలర్లు అందుబాటులో లేరు. (సమీప దుకాణాలు అందుబాటులో లేవు)",
         "all_out_of_stock": "⚠️ గమనిక: ఈ ఉత్పత్తి ప్రస్తుతం సమీప నమోదిత దుకాణాలలో స్టాక్ అందుబాటులో లేదు. కొత్త స్టాక్ తేదీల కోసం దయచేసి క్రింది డీలర్లను సంప్రదించండి.",
         "footer_disclaimer": "ℹ️ గమనిక: ధరలు మరియు స్టాక్ వివరాలు స్థానిక డీలర్ నిర్ధారణకు లోబడి ఉంటాయి.",
         "more": "మరిన్ని దుకాణాల కోసం: /shops",
@@ -1791,6 +1791,13 @@ def detect_user_intents(user_message: str) -> Dict[str, bool]:
         p in msg_lower for p in _PURE_BUY_PHRASES
     ) or any(p in user_message for p in ["ఎక్కడ దొరుకుతుంది", "ఎక్కడ కొనాలి", "కొనాలి", "దుకాణం", "షాపు", "दुकान", "દુકાન", "দোকান", "ಅಂಗಡಿ", "കട", "ਦੁਕਾਨ", "ଦୋକାନ"])
 
+    # Stock Alert Intent
+    stock_alert_kws = INTENT_KEYWORDS.get(FarmerIntent.STOCK_ALERT, {})
+    has_stock_alert = _matches_intent_keywords(user_message, stock_alert_kws)
+    if has_stock_alert:
+        if not any(bp in msg_lower for bp in ["buy", "shop", "store", "dealer"]) and not any(bp in user_message for bp in ["కొనాలి", "ఎక్కడ దొరుకుతుంది", "ఎక్కడ కొనాలి", "దుకాణం", "షాపు"]):
+            has_shop = False
+
     # 3. Market Intent (all 13 languages + legacy)
     market_kws = INTENT_KEYWORDS.get(FarmerIntent.MARKET_PRICE, {})
     has_market = _matches_intent_keywords(user_message, market_kws) or any(
@@ -1837,16 +1844,17 @@ def detect_user_intents(user_message: str) -> Dict[str, bool]:
         if not has_shop or has_fert_advice:
             has_direct_agri = True
 
-    is_pure_non_crop = (has_shop or has_weather or has_market or has_schemes or has_escalation) and not has_direct_agri
+    is_pure_non_crop = (has_shop or has_weather or has_market or has_schemes or has_escalation or has_stock_alert) and not has_direct_agri
     has_crop_advice = has_direct_agri and not (is_pure_non_crop and not has_direct_agri)
 
-    if not any([has_weather, has_shop, has_market, has_schemes, has_escalation]):
+    if not any([has_weather, has_shop, has_market, has_schemes, has_escalation, has_stock_alert]):
         has_crop_advice = True
 
     return {
         "crop_advice": has_crop_advice,
         "weather": has_weather,
         "shop": has_shop,
+        "stock_alert": has_stock_alert,
         "market": has_market,
         "schemes": has_schemes,
         "escalation": has_escalation,
@@ -1952,6 +1960,7 @@ def decompose_assembled_response(assembled_text: str) -> Dict[str, str]:
         "crop_advice": "",
         "weather": "",
         "shop": "",
+        "stock_alert": "",
         "market": "",
         "schemes": "",
         "escalation": "",
@@ -1959,7 +1968,7 @@ def decompose_assembled_response(assembled_text: str) -> Dict[str, str]:
     if not assembled_text:
         return sections
 
-    pattern = r"(?=(?:^|\n\n)(?:🏬|📊|🌡️|🌦️|🏛️|👨‍🌾|⚠️))"
+    pattern = r"(?=(?:^|\n\n)(?:🏬|📊|🌡️|🌦️|🏛️|👨‍🌾|⚠️|🔔|✅))"
     chunks = re.split(pattern, assembled_text.strip())
 
     base_ai_parts = []
@@ -1970,6 +1979,8 @@ def decompose_assembled_response(assembled_text: str) -> Dict[str, str]:
 
         if chunk.startswith("🏬") or "Available Nearby Shops" in chunk or "సమీప వ్యవసాయ దుకాణాలు" in chunk or "Nearby Agricultural Shops" in chunk or "Nearby Shops" in chunk or any(titles.get("shop", "") in chunk for titles in _SECTION_TITLES.values() if titles.get("shop")):
             sections["shop"] = chunk
+        elif chunk.startswith("🔔") or chunk.startswith("✅") or "స్టాక్ అలర్ట్" in chunk or "stock alert" in chunk.lower() or "Stock alert" in chunk:
+            sections["stock_alert"] = chunk
         elif chunk.startswith("📊") or "Mandi Prices" in chunk or "మార్కెట్ ధరలు" in chunk or "मंडी भाव" in chunk or any(titles.get("market", "") in chunk for titles in _SECTION_TITLES.values() if titles.get("market")):
             sections["market"] = chunk
         elif chunk.startswith("⚠️") and ("మార్కెట్ ధర" in chunk or "market price" in chunk.lower() or "మండి" in chunk or "mandi" in chunk.lower() or "मंडी भाव" in chunk or any(titles.get("market", "") in chunk for titles in _SECTION_TITLES.values() if titles.get("market"))):
@@ -2052,6 +2063,9 @@ def compact_section(section_key: str, section_text: str, language: str = "en") -
             body_lines.append(line)
         return f"{section_header}:\n" + "\n".join(body_lines)
 
+    elif section_key == "stock_alert":
+        return section_text.strip()
+
     elif section_key == "schemes":
         body_lines = []
         for line in lines:
@@ -2099,8 +2113,8 @@ def format_multi_intent_response(
     sections = decompose_assembled_response(assembled_text)
 
     active_enrichments = [
-        k for k in ["weather", "shop", "market", "schemes", "escalation"]
-        if sections[k] and sections[k].strip()
+        k for k in ["weather", "shop", "stock_alert", "market", "schemes", "escalation"]
+        if sections.get(k, "") and sections[k].strip()
     ]
 
     has_crop = bool(sections["crop_advice"] and sections["crop_advice"].strip())
@@ -2117,7 +2131,7 @@ def format_multi_intent_response(
     if not is_multi_intent:
         return assembled_text.strip()
 
-    ordered_keys = ["crop_advice", "weather", "shop", "market", "schemes", "escalation"]
+    ordered_keys = ["crop_advice", "weather", "stock_alert", "shop", "market", "schemes", "escalation"]
     formatted_blocks: List[str] = []
 
     for key in ordered_keys:
