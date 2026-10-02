@@ -373,10 +373,10 @@ async def process_message_pipeline(
                 )
             t_outbound = time.time() - t_outbound_start
 
-            # ── STAGE 6B: Outbound Voice Note Send (Voice-In -> Voice-Out) ──
+            # ── STAGE 6B: Outbound Voice Note Send (Omni Voice: Voice, Text, Image) ──
             settings = get_settings()
 
-            # Voice responses are dispatched for incoming audio messages (Voice-In -> Voice-Out).
+            # Voice responses are dispatched for incoming queries (audio, text, image).
             # Active by default unless explicitly disabled (enable_voice_responses=False).
             voice_flag = getattr(settings, "enable_voice_responses", None)
             is_explicitly_disabled = (
@@ -387,7 +387,12 @@ async def process_message_pipeline(
                     and settings.enable_voice_responses is False
                 )
             )
-            should_send_voice = (parsed.message_type == "audio") and not is_explicitly_disabled
+            is_supported_inbound = parsed.message_type in ("audio", "text", "image")
+            should_send_voice = (
+                is_supported_inbound
+                and not is_explicitly_disabled
+                and bool(ai_response and ai_response.strip())
+            )
 
             if should_send_voice:
                 from src.language.languages import get_language

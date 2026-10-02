@@ -552,8 +552,53 @@ class TestGatewayVoiceIntegration:
             mock_send_audio.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_text_input_feature_flag_on_text_only(self):
-        """When enable_voice_responses is True but input is text, outbound is text-only."""
+    async def test_text_input_feature_flag_off_text_only(self):
+        """When enable_voice_responses is False and input is text, outbound is text-only."""
+        import uuid
+        from src.core.models import Farmer, Conversation
+        from src.gateway.schemas import ParsedIncomingMessage
+        from src.gateway.service import process_message_pipeline
+
+        parsed = ParsedIncomingMessage(
+            phone_number="919876543210",
+            message_id="wamid.TEXT_FLAG_OFF_01",
+            timestamp="1700000000",
+            message_type="text",
+            text_content="వరి సాగు వివరాలు",
+        )
+
+        mock_farmer = Farmer(id=uuid.uuid4(), phone_number="919876543210", preferred_language="te")
+        mock_conv = Conversation(
+            id=uuid.uuid4(),
+            farmer_id=mock_farmer.id,
+            message_id=parsed.message_id,
+            user_message="వరి సాగు వివరాలు",
+            user_message_type="text",
+        )
+        mock_db_cm = self._setup_mocks(mock_farmer, mock_conv)
+
+        with patch("src.gateway.service.AsyncSessionLocal", return_value=mock_db_cm), \
+             patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=False), \
+             patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock, return_value=mock_farmer), \
+             patch("src.gateway.service.store_incoming_message", new_callable=AsyncMock, return_value=mock_conv), \
+             patch("src.gateway.service.process_text_message", new_callable=AsyncMock, return_value="వరి సాగు సమాధానం"), \
+             patch("src.gateway.service.send_text_message", new_callable=AsyncMock, return_value="wamid.TEXT_OUT_02") as mock_send_text, \
+             patch("src.gateway.service.upload_media_bytes", new_callable=AsyncMock) as mock_upload, \
+             patch("src.gateway.service.send_audio_message", new_callable=AsyncMock) as mock_send_audio, \
+             patch("src.gateway.service.mark_message_as_read", new_callable=AsyncMock), \
+             patch("src.gateway.service.get_settings") as mock_settings:
+
+            mock_settings.return_value.enable_voice_responses = False
+
+            await process_message_pipeline(parsed)
+
+            mock_send_text.assert_awaited_once()
+            mock_upload.assert_not_called()
+            mock_send_audio.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_text_input_feature_flag_on_dispatches_text_and_audio(self):
+        """When enable_voice_responses is True and input is text, both text and audio are dispatched."""
         import uuid
         from src.core.models import Farmer, Conversation
         from src.gateway.schemas import ParsedIncomingMessage
@@ -581,20 +626,24 @@ class TestGatewayVoiceIntegration:
              patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=False), \
              patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock, return_value=mock_farmer), \
              patch("src.gateway.service.store_incoming_message", new_callable=AsyncMock, return_value=mock_conv), \
+             patch("src.gateway.service.get_language_service") as mock_lang_svc, \
              patch("src.gateway.service.process_text_message", new_callable=AsyncMock, return_value="వరి సాగు సమాధానం"), \
              patch("src.gateway.service.send_text_message", new_callable=AsyncMock, return_value="wamid.TEXT_OUT_02") as mock_send_text, \
-             patch("src.gateway.service.upload_media_bytes", new_callable=AsyncMock) as mock_upload, \
-             patch("src.gateway.service.send_audio_message", new_callable=AsyncMock) as mock_send_audio, \
+             patch("src.gateway.service.upload_media_bytes", new_callable=AsyncMock, return_value="meta_media_text_01") as mock_upload, \
+             patch("src.gateway.service.send_audio_message", new_callable=AsyncMock, return_value="wamid.AUDIO_OUT_02") as mock_send_audio, \
              patch("src.gateway.service.mark_message_as_read", new_callable=AsyncMock), \
              patch("src.gateway.service.get_settings") as mock_settings:
 
             mock_settings.return_value.enable_voice_responses = True
+            mock_lang_svc.return_value.synthesize_speech = AsyncMock(return_value=[b"OggS_text_voice_bytes"])
 
             await process_message_pipeline(parsed)
 
-            mock_send_text.assert_awaited_once()
-            mock_upload.assert_not_called()
-            mock_send_audio.assert_not_called()
+            # Both text and audio dispatched with exact same content
+            mock_send_text.assert_awaited_once_with(to_phone="919876543210", message_text="వరి సాగు సమాధానం")
+            mock_lang_svc.return_value.synthesize_speech.assert_awaited_once_with("వరి సాగు సమాధానం", "te")
+            mock_upload.assert_awaited_once_with(b"OggS_text_voice_bytes", mime_type="audio/ogg")
+            mock_send_audio.assert_awaited_once_with("919876543210", "meta_media_text_01")
 
     @pytest.mark.asyncio
     async def test_voice_input_feature_flag_on_single_chunk_success(self):
