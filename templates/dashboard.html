@@ -749,69 +749,266 @@
     <!-- 5. PILOT ANALYTICS DASHBOARD VIEW (Admin Only)                       -->
     <!-- ==================================================================== -->
     <div id="view-analytics" class="dashboard-view" style="display: none;">
+      
+      <!-- Top Title & Global Actions -->
       <div class="view-header">
         <div>
-          <h2 class="view-title">📊 Startup Pilot Telemetry & Analytics</h2>
-          <p class="view-subtitle">Real-time operational metrics, DAU/WAU, modality adoption, and WhatsApp delivery health.</p>
+          <h2 class="view-title">📊 BhoomiMitra Admin Pilot Analytics</h2>
+          <p class="view-subtitle">Real-time telemetry, conversational analytics, AI performance, intent distribution, and audit log.</p>
         </div>
         <div class="view-actions">
-          <button class="btn btn-secondary btn-sm" onclick="loadPilotAnalytics()">🔄 Refresh Metrics</button>
+          <span id="analytics-last-refreshed" style="font-size: 0.82rem; color: var(--text-muted); align-self: center;">Live Telemetry</span>
+          <button class="btn btn-secondary btn-sm" onclick="loadPilotAnalytics()">🔄 Refresh All</button>
         </div>
       </div>
 
-      <!-- Top KPI Stats Grid -->
-      <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 1.5rem;">
+      <!-- 1. KPI Cards Grid (6 Main Metrics) -->
+      <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 1.5rem;">
+        <!-- Total Farmers -->
         <div class="stat-card">
           <div class="stat-icon">👨‍🌾</div>
-          <div class="stat-value" id="stat-analytics-farmers">0</div>
-          <div class="stat-label">Total Registered Farmers</div>
+          <div>
+            <div class="stat-value" id="stat-analytics-farmers">0</div>
+            <div class="stat-label">Total Farmers</div>
+          </div>
         </div>
-        <div class="stat-card">
-          <div class="stat-icon">⚡</div>
-          <div class="stat-value" id="stat-analytics-dau">0</div>
-          <div class="stat-label">DAU (Past 24h) / WAU: <span id="stat-analytics-wau">0</span></div>
-        </div>
+
+        <!-- Total Questions -->
         <div class="stat-card">
           <div class="stat-icon">💬</div>
-          <div class="stat-value" id="stat-analytics-messages-today">0</div>
-          <div class="stat-label">Messages Today (All-Time: <span id="stat-analytics-total-msgs">0</span>)</div>
+          <div>
+            <div class="stat-value" id="stat-analytics-total-msgs">0</div>
+            <div class="stat-label">Total Questions (<span id="stat-analytics-messages-today">0</span> Today)</div>
+          </div>
         </div>
+
+        <!-- Total AI Responses -->
         <div class="stat-card">
-          <div class="stat-icon">🌐</div>
-          <div class="stat-value" id="stat-analytics-te-ratio">0%</div>
-          <div class="stat-label">Telugu Usage (<span id="stat-analytics-te-count">0</span> TE / <span id="stat-analytics-en-count">0</span> EN)</div>
+          <div class="stat-icon" style="background: #e0e7ff; color: #4338ca;">🤖</div>
+          <div>
+            <div class="stat-value" id="stat-analytics-ai-responses">0</div>
+            <div class="stat-label">AI Responses</div>
+          </div>
         </div>
+
+        <!-- Active Users Today (DAU) -->
         <div class="stat-card">
-          <div class="stat-icon">🎙️</div>
-          <div class="stat-value" id="stat-analytics-audio-ratio">0%</div>
-          <div class="stat-label">Voice Note Usage (<span id="stat-analytics-audio-cnt">0</span> Audio / <span id="stat-analytics-text-cnt">0</span> Text)</div>
+          <div class="stat-icon">⚡</div>
+          <div>
+            <div class="stat-value" id="stat-analytics-dau">0</div>
+            <div class="stat-label">Active Users Today (WAU: <span id="stat-analytics-wau">0</span>)</div>
+          </div>
         </div>
+
+        <!-- Average AI Response Time -->
         <div class="stat-card">
-          <div class="stat-icon">👨‍⚕️</div>
-          <div class="stat-value" id="stat-analytics-escalation-total">0</div>
-          <div class="stat-label">Escalations (<span id="stat-analytics-escalation-pending" style="color: var(--accent-gold);">0</span> Pending / <span id="stat-analytics-escalation-resolved" style="color: var(--accent-green);">0</span> Resolved)</div>
+          <div class="stat-icon" style="background: #dbeafe; color: #1d4ed8;">⏱️</div>
+          <div>
+            <div class="stat-value" id="stat-analytics-avg-response-time">—</div>
+            <div class="stat-label">Avg Response Time</div>
+          </div>
         </div>
+
+        <!-- Slow Responses (>10s) -->
         <div class="stat-card">
-          <div class="stat-icon">📡</div>
-          <div class="stat-value" id="stat-analytics-delivery-rate">100%</div>
-          <div class="stat-label">WhatsApp Delivery (<span id="stat-analytics-delivery-sent">0</span> Sent / <span id="stat-analytics-delivery-failed" style="color: var(--danger-color);">0</span> Failed)</div>
+          <div class="stat-icon warning">⚠️</div>
+          <div>
+            <div class="stat-value" id="stat-analytics-slow-responses">0</div>
+            <div class="stat-label">Slow Responses (&gt;10s)</div>
+          </div>
         </div>
       </div>
 
-      <!-- Charts Row -->
-      <div class="grid-2" style="gap: 1.5rem; margin-bottom: 1.5rem;">
-        <div class="card">
-          <div class="card-title">📈 7-Day Active Farmers & Message Volume</div>
-          <div style="position: relative; height: 280px;">
-            <canvas id="chart-pilot-activity"></canvas>
+      <!-- 2. Activity Trends & Period Selector -->
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div class="card-title">
+          <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <span>📈 Activity Over Time</span>
+            <span style="font-size: 0.82rem; font-weight: normal; color: var(--text-muted);">(Questions &amp; Active Farmers)</span>
+          </div>
+          <!-- Day / Week / Month selector -->
+          <div class="analytics-period-toggle" style="display: flex; gap: 0.35rem;">
+            <button class="btn btn-sm btn-secondary" id="btn-period-day" onclick="setAnalyticsPeriod('day')">Day</button>
+            <button class="btn btn-sm btn-secondary active" id="btn-period-week" onclick="setAnalyticsPeriod('week')">Week</button>
+            <button class="btn btn-sm btn-secondary" id="btn-period-month" onclick="setAnalyticsPeriod('month')">Month</button>
           </div>
         </div>
+        <div style="position: relative; height: 280px;">
+          <canvas id="chart-pilot-activity"></canvas>
+        </div>
+      </div>
+
+      <!-- 3. Usage & Intent Breakdown Row -->
+      <div class="grid-2" style="gap: 1.5rem; margin-bottom: 1.5rem;">
+        
+        <!-- Intent / Query-Type Breakdown -->
         <div class="card">
-          <div class="card-title">🍩 Modality & Language Breakdown</div>
-          <div style="position: relative; height: 280px;">
+          <div class="card-title">
+            <span>🎯 Intent &amp; Query-Type Breakdown</span>
+          </div>
+          <div style="position: relative; height: 240px;">
+            <canvas id="chart-pilot-intent"></canvas>
+          </div>
+          <div id="analytics-intent-pills" style="display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.75rem;">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+
+        <!-- Usage & Health: Modality, Languages, Delivery, Escalations -->
+        <div class="card">
+          <div class="card-title">
+            <span>📡 Modality, Language &amp; Delivery Health</span>
+          </div>
+          <div style="position: relative; height: 200px; margin-bottom: 1rem;">
             <canvas id="chart-pilot-modality"></canvas>
           </div>
+          <div class="grid-3" style="gap: 0.75rem; text-align: center;">
+            <div style="background: var(--bg-main); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+              <div style="font-size: 0.78rem; color: var(--text-muted);">Language (TE/EN)</div>
+              <div style="font-weight: 700; font-size: 1.1rem; color: var(--primary); margin-top: 2px;" id="stat-analytics-te-ratio">0%</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);"><span id="stat-analytics-te-count">0</span> TE / <span id="stat-analytics-en-count">0</span> EN</div>
+            </div>
+            <div style="background: var(--bg-main); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+              <div style="font-size: 0.78rem; color: var(--text-muted);">Delivery Success</div>
+              <div style="font-weight: 700; font-size: 1.1rem; color: var(--success-color); margin-top: 2px;" id="stat-analytics-delivery-rate">100%</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);"><span id="stat-analytics-delivery-sent">0</span> Sent / <span id="stat-analytics-delivery-failed" style="color: var(--danger-color);">0</span> Fail</div>
+            </div>
+            <div style="background: var(--bg-main); padding: 0.75rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+              <div style="font-size: 0.78rem; color: var(--text-muted);">Escalations</div>
+              <div style="font-weight: 700; font-size: 1.1rem; color: var(--accent); margin-top: 2px;" id="stat-analytics-escalation-total">0</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);"><span id="stat-analytics-escalation-pending" style="color: var(--warning-color);">0</span> Pend / <span id="stat-analytics-escalation-resolved" style="color: var(--success-color);">0</span> Res</div>
+            </div>
+          </div>
         </div>
+
+      </div>
+
+      <!-- 4. Rankings Grid (Top FAQs, Top Crops, Top Districts) -->
+      <div class="grid-3" style="gap: 1.5rem; margin-bottom: 1.5rem;">
+        
+        <!-- Top Questions -->
+        <div class="card">
+          <div class="card-title">
+            <span>🔥 Top Questions</span>
+          </div>
+          <div id="analytics-top-questions-list" style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 250px; overflow-y: auto;">
+            <p style="color: var(--text-muted); font-size: 0.88rem; text-align: center; padding: 1rem;">Not available yet</p>
+          </div>
+        </div>
+
+        <!-- Top Crops -->
+        <div class="card">
+          <div class="card-title">
+            <span>🌾 Top Crops</span>
+          </div>
+          <div id="analytics-top-crops-list" style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 250px; overflow-y: auto;">
+            <p style="color: var(--text-muted); font-size: 0.88rem; text-align: center; padding: 1rem;">Not available yet</p>
+          </div>
+        </div>
+
+        <!-- Top Districts -->
+        <div class="card">
+          <div class="card-title">
+            <span>📍 Top Districts</span>
+          </div>
+          <div id="analytics-top-districts-list" style="display: flex; flex-direction: column; gap: 0.5rem; max-height: 250px; overflow-y: auto;">
+            <p style="color: var(--text-muted); font-size: 0.88rem; text-align: center; padding: 1rem;">Not available yet</p>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 5. Conversation Audit Log (Paginated with Filters) -->
+      <div class="card" style="margin-bottom: 2rem;">
+        <div class="card-title" style="margin-bottom: 1rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span>📋 Conversation Audit Log</span>
+            <span class="badge badge-open" id="conv-total-count-badge">0 Records</span>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="loadConversationAudit()">🔄 Refresh Log</button>
+        </div>
+
+        <!-- Filter Controls Bar -->
+        <div style="display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-bottom: 1rem; background: var(--bg-main); padding: 0.85rem 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border-color);">
+          <div style="flex: 1; min-width: 180px;">
+            <input type="text" id="filter-conv-search" class="form-control" placeholder="🔍 Search question or AI answer..." oninput="onConvSearchInput()" style="margin-bottom: 0;">
+          </div>
+          <div style="min-width: 130px;">
+            <select id="filter-conv-intent" class="form-control" onchange="applyConversationFilters()" style="margin-bottom: 0;">
+              <option value="">All Intents</option>
+              <option value="shops">Shops</option>
+              <option value="fertilizer">Fertilizer</option>
+              <option value="weather">Weather</option>
+              <option value="market">Market</option>
+              <option value="disease">Disease</option>
+              <option value="schemes">Schemes</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div style="min-width: 120px;">
+            <select id="filter-conv-modality" class="form-control" onchange="applyConversationFilters()" style="margin-bottom: 0;">
+              <option value="">All Modalities</option>
+              <option value="text">Text</option>
+              <option value="audio">Voice Audio</option>
+              <option value="image">Camera Image</option>
+            </select>
+          </div>
+          <div style="min-width: 130px;">
+            <select id="filter-conv-delivery" class="form-control" onchange="applyConversationFilters()" style="margin-bottom: 0;">
+              <option value="">All Deliveries</option>
+              <option value="sent">Sent</option>
+              <option value="delivered">Delivered</option>
+              <option value="failed">Failed</option>
+              <option value="pending">Pending</option>
+            </select>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="resetConversationFilters()" style="height: 38px;">Reset</button>
+        </div>
+
+        <!-- Conversation Table -->
+        <div class="table-responsive">
+          <table class="data-table" id="conversation-audit-table">
+            <thead>
+              <tr>
+                <th style="min-width: 130px;">Received Time</th>
+                <th style="min-width: 110px;">Farmer</th>
+                <th style="min-width: 90px;">Modality</th>
+                <th style="min-width: 180px;">Question</th>
+                <th style="min-width: 220px;">AI Answer</th>
+                <th style="min-width: 100px;">Intent</th>
+                <th style="min-width: 100px;">Response Time</th>
+                <th style="min-width: 90px;">Delivery</th>
+              </tr>
+            </thead>
+            <tbody id="conversation-audit-tbody">
+              <tr>
+                <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                  Loading conversations...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Pagination Controls -->
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem; margin-top: 1rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
+          <div style="font-size: 0.85rem; color: var(--text-muted);" id="conv-page-info">
+            Showing 0–0 of 0 conversations
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <button class="btn btn-secondary btn-sm" id="btn-conv-prev" onclick="changeConvPage(-1)" disabled>← Previous</button>
+            <span style="font-size: 0.85rem; font-weight: 600; padding: 0 0.25rem;">
+              Page <span id="conv-current-page-num">1</span> of <span id="conv-total-page-num">1</span>
+            </span>
+            <button class="btn btn-secondary btn-sm" id="btn-conv-next" onclick="changeConvPage(1)" disabled>Next →</button>
+            <select id="conv-page-size-select" class="form-control" onchange="changeConvPageSize(this.value)" style="width: auto; padding: 0.3rem 0.6rem; font-size: 0.82rem; margin-bottom: 0;">
+              <option value="10">10 / page</option>
+              <option value="20" selected>20 / page</option>
+              <option value="50">50 / page</option>
+            </select>
+          </div>
+        </div>
+
       </div>
 
     </div>

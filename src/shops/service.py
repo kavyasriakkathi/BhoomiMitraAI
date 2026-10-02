@@ -201,11 +201,17 @@ _KNOWN_DISTRICTS = {
     # Telangana
     "jagtial": "Jagtial",
     "జగిత్యాల": "Jagtial",
+    "జగిత్యాలలో": "Jagtial",
     "korutla": "Jagtial",
     "కోరుట్ల": "Jagtial",
+    "కోరుట్లలో": "Jagtial",
+    "korutla lo": "Jagtial",
+    "korutlalo": "Jagtial",
     "warangal": "Warangal",
     "hanamkonda": "Warangal",
     "వరంగల్": "Warangal",
+    "వరంగల్లో": "Warangal",
+    "వరంగల్ లో": "Warangal",
     "హనుమకొండ": "Warangal",
     "karimnagar": "Karimnagar",
     "కరీంనగర్": "Karimnagar",
@@ -458,12 +464,14 @@ def _is_explicit_stock_query(message: Optional[str]) -> bool:
         "available ga vundha", "available ga vunda", "available ga vundi", "available ga vundhi",
         "available vundha", "available vunda",
         "undha ledha", "unda leda", "vundha ledha", "vunda leda",
+        "unnadha ledha", "unnada leda", "unnadha", "unnada",
         "stock undha", "stock unda", "stock undhi", "stock undi",
         "stock vundha", "stock vunda", "stock vundi", "stock vundhi",
         "urea stock undi", "urea stock unda", "urea stock undha", "urea stock undhi",
         "urea stock vunda", "urea stock vundha", "urea stock vundi", "urea stock vundhi",
         "urea undha", "urea unda", "urea undhi", "urea undi",
         "urea vundha", "urea vunda", "urea vundi", "urea vundhi",
+        "urea unnadha", "urea unnada", "urea unnadhi", "urea unnadi",
         "dap undha", "dap unda", "fertilizer undha", "fertilizer unda",
         "dorukuthunda ledha", "dorukutunda leda", "dorukutunda", "dorukuthunda",
         "dorukuthundha", "dorukutundha",
@@ -472,22 +480,30 @@ def _is_explicit_stock_query(message: Optional[str]) -> bool:
         "is fertilizer available", "fertilizer available", "stock available",
         "is urea in stock", "urea in stock", "is dap in stock", "dap in stock", "in stock",
         "urea stock", "dap stock", "fertilizer stock", "stock availability",
+        "urea availability", "fertilizer availability", "pesticide availability", "seed availability",
         "available in", "is available",
         # Native Telugu script
         "అందుబాటులో ఉందా లేదా", "అందుబాటులో ఉందా", "అందుబాటులో ఉంది", "అందుబాటు",
         "లభ్యతగా ఉందా", "లభ్యత ఉందా", "స్టాక్ లభ్యత", "ఎరువుల స్టాక్",
         "స్టాక్ ఉందా", "స్టాక్ ఉంది", "యూరియా స్టాక్",
-        "ఉందా లేదా", "యూరియా ఉందా", "డిఎపి ఉందా", "ఎరువు ఉందా",
-        "యూరియా అందుబాటులో ఉందా", "యూరియా ఉందా లేదా",
+        "ఉందా లేదా", "ఉన్నదా లేదా", "ఉన్నదా", "యూరియా ఉందా", "యూరియా ఉన్నదా", "డిఎపి ఉందా", "ఎరువు ఉందా",
+        "యూరియా అందుబాటులో ఉందా", "యూరియా ఉందా లేదా", "యూరియా ఉన్నదా లేదా",
         "లభిస్తుందా లేదా", "దొరుకుతుందా లేదా", "లభ్యం అవుతుందా", "లభ్యం",
         "యూరియా లభిస్తుందా", "యూరియా దొరుకుతుందా",
+        # Society / PACS specific triggers
+        "సొసైటీలో యూరియా", "సొసైటీలో", "సొసైటీ", "సొసైటిలో", "సొసైటి", "pacs",
         # Multilingual phrases
         "उपलब्ध है या नहीं", "उपलब्ध है", "स्टॉक है या नहीं", "स्टॉक है", "यूरिया उपलब्ध है", "यूरिया स्टॉक",
         "இருப்பில் உள்ளதா", "கிடைக்குமா",
         "ಲಭ್ಯವಿದೆಯೇ", "ಸ್ಟಾಕ್ ಇದೆಯೇ",
     ]
     if any(k in m for k in stock_markers):
-        return True
+        # Directly match if it has an agricultural product, location, or society/pacs
+        if any(p in m for p in [
+            "urea", "dap", "fertilizer", "యూరియా", "డిఎపి", "ఎరువు",
+            "సొసైటీ", "సొసైటి", "pacs", "కోరుట్ల", "stock", "స్టాక్"
+        ]):
+            return True
 
     # Semantic check: query mentions an agricultural input product AND an availability word,
     # without asking for agricultural dosage/disease advice
@@ -496,13 +512,16 @@ def _is_explicit_stock_query(message: Optional[str]) -> bool:
         "seed", "seeds", "mop", "zinc", "boron", "neem oil", "confidor", "coragen",
         "roundup", "glyphosate", "యూరియా", "డిఎపి", "ఎరువు", "ఎరువులు", "విత్తనాలు",
         "పురుగుమందు", "పురుగుల మందు", "కలుపు మందు", "यूरिया", "खाद", "डीएपी", "बीज",
+        "సొసైటీ", "సొసైటీలో", "pacs",
     ]
     has_product = any(p in m for p in product_keywords)
 
     availability_tokens = [
-        "available", "availabl", "stock", "stocks", "undha", "unda", "vundha", "vunda",
+        "available", "availabl", "availability", "stock", "stocks", "undha", "unda", "vundha", "vunda",
+        "unnadha", "unnada", "unnadhi", "unnadi",
         "dorukuthunda", "dorukutunda", "dorukutundha", "dorukuthundha",
-        "ఉందా", "లభ్యత", "అందుబాటు", "లభిస్తుందా", "దొరుకుతుందా",
+        "ఉందా", "ఉన్నదా", "ఉన్నది", "లభ్యత", "అందుబాటు", "లభిస్తుందా", "దొరుకుతుందా",
+        "సొసైటీ", "సొసైటీలో", "pacs",
         "उपलब्ध", "स्टॉक", "இருப்பு", "ಲಭ್ಯ",
     ]
     has_avail = any(a in m for a in availability_tokens)
@@ -540,6 +559,16 @@ def _extract_district_from_query(query_text: Optional[str]) -> Optional[str]:
     for kw, dist_name in _KNOWN_DISTRICTS.items():
         if kw in q:
             return dist_name
+    return None
+
+
+def _extract_requested_town(query_text: Optional[str]) -> Optional[str]:
+    """Extract specific sub-district town if mentioned in query (e.g. Korutla)."""
+    if not query_text:
+        return None
+    q = query_text.lower()
+    if any(k in q for k in ["korutla", "కోరుట్ల", "కోరుట్లలో"]):
+        return "Korutla"
     return None
 
 
@@ -709,12 +738,7 @@ async def enrich_response_with_shops(
 
     # Step 2: Detect product keyword
     matched_product = _detect_product_from_query(query_text, ai_response)
-    if not matched_product:
-        logger.info("[ENRICH SHOPS] Bypassing shop enrichment - No product keyword matched.")
-        if not ai_response:
-            lang = detect_language(query_text, fallback=getattr(farmer, "preferred_language", "en") or "en")
-            return get_shops_labels(lang)["no_local_dealers"]
-        return ai_response
+    is_stock_query = _is_explicit_stock_query(query_text)
 
     # Step 3: Resolve farmer location and language (4-tier hierarchy)
     loc_res = await _resolve_farmer_location(db, farmer, query_text=query_text)
@@ -727,13 +751,40 @@ async def enrich_response_with_shops(
     language = detect_language(query_text, fallback=farmer_lang)
     labels = get_shops_labels(language)
 
-    # Step 4: Fetch matching shops from DB (no auto-seeding in production)
-    try:
-        shop_repo = ShopRepository(db)
-        matches = await shop_repo.search_shops_by_product(matched_product, only_available=False)
-    except Exception as db_err:
-        logger.warning(f"[ENRICH SHOPS] DB query failed: {db_err}")
-        return ai_response
+    matches: List[Tuple[Shop, Optional[Inventory]]] = []
+
+    if not matched_product:
+        # General shop query (no specific product mentioned)
+        if not is_stock_query and not ai_response and district:
+            try:
+                shop_repo = ShopRepository(db)
+                loc_shops = await shop_repo.search_by_location(district=district)
+                if loc_shops:
+                    matches = [(s, None) for s in loc_shops]
+                else:
+                    return labels["no_local_dealers"]
+            except Exception as db_err:
+                logger.warning(f"[ENRICH SHOPS] Location shop query failed: {db_err}")
+                return labels["no_local_dealers"]
+        else:
+            logger.info("[ENRICH SHOPS] Bypassing shop enrichment - No product keyword matched.")
+            if not ai_response:
+                return labels["no_local_dealers"]
+            return ai_response
+    else:
+        # Step 4: Fetch matching shops from DB (no auto-seeding in production)
+        try:
+            shop_repo = ShopRepository(db)
+            matches = await shop_repo.search_shops_by_product(matched_product, only_available=False)
+            # If no inventory matches, but user asked a general shop query (not a specific stock query)
+            # and specified/has a district, fallback to active registered shops in the location
+            if not matches and not is_stock_query and district:
+                loc_shops = await shop_repo.search_by_location(district=district)
+                if loc_shops:
+                    matches = [(s, None) for s in loc_shops]
+        except Exception as db_err:
+            logger.warning(f"[ENRICH SHOPS] DB query failed: {db_err}")
+            return ai_response
 
     if not matches:
         logger.info(f"[ENRICH SHOPS] No active shops found for product '{matched_product}'.")
@@ -755,6 +806,7 @@ async def enrich_response_with_shops(
             and shop.longitude is not None
         ):
             dist = haversine_distance(latitude, longitude, shop.latitude, shop.longitude)
+        requested_town = _extract_requested_town(query_text)
 
         shop_dist = resolve_shop_district(shop.district, shop.address)
         farmer_dist_canon = resolve_shop_district(district) if district else None
@@ -765,20 +817,29 @@ async def enrich_response_with_shops(
             and farmer_dist_canon.lower() == shop_dist.lower()
         )
 
-        # Production Guard: If farmer location is known (GPS or District):
-        # A shop is ONLY valid if it is within safe radius (<= 50km), matches the farmer's district,
-        # or is an unlocalized/general merchant (no GPS and no district specified).
+        # Production Guard: If farmer location is known (GPS, District, or Town):
+        # A shop is ONLY valid if it is within safe radius (<= 50km) or matches the farmer's canonical district.
+        # Unlocalized shops (NULL district/address) or out-of-district shops are strictly suppressed.
         if has_farmer_location:
             is_valid_local = False
-            if dist is not None and dist <= max_radius_km:
+            shop_address_lower = (shop.address or "").lower()
+            shop_name_lower = (shop.shop_name or "").lower()
+
+            # Town-level exact match (e.g. Korutla)
+            town_match = requested_town and (
+                requested_town.lower() in shop_address_lower
+                or requested_town.lower() in shop_name_lower
+            )
+
+            if town_match and (district_match or dist is not None and dist <= max_radius_km):
+                is_valid_local = True
+                rank = 0
+            elif dist is not None and dist <= max_radius_km:
                 is_valid_local = True
                 rank = 1
             elif district_match:
                 is_valid_local = True
                 rank = 2
-            elif shop.latitude is None and shop.district is None and shop_dist is None:
-                is_valid_local = True
-                rank = 3
             else:
                 is_valid_local = False
 
@@ -788,7 +849,7 @@ async def enrich_response_with_shops(
             rank = 3
 
         # Availability preference: In-stock items ranked before out-of-stock items
-        stock_rank = 0 if (item.available and item.quantity_in_stock > 0) else 1
+        stock_rank = 0 if item is not None and item.available and item.quantity_in_stock > 0 else 1
 
         sort_key = (
             rank,
@@ -802,15 +863,41 @@ async def enrich_response_with_shops(
             f"[ENRICH SHOPS] No local verified shops found within safe radius/district for product '{matched_product}' "
             f"(district: {district}, coords: ({latitude}, {longitude}))."
         )
+        if is_stock_query or requested_town:
+            if language == "te":
+                stock_unavail_msg = (
+                    "🏬 సమాచారం:\n"
+                    "ప్రస్తుతం మీ ప్రాంతంలో ధృవీకరించబడిన లైవ్ స్టాక్ సమాచారం అందుబాటులో లేదు. "
+                    "ఖచ్చితమైన స్టాక్ లభ్యత కోసం దయచేసి మీ స్థానిక ప్రాథమిక వ్యవసాయ సహకార సంఘం (PACS/సొసైటీ), "
+                    "వ్యవసాయ విస్తరణ అధికారి (AEO) లేదా స్థానిక డీలర్‌ను సంప్రదించండి."
+                )
+            elif language == "hi":
+                stock_unavail_msg = (
+                    "🏬 सूचना:\n"
+                    "वर्तमान में आपके क्षेत्र में सत्यापित लाइव स्टॉक जानकारी उपलब्ध नहीं है। "
+                    "कृपया सटीक स्टॉक उपलब्धता के लिए अपने स्थानीय पैक्स (PACS/सोसायटी), "
+                    "कृषि विस्तार अधिकारी (AEO) या स्थानीय डीलर से संपर्क करें।"
+                )
+            else:
+                stock_unavail_msg = (
+                    "🏬 Notice:\n"
+                    "Verified live stock information is currently unavailable for your locality. "
+                    "Please contact your local Primary Agricultural Credit Society (PACS), "
+                    "Agriculture Extension Officer (AEO), or authorized local dealer for current stock availability."
+                )
+            return (ai_response + "\n\n" + stock_unavail_msg).strip() if ai_response else stock_unavail_msg
+
         return (ai_response + "\n\n" + labels["no_local_dealers"]).strip() if ai_response else labels["no_local_dealers"]
 
     scored_matches.sort(key=lambda x: x[0])
     top = scored_matches[:3]
 
-    # Check if ALL top matches are out of stock
-    all_out_of_stock = all(
+    # Check if ALL top matches are out of stock (only when inventory items are present)
+    has_any_item = any(item is not None for _, _, item, _ in top)
+    all_out_of_stock = has_any_item and all(
         (not item.available or item.quantity_in_stock <= 0)
         for _, _, item, _ in top
+        if item is not None
     )
 
     # Step 6: Format WhatsApp reply block
@@ -819,9 +906,6 @@ async def enrich_response_with_shops(
         dist_str = labels["dist_fmt"].format(dist=dist) if dist is not None else labels["dist_generic"]
         status_str = labels["status_open"] if shop.status == "active" else labels["status_closed"]
         delivery_str = labels["delivery_avail"] if shop.delivery_available else labels["delivery_none"]
-        stock_str = _format_stock_string(
-            item.quantity_in_stock, item.minimum_stock_level, item.available, item.unit, labels
-        )
 
         time_range = ""
         if shop.opening_time and shop.closing_time:
@@ -829,22 +913,31 @@ async def enrich_response_with_shops(
 
         lines = [
             f"\n• *{shop.shop_name}* ({dist_str})",
-            f"  {labels['product']}: {item.product_name} ({item.brand})",
-            f"  {labels['price']}: ₹{item.price:g}/{item.unit} | {stock_str}",
+        ]
+        if item is not None:
+            stock_str = _format_stock_string(
+                item.quantity_in_stock, item.minimum_stock_level, item.available, item.unit, labels
+            )
+            lines.append(f"  {labels['product']}: {item.product_name} ({item.brand})")
+            lines.append(f"  {labels['price']}: ₹{item.price:g}/{item.unit} | {stock_str}")
+            if getattr(item, "last_updated", None):
+                v_date = item.last_updated.strftime("%d-%m-%Y")
+                updated_label = labels.get("last_updated", "Last updated")
+                lines.append(f"  🕒 {updated_label}: {v_date}")
+        elif shop.address:
+            lines.append(f"  📍 {shop.address}")
+
+        lines.extend([
             f"  {labels['contact']}: {shop.phone_number} | {status_str}{time_range}",
             f"  {labels['delivery']}: {delivery_str}",
-        ]
-        if getattr(item, "last_updated", None):
-            v_date = item.last_updated.strftime("%d-%m-%Y")
-            updated_label = labels.get("last_updated", "Last updated")
-            lines.append(f"  🕒 {updated_label}: {v_date}")
+        ])
         shop_entries.append("\n".join(lines))
 
     header_parts = [labels["title"]]
     if all_out_of_stock:
         header_parts.append(labels["all_out_of_stock"])
 
-    footer_parts = [labels["footer_disclaimer"]]
+    footer_parts = [labels["footer_disclaimer"]] if has_any_item else []
     if len(matches) > 3:
         footer_parts.append(labels["more"])
 
@@ -856,7 +949,7 @@ async def enrich_response_with_shops(
     ])
 
     logger.info(
-        f"[ENRICH SHOPS] Appending {len(top)} shops for '{matched_product}' "
+        f"[ENRICH SHOPS] Appending {len(top)} shops for '{matched_product or 'general shops'}' "
         f"(district: {district}, coords: ({latitude}, {longitude}))."
     )
     return (ai_response + "\n\n" + full_block).strip() if ai_response else full_block

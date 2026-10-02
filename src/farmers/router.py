@@ -5,6 +5,9 @@ from src.core.database import get_db
 from src.farmers.schemas import FarmerCreate, FarmerUpdate, FarmerResponse, PaginatedFarmerResponse
 from src.farmers.service import FarmerService
 from src.farmers.dependencies import get_farmer_service
+from src.conversation.schemas import PaginatedConversationResponse
+from src.conversation.service import ConversationService
+from src.conversation.dependencies import get_conversation_service
 from src.auth.dependencies import require_admin
 from src.core.models import UserAccount
 
@@ -58,6 +61,27 @@ async def get_farmer(
     service: FarmerService = Depends(get_farmer_service)
 ):
     return await service.get_farmer(farmer_id)
+
+@router.get(
+    "/{farmer_id}/conversations",
+    response_model=PaginatedConversationResponse,
+    status_code=status.HTTP_200_OK,
+    summary="List conversations for a farmer",
+    description="Retrieve a paginated conversation history for a specific farmer, ordered by newest first."
+)
+async def get_farmer_conversations(
+    farmer_id: UUID,
+    page: int = Query(1, ge=1, description="Page number"),
+    size: int = Query(10, ge=1, le=100, description="Page size"),
+    service: ConversationService = Depends(get_conversation_service)
+):
+    total, items = await service.get_farmer_conversations(farmer_id, page=page, size=size)
+    return PaginatedConversationResponse(
+        total=total,
+        items=items,
+        page=page,
+        size=size
+    )
 
 @router.put(
     "/{farmer_id}",

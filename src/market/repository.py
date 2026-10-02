@@ -330,6 +330,11 @@ class MarketPriceRepository:
         cutoff = datetime.utcnow() - timedelta(days=limit_days)
         base_commodity_filter = [MarketPrice.commodity.ilike(f"%{commodity}%")]
 
+        if district:
+            from src.market.service import normalize_district_name, infer_state_from_district
+            district = normalize_district_name(district)
+            state = infer_state_from_district(district, state)
+
         # 1. Exact district records with current date cutoff
         if district:
             district_recent = await self._query_prices(
@@ -392,7 +397,18 @@ class MarketPriceRepository:
                 )
                 return state_all
 
-        # 5. National records with current date cutoff
+        # Strict geographic fencing:
+        # If the user or profile has a known district or state (e.g. Telangana / Warangal / Jagtial):
+        # NEVER silently fall back to cross-state or national data (e.g. Cumbum, AP or Kalediya, Gujarat).
+        if district or state:
+            logger.info(
+                f"[MARKET REPO] Strict geographic fencing active for commodity='{commodity}', "
+                f"district='{district}', state='{state}'. No local or state-level records found. "
+                "Suppressed national cross-state fallback to prevent wrong location answers."
+            )
+            return []
+
+        # 5. National records with current date cutoff (only when completely ungrounded)
         national_recent = await self._query_prices(
             base_commodity_filter + [MarketPrice.price_date >= cutoff]
         )

@@ -173,6 +173,100 @@ def _is_timeout_error(e: Exception) -> bool:
     )
 
 
+def _is_permanent_client_error(e: Exception) -> bool:
+    """
+    Detect permanent 4xx client errors (excluding 408 timeout and 429 quota/rate limit).
+    These should not be retried as the request will never succeed without client modifications.
+    """
+    if e is None:
+        return False
+    if _is_auth_error(e) or _is_quota_exhausted_error(e) or _is_timeout_error(e):
+        return False
+
+    status = getattr(e, "code", None)
+    if status is None:
+        status = getattr(e, "status_code", None)
+
+    if status is not None and 400 <= status < 500 and status not in (408, 429):
+        return True
+
+    err_type = type(e).__name__.lower()
+    err_str = str(e).lower()
+
+    permanent_4xx_signals = (
+        "invalidargument",
+        "invalid_argument",
+        "invalid argument",
+        "notfound",
+        "not_found",
+        "not found",
+        "badrequest",
+        "bad_request",
+        "bad request",
+        "400",
+        "404",
+    )
+    return any(sig in err_type or sig in err_str for sig in permanent_4xx_signals)
+
+
+def _is_transient_error(e: Exception) -> bool:
+    """
+    Detect transient failures eligible for bounded retry:
+    - Connection timeouts
+    - Temporary network drops / disconnects
+    - HTTP 500 / 502 / 503 / 504
+    - Equivalent transient Google API errors (ServiceUnavailable, InternalServerError, etc.)
+    Strictly excludes auth, quota/429, and permanent 4xx errors.
+    """
+    if e is None:
+        return False
+
+    if _is_auth_error(e) or _is_quota_exhausted_error(e) or _is_permanent_client_error(e):
+        return False
+
+    if _is_timeout_error(e):
+        return True
+
+    status = getattr(e, "code", None)
+    if status is None:
+        status = getattr(e, "status_code", None)
+
+    if status in (500, 502, 503, 504):
+        return True
+
+    err_type = type(e).__name__.lower()
+    err_str = str(e).lower()
+
+    transient_signals = (
+        "serviceunavailable",
+        "service_unavailable",
+        "internalservererror",
+        "internal_server_error",
+        "badgateway",
+        "bad_gateway",
+        "gatewaytimeout",
+        "gateway_timeout",
+        "connection reset",
+        "connection refused",
+        "connection closed",
+        "remote end closed",
+        "network",
+        "temporarily unavailable",
+        "temporary failure",
+        "server disconnected",
+        "transport error",
+        "503",
+        "500",
+        "502",
+        "504",
+    )
+    return any(signal in err_type or signal in err_str for signal in transient_signals)
+
+
+MAX_RETRIES = 2
+RETRY_BACKOFF = [0.5, 1.2]
+
+
 def _build_history(
     conversation_history: List[Dict[str, str]],
 ) -> List[types.Content]:
@@ -261,132 +355,135 @@ async def generate_response(
     timeout_count = 0
 
     for attempt_idx, model_name in enumerate(candidate_models):
+        abort_all_candidates = False
 
-        req_start_time = time.time()
+        for retry_attempt in range(MAX_RETRIES + 1):
+            req_start_time = time.time()
 
-        current_timeout = (
-            timeout_seconds
-            if attempt_idx == 0
-            else min(timeout_seconds, 10.0)
-        )
-
-        logger.info(
-            f"[GEMINI API REQUEST START] "
-            f"(Attempt {attempt_idx + 1}/{len(candidate_models)})\n"
-            f"  Model            : {model_name}\n"
-            f"  Timeout          : {current_timeout}s\n"
-            f"  Context History  : {len(history)} messages\n"
-            f"  User Message     : "
-            f"'{user_message[:120]}' "
-            f"(len={len(user_message)})\n"
-            f"  System Prompt Len: "
-            f"{len(system_prompt)} chars"
-        )
-
-        try:
-
-            config = types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.4,
-                max_output_tokens=1024,
-                top_p=0.9,
+            current_timeout = (
+                timeout_seconds
+                if attempt_idx == 0
+                else min(timeout_seconds, 10.0)
             )
-
-            response = await asyncio.wait_for(
-                client.aio.models.generate_content(
-                    model=model_name,
-                    contents=contents,
-                    config=config,
-                ),
-                timeout=float(current_timeout),
-            )
-
-            elapsed = time.time() - req_start_time
-            total_elapsed = time.time() - total_start_time
 
             logger.info(
-                f"[GEMINI API RESPONSE RECEIVED]\n"
+                f"[GEMINI API REQUEST START] "
+                f"(Attempt {attempt_idx + 1}/{len(candidate_models)}: {model_name}, Try {retry_attempt + 1}/{MAX_RETRIES + 1})\n"
                 f"  Model            : {model_name}\n"
-                f"  Status           : 200 OK\n"
-                f"  Call Duration    : {elapsed:.2f}s\n"
-                f"  Total Duration   : {total_elapsed:.2f}s"
+                f"  Timeout          : {current_timeout}s\n"
+                f"  Context History  : {len(history)} messages\n"
+                f"  User Message     : "
+                f"'{user_message[:120]}' "
+                f"(len={len(user_message)})\n"
+                f"  System Prompt Len: "
+                f"{len(system_prompt)} chars"
             )
 
-            ai_text = (
-                response.text.strip()
-                if response.text
-                else ""
-            )
-
-            logger.info(
-                f"[GEMINI RESPONSE PARSED]\n"
-                f"  Model Used       : {model_name}\n"
-                f"  Output Length    : {len(ai_text)} chars\n"
-                f"  Preview          : "
-                f"'{ai_text[:120]}...'"
-            )
-
-            return ai_text
-
-        except Exception as e:
-
-            elapsed = time.time() - req_start_time
-            last_error = e
-
-            if _is_quota_exhausted_error(e):
-
-                logger.warning(
-                    f"[GEMINI QUOTA EXHAUSTED] "
-                    f"Model {model_name} failed with quota "
-                    f"exhaustion after {elapsed:.2f}s: "
-                    f"{type(e).__name__} - {e}. "
-                    f"Aborting model fallback chain."
+            try:
+                config = types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.4,
+                    max_output_tokens=1024,
+                    top_p=0.9,
                 )
 
-                break
-
-            if _is_auth_error(e):
-
-                logger.error(
-                    f"[GEMINI AUTH ERROR] "
-                    f"Model {model_name} failed with "
-                    f"authentication error after "
-                    f"{elapsed:.2f}s: "
-                    f"{type(e).__name__} - {e}. "
-                    f"Aborting fallback chain."
+                response = await asyncio.wait_for(
+                    client.aio.models.generate_content(
+                        model=model_name,
+                        contents=contents,
+                        config=config,
+                    ),
+                    timeout=float(current_timeout),
                 )
 
-                break
+                elapsed = time.time() - req_start_time
+                total_elapsed = time.time() - total_start_time
 
-            if _is_timeout_error(e):
-
-                timeout_count += 1
-
-                logger.warning(
-                    f"[GEMINI TIMEOUT] "
-                    f"Model {model_name} timed out after "
-                    f"{elapsed:.2f}s "
-                    f"(limit={current_timeout}s). "
-                    f"Trying next model..."
+                logger.info(
+                    f"[GEMINI API RESPONSE RECEIVED]\n"
+                    f"  Model            : {model_name}\n"
+                    f"  Status           : 200 OK\n"
+                    f"  Call Duration    : {elapsed:.2f}s\n"
+                    f"  Total Duration   : {total_elapsed:.2f}s"
                 )
 
-                if timeout_count >= 2:
+                ai_text = (
+                    response.text.strip()
+                    if response.text
+                    else ""
+                )
+
+                logger.info(
+                    f"[GEMINI RESPONSE PARSED]\n"
+                    f"  Model Used       : {model_name}\n"
+                    f"  Output Length    : {len(ai_text)} chars\n"
+                    f"  Preview          : "
+                    f"'{ai_text[:120]}...'"
+                )
+
+                return ai_text
+
+            except Exception as e:
+                elapsed = time.time() - req_start_time
+                last_error = e
+
+                if _is_quota_exhausted_error(e):
                     logger.warning(
-                        f"[GEMINI TIMEOUT CEILING] "
-                        f"{timeout_count} models timed out. "
-                        f"Aborting fallback."
+                        f"[GEMINI QUOTA EXHAUSTED] "
+                        f"Model {model_name} failed with quota exhaustion after {elapsed:.2f}s: "
+                        f"{type(e).__name__} - {e}. Aborting fallback chain."
+                    )
+                    abort_all_candidates = True
+                    break
+
+                if _is_auth_error(e):
+                    logger.error(
+                        f"[GEMINI AUTH ERROR] "
+                        f"Model {model_name} failed with authentication error after {elapsed:.2f}s: "
+                        f"{type(e).__name__} - {e}. Aborting fallback chain."
+                    )
+                    abort_all_candidates = True
+                    break
+
+                if _is_permanent_client_error(e):
+                    logger.warning(
+                        f"[GEMINI PERMANENT 4XX ERROR] "
+                        f"Model {model_name} failed with permanent client error after {elapsed:.2f}s: "
+                        f"{type(e).__name__} - {e}. Not retrying."
                     )
                     break
 
-            else:
+                if _is_transient_error(e) and retry_attempt < MAX_RETRIES:
+                    backoff = RETRY_BACKOFF[retry_attempt]
+                    logger.warning(
+                        f"[GEMINI TRANSIENT ERROR - RETRY {retry_attempt + 1}/{MAX_RETRIES}] "
+                        f"Model {model_name} failed with {type(e).__name__}: {e}. "
+                        f"Backing off {backoff}s before retry..."
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
 
-                logger.warning(
-                    f"[GEMINI ERROR] "
-                    f"Model {model_name} failed after "
-                    f"{elapsed:.2f}s: "
-                    f"{type(e).__name__} - {e}. "
-                    f"Trying next model..."
-                )
+                if _is_timeout_error(e):
+                    timeout_count += 1
+                    logger.warning(
+                        f"[GEMINI TIMEOUT] "
+                        f"Model {model_name} timed out after {elapsed:.2f}s (limit={current_timeout}s). Trying next model..."
+                    )
+                    if timeout_count >= 2:
+                        logger.warning(
+                            f"[GEMINI TIMEOUT CEILING] {timeout_count} models timed out. Aborting fallback."
+                        )
+                        abort_all_candidates = True
+                    break
+                else:
+                    logger.warning(
+                        f"[GEMINI ERROR] Model {model_name} failed after {elapsed:.2f}s: "
+                        f"{type(e).__name__} - {e}. Trying next model..."
+                    )
+                    break
+
+        if abort_all_candidates:
+            break
 
     total_elapsed = time.time() - total_start_time
 
@@ -445,145 +542,170 @@ async def generate_multimodal_response(
     timeout_count = 0
 
     for attempt_idx, model_name in enumerate(candidate_models):
+        abort_all_candidates = False
 
-        req_start_time = time.time()
-
-        logger.info(
-            f"[GEMINI MULTIMODAL REQUEST START] "
-            f"(Attempt {attempt_idx + 1}/{len(candidate_models)})\n"
-            f"  Model            : {model_name}\n"
-            f"  Timeout          : {timeout_seconds}s\n"
-            f"  Image Size       : "
-            f"{len(image_bytes)} bytes ({mime_type})\n"
-            f"  Caption          : '{user_message}'\n"
-            f"  Context History  : {len(history)} messages"
-        )
-
-        try:
-
-            message_parts = [
-                types.Part.from_bytes(
-                    data=image_bytes,
-                    mime_type=mime_type,
-                )
-            ]
-
-            if user_message:
-                message_parts.append(
-                    types.Part.from_text(
-                        text=user_message
-                    )
-                )
-
-            contents = history + [
-                types.Content(
-                    role="user",
-                    parts=message_parts,
-                )
-            ]
-
-            config = types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.4,
-                max_output_tokens=1024,
-                top_p=0.9,
-                response_mime_type="application/json",
-            )
-
-            response = await asyncio.wait_for(
-                client.aio.models.generate_content(
-                    model=model_name,
-                    contents=contents,
-                    config=config,
-                ),
-                timeout=float(timeout_seconds),
-            )
-
-            elapsed = time.time() - req_start_time
-            total_elapsed = time.time() - total_start_time
+        for retry_attempt in range(MAX_RETRIES + 1):
+            req_start_time = time.time()
 
             logger.info(
-                f"[GEMINI MULTIMODAL RESPONSE RECEIVED]\n"
+                f"[GEMINI MULTIMODAL REQUEST START] "
+                f"(Attempt {attempt_idx + 1}/{len(candidate_models)}: {model_name}, Try {retry_attempt + 1}/{MAX_RETRIES + 1})\n"
                 f"  Model            : {model_name}\n"
-                f"  Status           : 200 OK\n"
-                f"  Call Duration    : {elapsed:.2f}s\n"
-                f"  Total Duration   : {total_elapsed:.2f}s"
+                f"  Timeout          : {timeout_seconds}s\n"
+                f"  Image Size       : "
+                f"{len(image_bytes)} bytes ({mime_type})\n"
+                f"  Caption          : '{user_message}'\n"
+                f"  Context History  : {len(history)} messages"
             )
 
-            ai_text = (
-                response.text.strip()
-                if response.text
-                else ""
-            )
+            try:
 
-            logger.info(
-                f"[GEMINI MULTIMODAL RESPONSE PARSED]\n"
-                f"  Model Used       : {model_name}\n"
-                f"  Output Length    : {len(ai_text)} chars\n"
-                f"  Preview          : "
-                f"'{ai_text[:120]}...'"
-            )
+                message_parts = [
+                    types.Part.from_bytes(
+                        data=image_bytes,
+                        mime_type=mime_type,
+                    )
+                ]
 
-            return ai_text
+                if user_message:
+                    message_parts.append(
+                        types.Part.from_text(
+                            text=user_message
+                        )
+                    )
 
-        except Exception as e:
+                contents = history + [
+                    types.Content(
+                        role="user",
+                        parts=message_parts,
+                    )
+                ]
 
-            elapsed = time.time() - req_start_time
-            last_error = e
-
-            if _is_quota_exhausted_error(e):
-
-                logger.warning(
-                    f"[GEMINI MULTIMODAL QUOTA EXHAUSTED] "
-                    f"Model {model_name} failed after "
-                    f"{elapsed:.2f}s: "
-                    f"{type(e).__name__} - {e}. "
-                    f"Aborting fallback."
+                config = types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.4,
+                    max_output_tokens=1024,
+                    top_p=0.9,
+                    response_mime_type="application/json",
                 )
 
-                break
-
-            if _is_auth_error(e):
-
-                logger.error(
-                    f"[GEMINI MULTIMODAL AUTH ERROR] "
-                    f"Model {model_name} failed after "
-                    f"{elapsed:.2f}s: "
-                    f"{type(e).__name__} - {e}. "
-                    f"Aborting fallback."
+                response = await asyncio.wait_for(
+                    client.aio.models.generate_content(
+                        model=model_name,
+                        contents=contents,
+                        config=config,
+                    ),
+                    timeout=float(timeout_seconds),
                 )
 
-                break
+                elapsed = time.time() - req_start_time
+                total_elapsed = time.time() - total_start_time
 
-            if _is_timeout_error(e):
-
-                timeout_count += 1
-
-                logger.warning(
-                    f"[GEMINI MULTIMODAL TIMEOUT] "
-                    f"Model {model_name} timed out after "
-                    f"{elapsed:.2f}s "
-                    f"(limit={timeout_seconds}s). "
-                    f"Trying next model..."
+                logger.info(
+                    f"[GEMINI MULTIMODAL RESPONSE RECEIVED]\n"
+                    f"  Model            : {model_name}\n"
+                    f"  Status           : 200 OK\n"
+                    f"  Call Duration    : {elapsed:.2f}s\n"
+                    f"  Total Duration   : {total_elapsed:.2f}s"
                 )
 
-                if timeout_count >= 2:
+                ai_text = (
+                    response.text.strip()
+                    if response.text
+                    else ""
+                )
+
+                logger.info(
+                    f"[GEMINI MULTIMODAL RESPONSE PARSED]\n"
+                    f"  Model Used       : {model_name}\n"
+                    f"  Output Length    : {len(ai_text)} chars\n"
+                    f"  Preview          : "
+                    f"'{ai_text[:120]}...'"
+                )
+
+                return ai_text
+
+            except Exception as e:
+
+                elapsed = time.time() - req_start_time
+                last_error = e
+
+                if _is_quota_exhausted_error(e):
+
                     logger.warning(
-                        f"[GEMINI MULTIMODAL TIMEOUT CEILING] "
-                        f"{timeout_count} models timed out. "
+                        f"[GEMINI MULTIMODAL QUOTA EXHAUSTED] "
+                        f"Model {model_name} failed after "
+                        f"{elapsed:.2f}s: "
+                        f"{type(e).__name__} - {e}. "
                         f"Aborting fallback."
+                    )
+                    abort_all_candidates = True
+                    break
+
+                if _is_auth_error(e):
+
+                    logger.error(
+                        f"[GEMINI MULTIMODAL AUTH ERROR] "
+                        f"Model {model_name} failed after "
+                        f"{elapsed:.2f}s: "
+                        f"{type(e).__name__} - {e}. "
+                        f"Aborting fallback."
+                    )
+                    abort_all_candidates = True
+                    break
+
+                if _is_permanent_client_error(e):
+                    logger.warning(
+                        f"[GEMINI MULTIMODAL PERMANENT 4XX ERROR] "
+                        f"Model {model_name} failed with permanent client error after {elapsed:.2f}s: "
+                        f"{type(e).__name__} - {e}. Not retrying."
                     )
                     break
 
-            else:
+                if _is_transient_error(e) and retry_attempt < MAX_RETRIES:
+                    backoff = RETRY_BACKOFF[retry_attempt]
+                    logger.warning(
+                        f"[GEMINI MULTIMODAL TRANSIENT ERROR - RETRY {retry_attempt + 1}/{MAX_RETRIES}] "
+                        f"Model {model_name} failed with {type(e).__name__}: {e}. "
+                        f"Backing off {backoff}s before retry..."
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
 
-                logger.warning(
-                    f"[GEMINI MULTIMODAL ERROR] "
-                    f"Model {model_name} failed after "
-                    f"{elapsed:.2f}s: "
-                    f"{type(e).__name__} - {e}. "
-                    f"Trying next model..."
-                )
+                if _is_timeout_error(e):
+
+                    timeout_count += 1
+
+                    logger.warning(
+                        f"[GEMINI MULTIMODAL TIMEOUT] "
+                        f"Model {model_name} timed out after "
+                        f"{elapsed:.2f}s "
+                        f"(limit={timeout_seconds}s). "
+                        f"Trying next model..."
+                    )
+
+                    if timeout_count >= 2:
+                        logger.warning(
+                            f"[GEMINI MULTIMODAL TIMEOUT CEILING] "
+                            f"{timeout_count} models timed out. "
+                            f"Aborting fallback."
+                        )
+                        abort_all_candidates = True
+                    break
+
+                else:
+
+                    logger.warning(
+                        f"[GEMINI MULTIMODAL ERROR] "
+                        f"Model {model_name} failed after "
+                        f"{elapsed:.2f}s: "
+                        f"{type(e).__name__} - {e}. "
+                        f"Trying next model..."
+                    )
+                    break
+
+        if abort_all_candidates:
+            break
 
     total_elapsed = time.time() - total_start_time
 

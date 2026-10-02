@@ -126,6 +126,51 @@ async def test_empty_verified_inventory_returns_unavailable_notice():
 
 
 @pytest.mark.asyncio
+async def test_general_korutla_shop_query_formats_shop_without_inventory():
+    shop = Shop(
+        id=uuid4(),
+        shop_name="Korutla Agri Store",
+        owner_name="Verified Owner",
+        phone_number="9000000000",
+        address="Main Road, Korutla",
+        district="Jagtial",
+        state="Telangana",
+        opening_time="08:00 AM",
+        closing_time="08:00 PM",
+        status="active",
+        delivery_available=True,
+    )
+    mock_db = _make_clean_mock_db()
+    mock_farmer = MagicMock(spec=Farmer)
+    mock_farmer.preferred_language = "te"
+
+    with patch(
+        "src.shops.repository.ShopRepository.search_by_location",
+        new_callable=AsyncMock,
+        return_value=[shop],
+    ) as search_by_location, patch(
+        "src.shops.repository.ShopRepository.search_shops_by_product",
+        new_callable=AsyncMock,
+    ) as search_by_product:
+        response = await enrich_response_with_shops(
+            db=mock_db,
+            query_text="Korutla lo shops unnaya?",
+            ai_response="",
+            farmer=mock_farmer,
+        )
+
+    search_by_location.assert_awaited_once_with(district="Jagtial")
+    search_by_product.assert_not_awaited()
+    assert "Korutla Agri Store" in response
+    assert "Main Road, Korutla" in response
+    assert "9000000000" in response
+    assert "08:00 AM - 08:00 PM" in response
+    assert "అందుబాటులో ఉంది" in response
+    for inventory_label in ("📦", "💰", "₹", "ఉత్పత్తి", "ధర", "స్టాక్"):
+        assert inventory_label not in response
+
+
+@pytest.mark.asyncio
 async def test_existing_verified_inventory_returns_only_actual_database_inventory():
     """
     When database has existing legitimate inventory:

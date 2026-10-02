@@ -965,7 +965,7 @@ async def test_enrich_response_extracts_district_from_query_and_preserves_db_dat
         mock_get_prices.assert_called_once_with(
             commodity="Cotton",
             district="Warangal",
-            state=None,
+            state="Telangana",
         )
 
 

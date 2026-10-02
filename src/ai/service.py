@@ -566,14 +566,33 @@ class AIService:
                 provider_used="gemini"
             )
 
-        except HTTPException:
-            raise
         except Exception as e:
             elapsed = time.time() - service_start_time
-            logger.exception(f"[AI SERVICE ERROR] Failed generating AI response after {elapsed:.2f}s: {e}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"An unexpected error occurred while communicating with the AI provider: {str(e)}"
+            logger.warning(
+                f"[AI SERVICE GENERATION FAILED] Failed communicating with AI provider after {elapsed:.2f}s: {e}. "
+                "Falling back to safe agricultural guidance or localized AEO fallback."
+            )
+            # If trusted RAG context is already retrieved and not dosage-sensitive, provide safe excerpt
+            if rag_snippets and not is_dosage_req:
+                safe_rag_excerpt = "\n".join(rag_snippets[:2])
+                disclaimer = (
+                    "\n\n(గమనిక: AI సేవ ప్రస్తుతం పరిమితంగా ఉంది. అధికారిక సలహా కోసం మీ స్థానిక వ్యవసాయ విస్తరణ అధికారిని (AEO) సంప్రదించండి.)"
+                    if user_lang == "te"
+                    else "\n\n(Note: AI service is temporarily limited. Please consult your local Agriculture Extension Officer (AEO) for official advice.)"
+                )
+                return AIGenerateResponse(
+                    response_text=safe_rag_excerpt + disclaimer,
+                    intent="rag_safe_fallback",
+                    confidence=1.0,
+                    provider_used="rag_grounding",
+                )
+
+            safe_fallback = get_fallback_response(user_lang)
+            return AIGenerateResponse(
+                response_text=safe_fallback,
+                intent="ai_unavailable_fallback",
+                confidence=1.0,
+                provider_used="safe_fallback",
             )
 
 async def process_text_message(

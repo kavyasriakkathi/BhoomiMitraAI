@@ -61,6 +61,18 @@ async def get_conversations(
     summary="List conversations for a farmer",
     description="Retrieve a paginated conversation history for a specific farmer, ordered by newest first.",
 )
+@router.get(
+    "/farmers/{farmer_id}",
+    response_model=PaginatedConversationResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
+@router.get(
+    "/farmers/{farmer_id}/conversations",
+    response_model=PaginatedConversationResponse,
+    status_code=status.HTTP_200_OK,
+    include_in_schema=False,
+)
 async def get_farmer_conversations(
     farmer_id: UUID,
     page: int = Query(1, ge=1, description="Page number"),

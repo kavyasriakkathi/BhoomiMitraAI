@@ -152,6 +152,7 @@ _TELUGU_DISTRICT_MAP = {
     "Khammam": "ఖమ్మం",
     "Nizamabad": "నిజామాబాద్",
     "Karimnagar": "కరీంనగర్",
+    "Jagtial": "జగిత్యాల",
     "Nalgonda": "నల్గొండ",
     "Mahabubnagar": "మహబూబ్‌నగర్",
     "Hyderabad": "హైదరాబాద్",
@@ -162,6 +163,56 @@ _TELUGU_DISTRICT_MAP = {
     "Chittoor": "చిత్తూరు",
     "Visakhapatnam": "విశాఖపట్నం",
 }
+
+TELANGANA_DISTRICTS = {
+    "warangal", "enumamula", "hanamkonda", "karimnagar", "khammam", "nizamabad",
+    "nalgonda", "mahabubnagar", "hyderabad", "medak", "adilabad", "rangareddy",
+    "siddipet", "suryapet", "jagtial", "mancherial", "bhadradri kothagudem",
+    "vikarabad", "sangareddy", "kamareddy", "rajanna sircilla", "peddapalli",
+    "wanaparthy", "jogulamba gadwal", "nagarkurnool", "narayanpet", "mulugu",
+    "jayashankar bhupalpally", "jangaon", "yadadri bhuvanagiri",
+    "komaram bheem asifabad", "nirmal", "medchal-malkajgiri", "mahabubabad",
+}
+
+
+def normalize_district_name(raw_district: Optional[str]) -> Optional[str]:
+    """
+    Normalize Telugu and English district names to canonical English district names
+    using the existing centralized mapping.
+    Examples:
+      వరంగల్ -> Warangal
+      జగిత్యాల -> Jagtial
+      కోరుట్ల -> Jagtial
+    """
+    if not raw_district or not isinstance(raw_district, str):
+        return None
+    d = raw_district.strip()
+    from src.weather.service import _KNOWN_DISTRICTS
+    if d in _KNOWN_DISTRICTS:
+        return _KNOWN_DISTRICTS[d]
+    d_lower = d.lower()
+    if d_lower in _KNOWN_DISTRICTS:
+        return _KNOWN_DISTRICTS[d_lower]
+    for kw, canon in _KNOWN_DISTRICTS.items():
+        if kw in d_lower or kw in d:
+            return canon
+    return d
+
+
+def infer_state_from_district(district: Optional[str], current_state: Optional[str] = None) -> Optional[str]:
+    """
+    If current_state is NULL/empty, safely infer Telangana only when the district
+    is unambiguously a known Telangana district.
+    """
+    if current_state and current_state.strip():
+        return current_state.strip()
+    if not district:
+        return None
+    canon = normalize_district_name(district)
+    if canon and canon.lower() in TELANGANA_DISTRICTS:
+        return "Telangana"
+    return None
+
 
 
 def is_today_price_query(query_text: str) -> bool:
@@ -398,6 +449,10 @@ class MarketService:
         is_live = False
         source_note = ""
         today_ist = get_current_ist_date()
+
+        if district:
+            district = normalize_district_name(district)
+        state = infer_state_from_district(district, state)
 
         logger.info(
             f"[MARKET SERVICE] Query start -> commodity='{commodity}', district='{district}', "
@@ -858,6 +913,10 @@ async def enrich_response_with_market_prices(
                     matched_commodity = profile.current_crop.strip()
     except Exception as exc:
         logger.warning(f"[MARKET ENRICH] Could not load farmer profile: {exc}")
+
+    if district:
+        district = normalize_district_name(district)
+    state = infer_state_from_district(district, state)
 
     today_requested = is_today_price_query(query_text)
 

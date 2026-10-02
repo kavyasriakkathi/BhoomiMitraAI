@@ -7,6 +7,7 @@ and orchestrating the full pipeline (STT -> AI -> Outbound).
 """
 
 import time
+from datetime import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -455,17 +456,21 @@ async def process_message_pipeline(
             if conversation:
                 logger.info("STAGE 7: Updating delivery status in database")
                 try:
+                    pipeline_elapsed = time.time() - pipeline_start
                     conversation.outbound_message_id = outbound_id
                     conversation.delivery_status = "sent" if outbound_id else "failed"
                     conversation.ai_response = ai_response
+                    conversation.replied_at = datetime.utcnow()
+                    conversation.response_time_seconds = round(pipeline_elapsed, 2)
                     db.add(conversation)
                     await db.commit()
-                    logger.info(f"STAGE 7: Delivery status set to '{conversation.delivery_status}'")
+                    logger.info(
+                        f"STAGE 7: Delivery status set to '{conversation.delivery_status}' "
+                        f"(response_time={conversation.response_time_seconds}s)"
+                    )
 
                     if not outbound_id:
                         try:
-                            from sqlalchemy import select
-                            from src.core.models import Conversation
                             recent_statuses = (await db.execute(
                                 select(Conversation.delivery_status)
                                 .order_by(Conversation.created_at.desc())
@@ -514,18 +519,53 @@ async def process_message_pipeline(
 
     except Exception as pipeline_err:
         logger.exception(f"[CRITICAL PIPELINE FAILURE] Unhandled error in background pipeline for message {parsed.message_id}: {pipeline_err}")
-        if conversation and not outbound_id:
+        if conversation:
             try:
+                pipeline_elapsed = time.time() - pipeline_start
                 pref_lang = getattr(farmer, "preferred_language", "te") if farmer else "te"
                 emergency_fallback = get_fallback_response(pref_lang)
-                outbound_id = await send_text_message(to_phone=parsed.phone_number, message_text=emergency_fallback)
-                conversation.outbound_message_id = outbound_id
-                conversation.delivery_status = "sent" if outbound_id else "failed"
-                conversation.ai_response = emergency_fallback
+
+                # Send outbound fallback message ONLY if no outbound message was already dispatched
+                if not outbound_id:
+                    try:
+                        outbound_id = await send_text_message(
+                            to_phone=parsed.phone_number,
+                            message_text=emergency_fallback,
+                        )
+                    except Exception as send_fallback_err:
+                        logger.warning(f"Recovery outbound send failed: {send_fallback_err}")
+                        outbound_id = None
+
+                status_val = "sent" if outbound_id else "failed"
+                final_response = (
+                    ai_response
+                    if (ai_response and ai_response.strip())
+                    else emergency_fallback
+                )
+                replied_timestamp = datetime.utcnow()
+                response_secs = round(pipeline_elapsed, 2)
+                conv_id = conversation.id
+
+                # Query fresh conversation in a new isolated session to avoid session attachment conflicts
                 async with AsyncSessionLocal() as db_recovery:
-                    db_recovery.add(conversation)
-                    await db_recovery.commit()
+                    recovery_conv = (
+                        await db_recovery.execute(
+                            select(Conversation).where(Conversation.id == conv_id)
+                        )
+                    ).scalar_one_or_none()
+
+                    if recovery_conv:
+                        recovery_conv.outbound_message_id = outbound_id
+                        recovery_conv.delivery_status = status_val
+                        recovery_conv.ai_response = final_response
+                        recovery_conv.replied_at = replied_timestamp
+                        recovery_conv.response_time_seconds = response_secs
+                        await db_recovery.commit()
+                        logger.info(
+                            f"[EMERGENCY RECOVERY COMMITTED] Conversation {conv_id} updated: "
+                            f"status='{status_val}', response_time={response_secs}s"
+                        )
             except Exception as recovery_err:
-                logger.exception(f"Recovery fallback send failed: {recovery_err}")
+                logger.exception(f"Recovery fallback commit failed: {recovery_err}")
     finally:
         release_in_flight_lock(parsed.message_id)

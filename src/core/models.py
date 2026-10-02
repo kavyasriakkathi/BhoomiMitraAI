@@ -69,6 +69,8 @@ class Conversation(Base):
     delivery_status = Column(String(20), default="pending")   # 'pending', 'sent', 'delivered', 'read', 'failed'
     
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    replied_at = Column(DateTime, nullable=True)
+    response_time_seconds = Column(Float, nullable=True)
 
     # Relationships
     farmer = relationship("Farmer", back_populates="conversations")

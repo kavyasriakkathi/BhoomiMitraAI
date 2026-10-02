@@ -1963,11 +1963,19 @@ async function updateDashboardTicketStatus(ticketId, newStatus) {
 
 let pilotActivityChart = null;
 let pilotModalityChart = null;
+let pilotIntentChart = null;
+let currentAnalyticsPeriod = 'week';
+let convCurrentPage = 1;
+let convPageSize = 20;
+let convTotalPages = 1;
+let convSearchDebounceTimer = null;
 
 async function loadPilotAnalytics() {
   try {
-    const summaryRes = await fetch('/analytics/summary', { credentials: 'include' });
-    const activityRes = await fetch('/analytics/activity?days=7', { credentials: 'include' });
+    const summaryPromise = fetch('/analytics/summary', { credentials: 'include' });
+    const activityPromise = fetch(`/analytics/activity?period=${currentAnalyticsPeriod}`, { credentials: 'include' });
+
+    const [summaryRes, activityRes] = await Promise.all([summaryPromise, activityPromise]);
 
     if (!summaryRes.ok) {
       console.warn("Could not load analytics summary", summaryRes.status);
@@ -1976,18 +1984,25 @@ async function loadPilotAnalytics() {
 
     const summary = await summaryRes.json();
 
-    // Update KPI Card DOM elements
+    // Helper to safely set element text
     const setVal = (id, val) => {
       const el = document.getElementById(id);
       if (el) el.innerText = val;
     };
 
-    setVal('stat-analytics-farmers', summary.total_farmers || 0);
-    setVal('stat-analytics-dau', summary.dau || 0);
-    setVal('stat-analytics-wau', summary.wau || 0);
-    setVal('stat-analytics-messages-today', summary.messages_today || 0);
-    setVal('stat-analytics-total-msgs', summary.total_messages || 0);
+    // 1. KPI Cards (Real numbers, no fake defaults)
+    setVal('stat-analytics-farmers', summary.total_farmers ?? 0);
+    setVal('stat-analytics-total-msgs', summary.total_messages ?? 0);
+    setVal('stat-analytics-messages-today', summary.messages_today ?? 0);
+    setVal('stat-analytics-ai-responses', summary.total_ai_responses ?? 0);
+    setVal('stat-analytics-dau', summary.dau ?? 0);
+    setVal('stat-analytics-wau', summary.wau ?? 0);
 
+    const avgRt = summary.avg_response_time_seconds;
+    setVal('stat-analytics-avg-response-time', (avgRt != null && avgRt > 0) ? `${avgRt}s` : '—');
+    setVal('stat-analytics-slow-responses', summary.slow_responses_count ?? 0);
+
+    // 2. Language breakdown
     const teCount = (summary.languages && summary.languages.telugu) || 0;
     const enCount = (summary.languages && summary.languages.english) || 0;
     const totalLang = teCount + enCount + ((summary.languages && summary.languages.other) || 0);
@@ -1996,15 +2011,7 @@ async function loadPilotAnalytics() {
     setVal('stat-analytics-te-count', teCount);
     setVal('stat-analytics-en-count', enCount);
 
-    const audioCnt = (summary.modality && summary.modality.audio) || 0;
-    const textCnt = (summary.modality && summary.modality.text) || 0;
-    const imgCnt = (summary.modality && summary.modality.image) || 0;
-    const totalMod = audioCnt + textCnt + imgCnt;
-    const audioRatio = totalMod > 0 ? Math.round((audioCnt / totalMod) * 100) : 0;
-    setVal('stat-analytics-audio-ratio', `${audioRatio}%`);
-    setVal('stat-analytics-audio-cnt', audioCnt);
-    setVal('stat-analytics-text-cnt', textCnt);
-
+    // 3. Escalations
     const escTotal = (summary.escalation && summary.escalation.total) || 0;
     const escPending = (summary.escalation && summary.escalation.pending) || 0;
     const escResolved = (summary.escalation && summary.escalation.resolved) || 0;
@@ -2012,6 +2019,7 @@ async function loadPilotAnalytics() {
     setVal('stat-analytics-escalation-pending', escPending);
     setVal('stat-analytics-escalation-resolved', escResolved);
 
+    // 4. Delivery Status
     const delSuccessRate = (summary.delivery && summary.delivery.success_rate_pct) ?? 100;
     const delSent = (summary.delivery && summary.delivery.sent) || 0;
     const delFailed = (summary.delivery && summary.delivery.failed) || 0;
@@ -2019,75 +2027,405 @@ async function loadPilotAnalytics() {
     setVal('stat-analytics-delivery-sent', delSent);
     setVal('stat-analytics-delivery-failed', delFailed);
 
-    // Render Charts
+    // 5. Render Charts
     if (activityRes.ok && typeof Chart !== 'undefined') {
       const activityData = await activityRes.json();
-      renderPilotCharts(activityData.activity || [], summary);
+      renderPilotActivityChart(activityData.activity || []);
     }
+
+    if (typeof Chart !== 'undefined') {
+      renderPilotModalityChart(summary.modality);
+      renderPilotIntentChart(summary.intents);
+    }
+
+    // 6. Render Rankings
+    renderAnalyticsTopQuestions(summary.top_questions);
+    renderAnalyticsTopCrops(summary.top_crops);
+    renderAnalyticsTopDistricts(summary.top_districts);
+
+    // 7. Update Last Refreshed Timestamp
+    const lastRefreshed = document.getElementById('analytics-last-refreshed');
+    if (lastRefreshed) {
+      lastRefreshed.innerText = `Updated: ${new Date().toLocaleTimeString()}`;
+    }
+
+    // 8. Load Conversation Audit Log
+    await loadConversationAudit();
+
   } catch (err) {
     console.error("Failed to load pilot analytics:", err);
   }
 }
 
-function renderPilotCharts(activityList, summary) {
+// Activity Time-Series Chart
+function renderPilotActivityChart(activityList) {
   const dates = activityList.map(a => a.date ? a.date.slice(5) : '');
   const activeFarmers = activityList.map(a => a.active_farmers || 0);
   const msgCounts = activityList.map(a => a.message_count || 0);
 
   const actCanvas = document.getElementById('chart-pilot-activity');
-  if (actCanvas) {
-    if (pilotActivityChart) pilotActivityChart.destroy();
-    pilotActivityChart = new Chart(actCanvas, {
-      type: 'bar',
-      data: {
-        labels: dates,
-        datasets: [
-          {
-            label: 'Total Messages',
-            data: msgCounts,
-            backgroundColor: 'rgba(52, 211, 153, 0.7)',
-            borderColor: '#10B981',
-            borderWidth: 1,
-          },
-          {
-            label: 'Active Farmers',
-            data: activeFarmers,
-            backgroundColor: 'rgba(59, 130, 246, 0.7)',
-            borderColor: '#3B82F6',
-            borderWidth: 1,
-          }
-        ]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          y: { beginAtZero: true, ticks: { precision: 0 } }
+  if (!actCanvas) return;
+
+  if (pilotActivityChart) pilotActivityChart.destroy();
+  pilotActivityChart = new Chart(actCanvas, {
+    type: 'bar',
+    data: {
+      labels: dates,
+      datasets: [
+        {
+          label: 'Total Questions / Messages',
+          data: msgCounts,
+          backgroundColor: 'rgba(5, 150, 105, 0.75)',
+          borderColor: '#059669',
+          borderWidth: 1,
+          borderRadius: 4,
+        },
+        {
+          label: 'Active Farmers',
+          data: activeFarmers,
+          backgroundColor: 'rgba(59, 130, 246, 0.75)',
+          borderColor: '#3B82F6',
+          borderWidth: 1,
+          borderRadius: 4,
         }
-      }
-    });
-  }
-
-  const modCanvas = document.getElementById('chart-pilot-modality');
-  if (modCanvas) {
-    if (pilotModalityChart) pilotModalityChart.destroy();
-    const textCnt = (summary.modality && summary.modality.text) || 0;
-    const audioCnt = (summary.modality && summary.modality.audio) || 0;
-    const imgCnt = (summary.modality && summary.modality.image) || 0;
-
-    pilotModalityChart = new Chart(modCanvas, {
-      type: 'doughnut',
-      data: {
-        labels: ['Text Messages', 'Voice Audio (Telugu STT)', 'Camera Leaf Scans'],
-        datasets: [{
-          data: [textCnt, audioCnt, imgCnt],
-          backgroundColor: ['#3B82F6', '#10B981', '#F59E0B'],
-        }]
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        y: { beginAtZero: true, ticks: { precision: 0 } }
       },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top' }
       }
-    });
+    }
+  });
+}
+
+// Modality Breakdown Doughnut Chart
+function renderPilotModalityChart(modality) {
+  const modCanvas = document.getElementById('chart-pilot-modality');
+  if (!modCanvas) return;
+
+  if (pilotModalityChart) pilotModalityChart.destroy();
+  const textCnt = (modality && modality.text) || 0;
+  const audioCnt = (modality && modality.audio) || 0;
+  const imgCnt = (modality && modality.image) || 0;
+
+  pilotModalityChart = new Chart(modCanvas, {
+    type: 'doughnut',
+    data: {
+      labels: ['📝 Text Messages', '🎙️ Voice Audio', '📷 Camera Leaf Scans'],
+      datasets: [{
+        data: [textCnt, audioCnt, imgCnt],
+        backgroundColor: ['#3B82F6', '#10B981', '#F59E0B'],
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom' }
+      }
+    }
+  });
+}
+
+// Intent / Query-Type Breakdown Chart
+function renderPilotIntentChart(intents) {
+  const intentCanvas = document.getElementById('chart-pilot-intent');
+  if (!intentCanvas) return;
+
+  if (pilotIntentChart) pilotIntentChart.destroy();
+
+  const dataValues = [
+    (intents && intents.shops) || 0,
+    (intents && intents.fertilizer) || 0,
+    (intents && intents.weather) || 0,
+    (intents && intents.market) || 0,
+    (intents && intents.disease) || 0,
+    (intents && intents.schemes) || 0,
+    (intents && intents.other) || 0,
+  ];
+
+  const labels = ['Shops', 'Fertilizer', 'Weather', 'Market', 'Disease', 'Schemes', 'Other'];
+  const colors = ['#3B82F6', '#10B981', '#06B6D4', '#F59E0B', '#EF4444', '#8B5CF6', '#94A3B8'];
+
+  pilotIntentChart = new Chart(intentCanvas, {
+    type: 'doughnut',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: dataValues,
+        backgroundColor: colors,
+        borderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom' }
+      }
+    }
+  });
+
+  // Render intent summary pills
+  const pillsContainer = document.getElementById('analytics-intent-pills');
+  if (pillsContainer) {
+    pillsContainer.innerHTML = labels.map((lbl, idx) => {
+      const cnt = dataValues[idx];
+      return `<span class="badge-intent-pill" style="border-left: 3px solid ${colors[idx]};">
+        ${lbl}: <strong>${cnt}</strong>
+      </span>`;
+    }).join('');
   }
 }
+
+// Activity Period Selector (Day / Week / Month)
+async function setAnalyticsPeriod(period) {
+  currentAnalyticsPeriod = period;
+  ['day', 'week', 'month'].forEach(p => {
+    const btn = document.getElementById(`btn-period-${p}`);
+    if (btn) {
+      if (p === period) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    }
+  });
+
+  try {
+    const res = await fetch(`/analytics/activity?period=${period}`, { credentials: 'include' });
+    if (res.ok) {
+      const data = await res.json();
+      renderPilotActivityChart(data.activity || []);
+    }
+  } catch (err) {
+    console.error("Failed to switch analytics period:", err);
+  }
+}
+
+// Top Frequently Asked Questions Renderer
+function renderAnalyticsTopQuestions(questions) {
+  const container = document.getElementById('analytics-top-questions-list');
+  if (!container) return;
+
+  if (!questions || questions.length === 0) {
+    container.innerHTML = `<p style="color:var(--text-muted); font-size:0.88rem; text-align:center; padding:1.5rem;">Not available yet</p>`;
+    return;
+  }
+
+  container.innerHTML = questions.slice(0, 10).map((q, idx) => `
+    <div class="analytics-rank-item">
+      <div style="display:flex; align-items:center; gap:0.5rem; overflow:hidden;">
+        <span style="font-weight:700; color:var(--primary); font-size:0.85rem;">#${idx + 1}</span>
+        <span class="analytics-rank-label" title="${escapeHtml(q.question)}">${escapeHtml(q.question)}</span>
+      </div>
+      <span class="badge badge-open" style="flex-shrink:0;">${q.count}</span>
+    </div>
+  `).join('');
+}
+
+// Top Crops Renderer
+function renderAnalyticsTopCrops(crops) {
+  const container = document.getElementById('analytics-top-crops-list');
+  if (!container) return;
+
+  if (!crops || crops.length === 0) {
+    container.innerHTML = `<p style="color:var(--text-muted); font-size:0.88rem; text-align:center; padding:1.5rem;">Not available yet</p>`;
+    return;
+  }
+
+  container.innerHTML = crops.slice(0, 10).map((c, idx) => `
+    <div class="analytics-rank-item">
+      <div style="display:flex; align-items:center; gap:0.5rem; overflow:hidden;">
+        <span style="font-weight:700; color:var(--primary); font-size:0.85rem;">#${idx + 1}</span>
+        <span class="analytics-rank-label">${escapeHtml(c.crop)}</span>
+      </div>
+      <span class="badge badge-open" style="flex-shrink:0;">${c.count} farms</span>
+    </div>
+  `).join('');
+}
+
+// Top Districts Renderer
+function renderAnalyticsTopDistricts(districts) {
+  const container = document.getElementById('analytics-top-districts-list');
+  if (!container) return;
+
+  if (!districts || districts.length === 0) {
+    container.innerHTML = `<p style="color:var(--text-muted); font-size:0.88rem; text-align:center; padding:1.5rem;">Not available yet</p>`;
+    return;
+  }
+
+  container.innerHTML = districts.slice(0, 10).map((d, idx) => `
+    <div class="analytics-rank-item">
+      <div style="display:flex; align-items:center; gap:0.5rem; overflow:hidden;">
+        <span style="font-weight:700; color:var(--primary); font-size:0.85rem;">#${idx + 1}</span>
+        <span class="analytics-rank-label">${escapeHtml(d.district)}</span>
+      </div>
+      <span class="badge badge-open" style="flex-shrink:0;">${d.count}</span>
+    </div>
+  `).join('');
+}
+
+// =====================================================================
+// CONVERSATION AUDIT LOG CONTROLLER (Paginated with Filters)
+// =====================================================================
+
+async function loadConversationAudit() {
+  const tbody = document.getElementById('conversation-audit-tbody');
+  const countBadge = document.getElementById('conv-total-count-badge');
+  const pageInfo = document.getElementById('conv-page-info');
+  const pageNumSpan = document.getElementById('conv-current-page-num');
+  const totalPagesSpan = document.getElementById('conv-total-page-num');
+  const btnPrev = document.getElementById('btn-conv-prev');
+  const btnNext = document.getElementById('btn-conv-next');
+
+  if (!tbody) return;
+
+  const searchInput = document.getElementById('filter-conv-search');
+  const intentSelect = document.getElementById('filter-conv-intent');
+  const modalitySelect = document.getElementById('filter-conv-modality');
+  const deliverySelect = document.getElementById('filter-conv-delivery');
+
+  let url = `/analytics/conversations?page=${convCurrentPage}&page_size=${convPageSize}`;
+  if (searchInput && searchInput.value.trim()) {
+    url += `&search=${encodeURIComponent(searchInput.value.trim())}`;
+  }
+  if (intentSelect && intentSelect.value) {
+    url += `&intent=${encodeURIComponent(intentSelect.value)}`;
+  }
+  if (modalitySelect && modalitySelect.value) {
+    url += `&modality=${encodeURIComponent(modalitySelect.value)}`;
+  }
+  if (deliverySelect && deliverySelect.value) {
+    url += `&delivery_status=${encodeURIComponent(deliverySelect.value)}`;
+  }
+
+  try {
+    const res = await fetch(url, { credentials: 'include' });
+    if (!res.ok) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:1.5rem; color:var(--danger-color);">Error loading conversations: HTTP ${res.status}</td></tr>`;
+      return;
+    }
+
+    const data = await res.json();
+    convTotalPages = data.total_pages || 1;
+
+    if (countBadge) countBadge.innerText = `${data.total || 0} Records`;
+    if (pageNumSpan) pageNumSpan.innerText = data.page || 1;
+    if (totalPagesSpan) totalPagesSpan.innerText = convTotalPages;
+
+    if (btnPrev) btnPrev.disabled = (data.page <= 1);
+    if (btnNext) btnNext.disabled = (data.page >= convTotalPages);
+
+    if (pageInfo) {
+      const start = data.total > 0 ? (data.page - 1) * data.page_size + 1 : 0;
+      const end = Math.min(data.page * data.page_size, data.total || 0);
+      pageInfo.innerText = `Showing ${start}–${end} of ${data.total || 0} conversations`;
+    }
+
+    if (!data.items || data.items.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:2rem; color:var(--text-muted);">No conversations matching filters found.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = data.items.map(item => {
+      const receivedDate = item.received_time
+        ? new Date(item.received_time).toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+        : '—';
+
+      const farmerIden = item.farmer_identifier || 'Farmer';
+      
+      let modalityBadge = '📝 Text';
+      if (item.modality === 'audio') modalityBadge = '🎙️ Voice';
+      else if (item.modality === 'image') modalityBadge = '📷 Image';
+
+      const intentDisplay = item.intent ? item.intent.replace(/_/g, ' ') : '—';
+
+      const rtDisplay = (item.response_time != null && item.response_time > 0)
+        ? `${Number(item.response_time).toFixed(1)}s`
+        : '—';
+
+      let statusBadge = `<span class="badge badge-open">${escapeHtml(item.delivery_status || 'sent')}</span>`;
+      if (item.delivery_status === 'failed') {
+        statusBadge = `<span class="badge badge-cancelled">failed</span>`;
+      } else if (item.delivery_status === 'pending') {
+        statusBadge = `<span class="badge badge-ready">pending</span>`;
+      }
+
+      return `
+        <tr>
+          <td style="white-space:nowrap; font-size:0.82rem; color:var(--text-muted);">${receivedDate}</td>
+          <td><strong>${escapeHtml(farmerIden)}</strong></td>
+          <td><span class="badge-intent-pill" style="font-size:0.75rem;">${modalityBadge}</span></td>
+          <td style="max-width:240px; font-size:0.85rem;" title="${escapeHtml(item.question || '')}">
+            ${item.question ? escapeHtml(item.question) : '<em style="color:var(--text-muted);">(No text content)</em>'}
+          </td>
+          <td style="max-width:280px; font-size:0.85rem;" title="${escapeHtml(item.ai_answer || '')}">
+            ${item.ai_answer ? escapeHtml(item.ai_answer) : '<em style="color:var(--text-muted);">(No response yet)</em>'}
+          </td>
+          <td><span class="badge-intent-pill" style="text-transform:capitalize; font-size:0.75rem;">${escapeHtml(intentDisplay)}</span></td>
+          <td style="white-space:nowrap; font-size:0.85rem; font-weight:600;">${rtDisplay}</td>
+          <td>${statusBadge}</td>
+        </tr>
+      `;
+    }).join('');
+
+  } catch (err) {
+    console.error("Failed to load conversation audit:", err);
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; padding:1.5rem; color:var(--danger-color);">Failed to load conversations: ${err.message}</td></tr>`;
+  }
+}
+
+function onConvSearchInput() {
+  if (convSearchDebounceTimer) clearTimeout(convSearchDebounceTimer);
+  convSearchDebounceTimer = setTimeout(() => {
+    convCurrentPage = 1;
+    loadConversationAudit();
+  }, 350);
+}
+
+function applyConversationFilters() {
+  convCurrentPage = 1;
+  loadConversationAudit();
+}
+
+function resetConversationFilters() {
+  const searchInput = document.getElementById('filter-conv-search');
+  const intentSelect = document.getElementById('filter-conv-intent');
+  const modalitySelect = document.getElementById('filter-conv-modality');
+  const deliverySelect = document.getElementById('filter-conv-delivery');
+
+  if (searchInput) searchInput.value = '';
+  if (intentSelect) intentSelect.value = '';
+  if (modalitySelect) modalitySelect.value = '';
+  if (deliverySelect) deliverySelect.value = '';
+
+  convCurrentPage = 1;
+  loadConversationAudit();
+}
+
+function changeConvPage(delta) {
+  const target = convCurrentPage + delta;
+  if (target >= 1 && target <= convTotalPages) {
+    convCurrentPage = target;
+    loadConversationAudit();
+  }
+}
+
+function changeConvPageSize(size) {
+  convPageSize = parseInt(size, 10) || 20;
+  convCurrentPage = 1;
+  loadConversationAudit();
+}
+

@@ -50,6 +50,8 @@ class ConversationUpdate(BaseModel):
     confidence_score: Optional[float] = Field(None, ge=0.0, le=1.0)
     outbound_message_id: Optional[str] = Field(None, max_length=100)
     delivery_status: Optional[str] = Field(None, max_length=20)
+    replied_at: Optional[datetime] = None
+    response_time_seconds: Optional[float] = None
 
     @field_validator("delivery_status")
     @classmethod
@@ -74,6 +76,8 @@ class ConversationResponse(BaseModel):
     outbound_message_id: Optional[str] = None
     delivery_status: str
     created_at: datetime
+    replied_at: Optional[datetime] = None
+    response_time_seconds: Optional[float] = None
 
     model_config = ConfigDict(from_attributes=True)
 

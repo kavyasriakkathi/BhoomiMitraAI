@@ -132,6 +132,19 @@ def test_get_farmer_conversations(mock_conversation_service):
     assert response.json()["items"][0]["farmer_id"] == str(farmer_id)
 
 
+def test_get_farmer_conversations_endpoint_alias(mock_conversation_service):
+    """GET /farmers/{farmer_id}/conversations alias should return farmer conversations."""
+    farmer_id = uuid4()
+    conv = _mock_response(farmer_id=farmer_id)
+    mock_conversation_service.get_farmer_conversations.return_value = (1, [conv])
+
+    response = client.get(f"/farmers/{farmer_id}/conversations?page=1&size=10")
+
+    assert response.status_code == 200
+    assert response.json()["total"] == 1
+    assert response.json()["items"][0]["farmer_id"] == str(farmer_id)
+
+
 # ---- UPDATE ----
 
 def test_update_conversation(mock_conversation_service):
@@ -164,3 +177,39 @@ def test_delete_conversation(mock_conversation_service):
     response = client.delete(f"/conversations/{conv_id}")
 
     assert response.status_code == 204
+
+
+# ---- UNMIGRATED SCHEMA REGRESSION TESTS ----
+
+def test_unmigrated_schema_row_to_conversation():
+    """Verify projected rows without replied_at/response_time_seconds safely convert to Conversation model."""
+    from types import SimpleNamespace
+    from src.conversation.repository import _row_to_conversation
+
+    conv_id = uuid4()
+    farmer_id = uuid4()
+    now = datetime.utcnow()
+    fake_row = SimpleNamespace(
+        id=conv_id,
+        farmer_id=farmer_id,
+        message_id="msg_123",
+        user_message="Hello",
+        user_message_type="text",
+        ai_response="Namaste",
+        intent="weather",
+        confidence_score=0.95,
+        outbound_message_id=None,
+        delivery_status="sent",
+        created_at=now,
+    )
+    conv = _row_to_conversation(fake_row)
+    assert conv.id == conv_id
+    assert conv.replied_at is None
+    assert conv.response_time_seconds is None
+
+    # Test serialization to ConversationResponse
+    resp = ConversationResponse.model_validate(conv)
+    assert resp.id == conv_id
+    assert resp.replied_at is None
+    assert resp.response_time_seconds is None
+
