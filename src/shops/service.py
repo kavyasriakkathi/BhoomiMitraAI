@@ -453,6 +453,35 @@ def _is_explicit_stock_query(message: Optional[str]) -> bool:
     if m in ("stock", "స్టాక్", "stocks"):
         return True
 
+    # Check if this is a shop directory / existence query rather than a live-stock query.
+    # e.g., "Korutla lo RAM FERTILIZER shop undha?", "Korutla lo shops unnaya?", "fertilizer shop undha?"
+    # These ask whether a shop/store exists, not whether inventory/stock is available.
+    shop_existence_markers = [
+        "shop undha", "shop unda", "shop vundha", "shop vunda",
+        "shops unnaya", "shops unnaaya", "shops vunnaya", "shops vunda", "shops vundha",
+        "store undha", "store unda", "store vundha", "store vunda",
+        "stores unnaya", "stores unnaaya",
+        "షాప్ ఉందా", "షాపు ఉందా", "దుకాణం ఉందా",
+        "షాపులు ఉన్నాయా", "దుకాణాలు ఉన్నాయా", "షాప్స్ ఉన్నాయా",
+    ]
+    if any(k in m for k in shop_existence_markers):
+        explicit_stock_terms = [
+            "stock", "స్టాక్", "బస్తా", "బ్యాగ్", "bag", "bags", "kg", "కిలో",
+            "ధర", "రేటు", "rate", "price", "లభ్యత",
+        ]
+        has_explicit_stock = any(t in m for t in explicit_stock_terms)
+        specific_prod_in_shop = any(p in m for p in ["urea", "dap", "యూరియా", "డిఎపి", "potash"])
+        if not has_explicit_stock and not specific_prod_in_shop:
+            return False
+
+    # Also detect direct registered shop name inquiries (e.g., "Korutla lo RAM FERTILIZER undha?")
+    known_shop_name_markers = [
+        "ram fertilizer", "ram fertilizers", "రామ్ ఫెర్టిలైజర్",
+    ]
+    if any(s in m for s in known_shop_name_markers):
+        if not any(t in m for t in ["stock", "స్టాక్", "urea", "dap", "యూరియా", "డిఎపి", "బస్తా", "bag", "rate", "price", "ధర", "రేటు"]):
+            return False
+
     # Check known stock availability phrases
     stock_markers = [
         # Telugu / Tanglish phrases
@@ -752,12 +781,44 @@ async def enrich_response_with_shops(
     labels = get_shops_labels(language)
 
     matches: List[Tuple[Shop, Optional[Inventory]]] = []
+    is_specific_shop_query = False
 
-    if not matched_product:
+    # Step 3b: Check if query targets a specific registered shop by name (e.g. "RAM FERTILIZER")
+    shop_repo = ShopRepository(db)
+    matched_named_shops = []
+    try:
+        candidate_shops = await shop_repo.get_active_shops(district=district)
+        if not candidate_shops and district:
+            candidate_shops = await shop_repo.get_active_shops()
+
+        for s in candidate_shops:
+            s_name = (s.shop_name or "").strip().lower()
+            if s_name and (s_name in query_lower or query_lower.startswith(s_name)):
+                matched_named_shops.append(s)
+
+        # Also support known Telugu/Tanglish aliases
+        if not matched_named_shops and any(k in query_lower for k in ["ram fertilizer", "ram fertilizers", "రామ్ ఫెర్టిలైజర్"]):
+            ram_matches = await shop_repo.search_by_name("RAM FERTILIZER", district=district)
+            if not ram_matches and district:
+                ram_matches = await shop_repo.search_by_name("RAM FERTILIZER")
+            matched_named_shops.extend(ram_matches)
+
+        if matched_named_shops:
+            is_specific_shop_query = True
+            is_stock_query = False
+            # Clear matched_product if it was triggered merely by words within the shop's own name
+            # (e.g. "fertilizer" inside "RAM FERTILIZER")
+            if matched_product in ("fertilizer", "fertilizers"):
+                matched_product = None
+    except Exception as shop_name_err:
+        logger.warning(f"[ENRICH SHOPS] Error checking shop names: {shop_name_err}")
+
+    if is_specific_shop_query:
+        matches = [(s, None) for s in matched_named_shops]
+    elif not matched_product:
         # General shop query (no specific product mentioned)
         if not is_stock_query and not ai_response and district:
             try:
-                shop_repo = ShopRepository(db)
                 loc_shops = await shop_repo.search_by_location(district=district)
                 if loc_shops:
                     matches = [(s, None) for s in loc_shops]
@@ -774,7 +835,6 @@ async def enrich_response_with_shops(
     else:
         # Step 4: Fetch matching shops from DB (no auto-seeding in production)
         try:
-            shop_repo = ShopRepository(db)
             matches = await shop_repo.search_shops_by_product(matched_product, only_available=False)
             # If no inventory matches, but user asked a general shop query (not a specific stock query)
             # and specified/has a district, fallback to active registered shops in the location
@@ -831,7 +891,10 @@ async def enrich_response_with_shops(
                 or requested_town.lower() in shop_name_lower
             )
 
-            if town_match and (district_match or dist is not None and dist <= max_radius_km):
+            if is_specific_shop_query and (district_match or town_match or not district):
+                is_valid_local = True
+                rank = 0
+            elif town_match and (district_match or dist is not None and dist <= max_radius_km):
                 is_valid_local = True
                 rank = 0
             elif dist is not None and dist <= max_radius_km:
@@ -924,8 +987,16 @@ async def enrich_response_with_shops(
                 v_date = item.last_updated.strftime("%d-%m-%Y")
                 updated_label = labels.get("last_updated", "Last updated")
                 lines.append(f"  🕒 {updated_label}: {v_date}")
-        elif shop.address:
-            lines.append(f"  📍 {shop.address}")
+        else:
+            if shop.address:
+                lines.append(f"  📍 {shop.address}")
+            if is_specific_shop_query:
+                if language == "te":
+                    lines.append("  ℹ️ ప్రస్తుత స్టాక్ వివరాలు ధృవీకరించబడలేదు (ధర/స్టాక్ లభ్యత కోసం దుకాణాన్ని సంప్రదించండి)")
+                elif language == "hi":
+                    lines.append("  ℹ️ वर्तमान स्टॉक विवरण असत्यापित है (मूल्य और उपलब्धता के लिए दुकान से संपर्क करें)")
+                else:
+                    lines.append("  ℹ️ Current stock is not verified (Please contact the shop directly for price and availability)")
 
         lines.extend([
             f"  {labels['contact']}: {shop.phone_number} | {status_str}{time_range}",

@@ -318,3 +318,162 @@ async def test_inventory_timestamp_uses_last_updated_not_verified():
         )
         assert "చివరిగా అప్‌డేట్ చేయబడింది: 20-09-2026" in res_te
         assert "Verified: 20-09-2026" not in res_te
+
+
+@pytest.mark.asyncio
+async def test_korutla_ram_fertilizer_shop_undha_returns_verified_metadata_with_unverified_stock():
+    """
+    Regression Test 1:
+    'Korutla lo RAM FERTILIZER shop undha?' must be treated as a shop directory/name lookup,
+    not a live-stock query.
+    - Finds registered RAM FERTILIZER shop even though it has zero inventory rows.
+    - Returns only verified shop information: name, address, phone, and metadata.
+    - Clearly says current stock is not verified.
+    - Does NOT invent quantity, price, Urea availability, or other inventory.
+    """
+    from src.shops.service import _is_explicit_stock_query
+    query = "Korutla lo RAM FERTILIZER shop undha?"
+
+    # 1. Must NOT be an explicit live-stock query
+    assert _is_explicit_stock_query(query) is False
+
+    # 2. Decision engine must detect SHOPS intent and NOT FERTILIZER advice intent
+    intents = AIDecisionEngine.detect_all_intents(query)
+    assert FarmerIntent.SHOPS in intents
+    assert FarmerIntent.FERTILIZER not in intents
+
+    # 3. Setup mock RAM FERTILIZER shop (with zero inventory items)
+    ram_shop = Shop(
+        id=uuid4(),
+        shop_name="RAM FERTILIZER",
+        owner_name="RAM FERTILIZER",
+        phone_number="7989271932",
+        address="Beside Balaji Book Seller, Srinivasa Road",
+        district="Jagtial",
+        state="Telangana",
+        status="active",
+        delivery_available=False,
+    )
+
+    mock_db = _make_clean_mock_db()
+    mock_farmer = Farmer(id=uuid4(), phone_number="919848011236", preferred_language="te")
+    mock_farmer.district = "Jagtial"
+    mock_conv = Conversation(id=uuid4(), farmer_id=mock_farmer.id, user_message=query)
+
+    engine = AIDecisionEngine()
+
+    with patch("src.ai.service.AIService.generate_ai_response", new_callable=AsyncMock) as mock_gemini, \
+         patch("src.shops.repository.ShopRepository.get_active_shops", new_callable=AsyncMock, return_value=[ram_shop]), \
+         patch("src.shops.repository.ShopRepository.search_shops_by_product", new_callable=AsyncMock, return_value=[]):
+
+        res = await engine.process_message(mock_db, mock_farmer, mock_conv)
+
+        # Gemini was bypassed (no LLM hallucination)
+        mock_gemini.assert_not_called()
+
+        # Returns verified shop information
+        assert "RAM FERTILIZER" in res
+        assert "Beside Balaji Book Seller, Srinivasa Road" in res
+        assert "7989271932" in res
+        assert "తెరిచి ఉంది" in res
+
+        # Clearly states current stock is not verified
+        assert "ప్రస్తుత స్టాక్ వివరాలు ధృవీకరించబడలేదు" in res or "ధృవీకరించబడలేదు" in res
+
+        # Does NOT invent inventory, quantity, price, or Urea availability
+        for invented_item in ("Urea", "యూరియా", "DAP", "డిఎపి", "₹", "బస్తా", "Bag"):
+            assert invented_item not in res
+
+
+@pytest.mark.asyncio
+async def test_korutla_urea_undha_uses_strict_stock_flow_and_excludes_ram_fertilizer():
+    """
+    Regression Test 2:
+    'Korutla lo urea undha?' must continue using the strict inventory/stock flow
+    and must NOT return RAM FERTILIZER merely because it is a fertilizer shop.
+    """
+    from src.shops.service import _is_explicit_stock_query
+    query = "Korutla lo urea undha?"
+
+    # 1. Must be recognized as an explicit stock query
+    assert _is_explicit_stock_query(query) is True
+
+    ram_shop = Shop(
+        id=uuid4(),
+        shop_name="RAM FERTILIZER",
+        owner_name="RAM FERTILIZER",
+        phone_number="7989271932",
+        address="Beside Balaji Book Seller, Srinivasa Road",
+        district="Jagtial",
+        state="Telangana",
+        status="active",
+        delivery_available=False,
+    )
+
+    mock_db = _make_clean_mock_db()
+    mock_farmer = Farmer(id=uuid4(), phone_number="919848011237", preferred_language="te")
+    mock_farmer.district = "Jagtial"
+    mock_conv = Conversation(id=uuid4(), farmer_id=mock_farmer.id, user_message=query)
+
+    engine = AIDecisionEngine()
+
+    # Even if RAM FERTILIZER is in active shops, search_shops_by_product returns [] for urea
+    with patch("src.ai.service.AIService.generate_ai_response", new_callable=AsyncMock) as mock_gemini, \
+         patch("src.shops.repository.ShopRepository.get_active_shops", new_callable=AsyncMock, return_value=[ram_shop]), \
+         patch("src.shops.repository.ShopRepository.search_shops_by_product", new_callable=AsyncMock, return_value=[]):
+
+        res = await engine.process_message(mock_db, mock_farmer, mock_conv)
+
+        # Must NOT return RAM FERTILIZER merely because it is a fertilizer shop
+        assert "RAM FERTILIZER" not in res
+        assert "7989271932" not in res
+
+        # Must return the verified stock unavailable notice
+        assert "లైవ్ స్టాక్ సమాచారం అందుబాటులో లేదు" in res or "అందుబాటులో లేరు" in res
+
+
+@pytest.mark.asyncio
+async def test_korutla_shops_unnaya_returns_registered_active_shops():
+    """
+    Regression Test 3:
+    'Korutla lo shops unnaya?' must continue returning registered active shops.
+    """
+    from src.shops.service import _is_explicit_stock_query
+    query = "Korutla lo shops unnaya?"
+
+    # 1. Must NOT be an explicit stock query
+    assert _is_explicit_stock_query(query) is False
+
+    ram_shop = Shop(
+        id=uuid4(),
+        shop_name="RAM FERTILIZER",
+        owner_name="RAM FERTILIZER",
+        phone_number="7989271932",
+        address="Beside Balaji Book Seller, Srinivasa Road",
+        district="Jagtial",
+        state="Telangana",
+        status="active",
+        delivery_available=False,
+    )
+
+    mock_db = _make_clean_mock_db()
+    mock_farmer = Farmer(id=uuid4(), phone_number="919848011238", preferred_language="te")
+    mock_farmer.district = "Jagtial"
+    mock_conv = Conversation(id=uuid4(), farmer_id=mock_farmer.id, user_message=query)
+
+    engine = AIDecisionEngine()
+
+    with patch("src.ai.service.AIService.generate_ai_response", new_callable=AsyncMock) as mock_gemini, \
+         patch("src.shops.repository.ShopRepository.search_by_location", new_callable=AsyncMock, return_value=[ram_shop]), \
+         patch("src.shops.repository.ShopRepository.get_active_shops", new_callable=AsyncMock, return_value=[ram_shop]):
+
+        res = await engine.process_message(mock_db, mock_farmer, mock_conv)
+
+        # Returns registered active shop
+        assert "RAM FERTILIZER" in res
+        assert "Beside Balaji Book Seller, Srinivasa Road" in res
+        assert "7989271932" in res
+
+        # Does not fabricate inventory items
+        for inv_marker in ("📦", "💰", "₹"):
+            assert inv_marker not in res

@@ -388,6 +388,7 @@ INTENT_KEYWORDS: Dict[FarmerIntent, Dict[str, List[str]]] = {
         "transliterated": [
             "ekkada dorukuthundi", "ekkada konali", "shops ekkada", "shop ekkada", "urea ekkada",
             "dap ekkada", "seeds ekkada", "fertilizer shop", "pesticide shop", "near shops",
+            "shops unnaya", "shops unnaaya", "shops vunnaya", "shop undha", "shop unda", "shop vundha", "shop vunda",
             "daggara shop", "konadaniki", "dorukuthunda", "shops daggara", "dealer daggara",
             "dorukutundi", "konachu", "kahan milega", "kuthe bhetel",
             "urea stock", "stock undha", "stock unda", "stock undhi", "stock undi",
@@ -911,7 +912,8 @@ class AIDecisionEngine:
         if _matches_intent_keywords(msg, FarmerIntent.FERTILIZER):
             from src.ai.formatting import _FERTILIZER_ADVICE_WORDS
             has_fert_advice = any(w in msg for w in _FERTILIZER_ADVICE_WORDS) or any(w in msg_original for w in _FERTILIZER_ADVICE_WORDS)
-            if not is_stock_avail or has_fert_advice:
+            is_shop_query = (FarmerIntent.SHOPS in detected) or any(w in msg for w in ["shop", "shops", "store", "stores", "షాప్", "షాపు", "దుకాణం"])
+            if (not is_stock_avail and not is_shop_query) or has_fert_advice:
                 detected.append(FarmerIntent.FERTILIZER)
 
         # 7. Irrigation
@@ -1021,15 +1023,15 @@ class AIDecisionEngine:
             if any(w in msg_l for w in _FERTILIZER_ADVICE_WORDS) or any(w in user_message for w in _FERTILIZER_ADVICE_WORDS):
                 has_crop_advice = True
 
-        is_pure_stock_query = (
-            _is_explicit_stock_query(user_message)
+        is_pure_stock_or_shop_query = (
+            (_is_explicit_stock_query(user_message) or has_shops)
             and not has_crop_advice
             and not has_market
             and not has_weather
             and not has_schemes
             and not has_stock_alert
         )
-        if not is_pure_stock_query:
+        if not is_pure_stock_or_shop_query:
             from src.ai.repository import AIRepository
             from src.ai.service import AIService
             from src.ai.schemas import AIGenerateRequest
@@ -1063,7 +1065,7 @@ class AIDecisionEngine:
                 logger.warning(f"Stock alert handling warning: {alert_err}")
 
         # A. Shops / Input Availability
-        if (has_shops or is_pure_stock_query) and not has_stock_alert:
+        if (has_shops or is_pure_stock_or_shop_query) and not has_stock_alert:
             try:
                 from src.shops.service import enrich_response_with_shops
                 logger.info("[DECISION ENGINE] Routing to shops service")

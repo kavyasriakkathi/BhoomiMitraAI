@@ -104,6 +104,31 @@ class ShopRepository:
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
+    async def search_by_name(
+        self,
+        name_query: str,
+        district: Optional[str] = None,
+    ) -> List[Shop]:
+        """Search active shops by shop name substring."""
+        query = select(Shop).where(Shop.status == "active")
+        filters = [Shop.shop_name.ilike(f"%{name_query.strip()}%")]
+        if district:
+            filters.append(Shop.district.ilike(f"%{district.strip()}%"))
+        query = query.where(and_(*filters))
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def get_active_shops(
+        self,
+        district: Optional[str] = None,
+    ) -> List[Shop]:
+        """Fetch all active shops, optionally filtered by district."""
+        query = select(Shop).where(Shop.status == "active")
+        if district:
+            query = query.where(Shop.district.ilike(f"%{district.strip()}%"))
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
     async def search_shops_by_product(
         self, product_query: str, only_available: bool = False
     ) -> List[Tuple[Shop, Inventory]]:
