@@ -195,7 +195,7 @@ async def test_gemini_generate_response_fallback_on_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_gemini_generate_response_max_output_tokens_is_1024(monkeypatch):
+async def test_gemini_generate_response_max_output_tokens_is_2048_and_thinking_budget_0(monkeypatch):
     from unittest.mock import MagicMock, AsyncMock
     import src.ai.gemini_client as gemini_module
 
@@ -221,7 +221,98 @@ async def test_gemini_generate_response_max_output_tokens_is_1024(monkeypatch):
     assert response == "Valid test response"
     assert len(captured_configs) > 0
     gen_config = captured_configs[0]
-    assert getattr(gen_config, "max_output_tokens", None) == 1024
+    assert getattr(gen_config, "max_output_tokens", None) == 2048
+    thinking_cfg = getattr(gen_config, "thinking_config", None)
+    assert thinking_cfg is not None
+    assert getattr(thinking_cfg, "thinking_budget", None) == 0
+
+
+@pytest.mark.asyncio
+async def test_gemini_generate_response_rejects_max_tokens_and_triggers_fallback(monkeypatch):
+    """Verify that generate_response rejects incomplete MAX_TOKENS responses and routes to fallback model."""
+    from unittest.mock import MagicMock, AsyncMock
+    import src.ai.gemini_client as gemini_module
+    from google.genai import types
+
+    mock_client = MagicMock()
+    attempts = []
+
+    async def mock_generate_content(model, contents, config=None):
+        attempts.append(model)
+        if model == "gemini-3.6-flash":
+            # Primary model returns cut-off response with MAX_TOKENS finish_reason
+            mock_cand = MagicMock()
+            mock_cand.finish_reason = types.FinishReason.MAX_TOKENS
+            mock_resp = MagicMock()
+            mock_resp.candidates = [mock_cand]
+            mock_resp.text = "వరి పంటలో ఆకులు పసుపుగా మారడానికి నత్రజని (యూరియా) లోపం, జింక్ లోపం లేదా కాండం తొలిచే పురుగు ఆ"
+            return mock_resp
+        else:
+            # Fallback model returns complete response with STOP finish_reason
+            mock_cand = MagicMock()
+            mock_cand.finish_reason = types.FinishReason.STOP
+            mock_resp = MagicMock()
+            mock_resp.candidates = [mock_cand]
+            mock_resp.text = "వరి పంటలో ఆకులు పసుపుగా మారడానికి నత్రజని లోపం లేదా కాండం తొలిచే పురుగు ఆశించడం కారణం కావచ్చు. తగిన నివారణ చర్యలు చేపట్టండి."
+            return mock_resp
+
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
+
+    response = await gemini_module.generate_response(
+        system_prompt="Test prompt",
+        conversation_history=[],
+        user_message="నా వరి పంటలో ఆకులు పసుపుగా మారుతున్నాయి",
+        timeout_seconds=5,
+    )
+
+    # Primary attempt was rejected and fallback model was used
+    assert attempts == ["gemini-3.6-flash", "gemini-3.5-flash"]
+    assert response.endswith("తగిన నివారణ చర్యలు చేపట్టండి.")
+    assert not response.endswith("పురుగు ఆ")
+
+
+@pytest.mark.asyncio
+async def test_gemini_multimodal_rejects_max_tokens_and_triggers_fallback(monkeypatch):
+    """Verify that generate_multimodal_response rejects incomplete MAX_TOKENS responses and routes to fallback."""
+    from unittest.mock import MagicMock, AsyncMock
+    import src.ai.gemini_client as gemini_module
+    from google.genai import types
+
+    mock_client = MagicMock()
+    attempts = []
+
+    async def mock_generate_content(model, contents, config=None):
+        attempts.append(model)
+        if model == "gemini-3.6-flash":
+            mock_cand = MagicMock()
+            mock_cand.finish_reason = types.FinishReason.MAX_TOKENS
+            mock_resp = MagicMock()
+            mock_resp.candidates = [mock_cand]
+            mock_resp.text = '{"diagnosis": "Leaf Blast", "treatment": "Spray Tricycl'
+            return mock_resp
+        else:
+            mock_cand = MagicMock()
+            mock_cand.finish_reason = types.FinishReason.STOP
+            mock_resp = MagicMock()
+            mock_resp.candidates = [mock_cand]
+            mock_resp.text = '{"diagnosis": "Leaf Blast", "treatment": "Spray Tricyclazole 75% WP @ 0.6 g/L."}'
+            return mock_resp
+
+    mock_client.aio.models.generate_content = AsyncMock(side_effect=mock_generate_content)
+    monkeypatch.setattr(gemini_module, "_client", mock_client)
+
+    response = await gemini_module.generate_multimodal_response(
+        system_prompt="Test prompt",
+        conversation_history=[],
+        image_bytes=b"fake-image",
+        mime_type="image/jpeg",
+        user_message="ఆకు తెగులు",
+        timeout_seconds=5,
+    )
+
+    assert attempts == ["gemini-3.6-flash", "gemini-3.5-flash"]
+    assert "Spray Tricyclazole 75% WP" in response
 
 
 @pytest.mark.asyncio
@@ -1295,9 +1386,10 @@ async def test_gemini_transient_error_continues_fallback(monkeypatch):
     )
 
     assert resp == "Fallback model success answer."
-    # Primary was tried, failed transients, then fallback was tried and succeeded
+    # Primary was tried, failed transients with bounded retries, then fallback was tried and succeeded
     assert models_attempted[0] == "gemini-3.6-flash"
-    assert models_attempted[1] == "gemini-3.5-flash"
+    assert "gemini-3.5-flash" in models_attempted
+    assert models_attempted[-1] == "gemini-3.5-flash"
 
 
 @pytest.mark.asyncio
@@ -1442,11 +1534,14 @@ async def test_gemini_sdk_request_options_timeout_primary_and_fallback(monkeypat
     from unittest.mock import MagicMock, AsyncMock
 
     captured_timeouts = {}
+    attempt_count = 0
 
     async def mock_wait_for(fut, timeout):
+        nonlocal attempt_count
+        attempt_count += 1
         if hasattr(fut, "close"):
             fut.close()
-        if "gemini-3.6-flash" not in captured_timeouts:
+        if attempt_count <= 3:
             captured_timeouts["gemini-3.6-flash"] = timeout
             raise ConnectionError("Primary network error to trigger fallback")
         else:

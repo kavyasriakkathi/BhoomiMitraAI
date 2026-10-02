@@ -7,7 +7,7 @@ Handles API calls, timeouts, error handling, and model fallback.
 
 import asyncio
 import time
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 from google import genai
 from google.genai import types
@@ -209,6 +209,45 @@ def _is_permanent_client_error(e: Exception) -> bool:
     return any(sig in err_type or sig in err_str for sig in permanent_4xx_signals)
 
 
+class GeminiResponseTruncatedError(RuntimeError):
+    """Raised deterministically when a Gemini candidate response is truncated by MAX_TOKENS."""
+    def __init__(self, model_name: str, finish_reason: Any = None, partial_text: str = ""):
+        self.model_name = model_name
+        self.finish_reason = finish_reason
+        self.partial_text = partial_text
+        super().__init__(
+            f"Gemini response from model '{model_name}' was truncated by MAX_TOKENS "
+            f"(finish_reason={finish_reason}, length={len(partial_text)} chars)."
+        )
+
+
+def _is_candidate_truncated(candidate: Any) -> bool:
+    """
+    Deterministically inspect candidate finish_reason for MAX_TOKENS truncation.
+    """
+    if not candidate:
+        return False
+    finish_reason = getattr(candidate, "finish_reason", None)
+    if not finish_reason:
+        return False
+    if getattr(types, "FinishReason", None) and hasattr(types.FinishReason, "MAX_TOKENS"):
+        if finish_reason == types.FinishReason.MAX_TOKENS:
+            return True
+    return "MAX_TOKENS" in str(finish_reason).upper()
+
+
+def _is_truncated_error(e: Exception) -> bool:
+    """
+    Detect if an exception was caused by a truncated Gemini response (MAX_TOKENS).
+    """
+    if e is None:
+        return False
+    if isinstance(e, GeminiResponseTruncatedError):
+        return True
+    err_str = str(e).lower()
+    return "finish_reason=max_tokens" in err_str or "max_tokens" in type(e).__name__.lower()
+
+
 def _is_transient_error(e: Exception) -> bool:
     """
     Detect transient failures eligible for bounded retry:
@@ -216,12 +255,17 @@ def _is_transient_error(e: Exception) -> bool:
     - Temporary network drops / disconnects
     - HTTP 500 / 502 / 503 / 504
     - Equivalent transient Google API errors (ServiceUnavailable, InternalServerError, etc.)
-    Strictly excludes auth, quota/429, and permanent 4xx errors.
+    Strictly excludes auth, quota/429, permanent 4xx, and truncated response errors.
     """
     if e is None:
         return False
 
-    if _is_auth_error(e) or _is_quota_exhausted_error(e) or _is_permanent_client_error(e):
+    if (
+        _is_auth_error(e)
+        or _is_quota_exhausted_error(e)
+        or _is_permanent_client_error(e)
+        or _is_truncated_error(e)
+    ):
         return False
 
     if _is_timeout_error(e):
@@ -383,7 +427,8 @@ async def generate_response(
                 config = types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     temperature=0.4,
-                    max_output_tokens=1024,
+                    max_output_tokens=2048,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
                     top_p=0.9,
                 )
 
@@ -406,6 +451,19 @@ async def generate_response(
                     f"  Call Duration    : {elapsed:.2f}s\n"
                     f"  Total Duration   : {total_elapsed:.2f}s"
                 )
+
+                candidate = response.candidates[0] if getattr(response, "candidates", None) else None
+                if _is_candidate_truncated(candidate):
+                    logger.warning(
+                        f"[GEMINI TRUNCATED RESPONSE: MAX_TOKENS] "
+                        f"Model {model_name} hit MAX_TOKENS ceiling after {elapsed:.2f}s. "
+                        f"Rejecting incomplete output and routing to next fallback model."
+                    )
+                    raise GeminiResponseTruncatedError(
+                        model_name=model_name,
+                        finish_reason=getattr(candidate, "finish_reason", None),
+                        partial_text=response.text or "",
+                    )
 
                 ai_text = (
                     response.text.strip()
@@ -453,15 +511,12 @@ async def generate_response(
                     )
                     break
 
-                if _is_transient_error(e) and retry_attempt < MAX_RETRIES:
-                    backoff = RETRY_BACKOFF[retry_attempt]
+                if _is_truncated_error(e):
                     logger.warning(
-                        f"[GEMINI TRANSIENT ERROR - RETRY {retry_attempt + 1}/{MAX_RETRIES}] "
-                        f"Model {model_name} failed with {type(e).__name__}: {e}. "
-                        f"Backing off {backoff}s before retry..."
+                        f"[GEMINI TRUNCATED ERROR] Model {model_name} output was truncated by MAX_TOKENS after {elapsed:.2f}s. "
+                        f"Routing to next model in fallback chain..."
                     )
-                    await asyncio.sleep(backoff)
-                    continue
+                    break
 
                 if _is_timeout_error(e):
                     timeout_count += 1
@@ -475,6 +530,17 @@ async def generate_response(
                         )
                         abort_all_candidates = True
                     break
+
+                if _is_transient_error(e) and retry_attempt < MAX_RETRIES:
+                    backoff = RETRY_BACKOFF[retry_attempt]
+                    logger.warning(
+                        f"[GEMINI TRANSIENT ERROR - RETRY {retry_attempt + 1}/{MAX_RETRIES}] "
+                        f"Model {model_name} failed with {type(e).__name__}: {e}. "
+                        f"Backing off {backoff}s before retry..."
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
+
                 else:
                     logger.warning(
                         f"[GEMINI ERROR] Model {model_name} failed after {elapsed:.2f}s: "
@@ -584,7 +650,8 @@ async def generate_multimodal_response(
                 config = types.GenerateContentConfig(
                     system_instruction=system_prompt,
                     temperature=0.4,
-                    max_output_tokens=1024,
+                    max_output_tokens=2048,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
                     top_p=0.9,
                     response_mime_type="application/json",
                 )
@@ -608,6 +675,19 @@ async def generate_multimodal_response(
                     f"  Call Duration    : {elapsed:.2f}s\n"
                     f"  Total Duration   : {total_elapsed:.2f}s"
                 )
+
+                candidate = response.candidates[0] if getattr(response, "candidates", None) else None
+                if _is_candidate_truncated(candidate):
+                    logger.warning(
+                        f"[GEMINI MULTIMODAL TRUNCATED RESPONSE: MAX_TOKENS] "
+                        f"Model {model_name} hit MAX_TOKENS ceiling after {elapsed:.2f}s. "
+                        f"Rejecting incomplete output and routing to next fallback model."
+                    )
+                    raise GeminiResponseTruncatedError(
+                        model_name=model_name,
+                        finish_reason=getattr(candidate, "finish_reason", None),
+                        partial_text=response.text or "",
+                    )
 
                 ai_text = (
                     response.text.strip()
@@ -662,15 +742,12 @@ async def generate_multimodal_response(
                     )
                     break
 
-                if _is_transient_error(e) and retry_attempt < MAX_RETRIES:
-                    backoff = RETRY_BACKOFF[retry_attempt]
+                if _is_truncated_error(e):
                     logger.warning(
-                        f"[GEMINI MULTIMODAL TRANSIENT ERROR - RETRY {retry_attempt + 1}/{MAX_RETRIES}] "
-                        f"Model {model_name} failed with {type(e).__name__}: {e}. "
-                        f"Backing off {backoff}s before retry..."
+                        f"[GEMINI MULTIMODAL TRUNCATED ERROR] Model {model_name} hit MAX_TOKENS after {elapsed:.2f}s. "
+                        f"Routing to next model in fallback chain..."
                     )
-                    await asyncio.sleep(backoff)
-                    continue
+                    break
 
                 if _is_timeout_error(e):
 
@@ -692,6 +769,16 @@ async def generate_multimodal_response(
                         )
                         abort_all_candidates = True
                     break
+
+                if _is_transient_error(e) and retry_attempt < MAX_RETRIES:
+                    backoff = RETRY_BACKOFF[retry_attempt]
+                    logger.warning(
+                        f"[GEMINI MULTIMODAL TRANSIENT ERROR - RETRY {retry_attempt + 1}/{MAX_RETRIES}] "
+                        f"Model {model_name} failed with {type(e).__name__}: {e}. "
+                        f"Backing off {backoff}s before retry..."
+                    )
+                    await asyncio.sleep(backoff)
+                    continue
 
                 else:
 
