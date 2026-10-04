@@ -903,10 +903,10 @@ def test_empty_or_whitespace_message_handling():
 
 def test_invalid_webhook_payload_handling():
     """Invalid webhook payloads should return status: ignored without crashing."""
-    from fastapi.testclient import TestClient
+    from tests.conftest import SignedWebhookTestClient
     from src.main import app
 
-    client = TestClient(app)
+    client = SignedWebhookTestClient(app)
     # Post invalid JSON
     res = client.post("/webhook/whatsapp", content=b"invalid json payload", headers={"Content-Type": "application/json"})
     assert res.status_code == 200

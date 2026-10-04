@@ -1,6 +1,6 @@
 import pytest
 import uuid
-from fastapi.testclient import TestClient
+from tests.conftest import SignedWebhookTestClient
 from unittest.mock import patch, AsyncMock
 from sqlalchemy.exc import IntegrityError
 
@@ -12,7 +12,7 @@ from src.gateway.service import (
     process_message_pipeline,
 )
 
-client = TestClient(app)
+client = SignedWebhookTestClient(app)
 
 
 @patch("src.gateway.router.get_settings")

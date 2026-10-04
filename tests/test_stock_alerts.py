@@ -1078,9 +1078,9 @@ async def test_stock_siren_district_resolution_regression(db_session):
 async def test_production_unresolvable_location_update_and_stock_siren_trigger(db_session):
     """
     Simulates and validates the exact production situation:
-    - Shop has district=None, address='korutla', latitude=17.9784, longitude=79.5941.
+    - Shop has district=None, address='Unknown Hamlet', latitude=17.9784, longitude=79.5941.
     - Active StockAlert exists for district='వరంగల్', product='urea'.
-    - Restock event (qty 0 -> 50) fails because 'korutla' does not resolve to Warangal,
+    - Restock event (qty 0 -> 50) fails because 'Unknown Hamlet' does not resolve to Warangal,
       and coordinates are not auto-inferred (preserving curated whitelist & avoiding arbitrary inferences).
     - 0 notifications are sent.
     - Shop owner performs legitimate location update (setting district='Warangal').
@@ -1106,7 +1106,7 @@ async def test_production_unresolvable_location_update_and_stock_siren_trigger(d
         shop_name="Kisan Seva Kendra",
         owner_name="Mallesh Goud",
         phone_number="9876543999",
-        address="korutla",
+        address="Unknown Hamlet",
         district=None,
         latitude=17.9784,
         longitude=79.5941,
@@ -1130,7 +1130,7 @@ async def test_production_unresolvable_location_update_and_stock_siren_trigger(d
     db_session.add(inv)
     await db_session.commit()
 
-    # Step 2: In initial state, district resolution fails ('korutla' not in curated whitelist)
+    # Step 2: In initial state, district resolution fails ('Unknown Hamlet' not in curated whitelist)
     assert resolve_shop_district(prod_shop.district, prod_shop.address) is None
 
     with patch("src.gateway.whatsapp_client.send_text_message", new_callable=AsyncMock) as mock_send:
@@ -1153,7 +1153,7 @@ async def test_production_unresolvable_location_update_and_stock_siren_trigger(d
     updated_shop = await shop_repo.update(prod_shop.id, ShopUpdate(district="Warangal"))
     assert updated_shop is not None
     assert updated_shop.district == "Warangal"
-    assert updated_shop.address == "korutla"
+    assert updated_shop.address == "Unknown Hamlet"
 
     # Step 4: resolve_shop_district now successfully resolves to 'Warangal'
     assert resolve_shop_district(updated_shop.district, updated_shop.address) == "Warangal"

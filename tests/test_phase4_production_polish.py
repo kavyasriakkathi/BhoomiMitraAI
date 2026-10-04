@@ -18,7 +18,7 @@ import asyncio
 import httpx
 from datetime import datetime, timedelta
 from unittest.mock import patch, AsyncMock, MagicMock
-from fastapi.testclient import TestClient
+from tests.conftest import SignedWebhookTestClient
 
 from src.main import app, validate_production_settings, audit_environment_variables
 from src.config import Settings, get_settings
@@ -47,7 +47,7 @@ from src.ai.prompts import (
     get_shops_fallback_response,
 )
 
-client = TestClient(app)
+client = SignedWebhookTestClient(app)
 
 
 # ==============================================================================

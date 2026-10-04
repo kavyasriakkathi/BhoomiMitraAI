@@ -18,7 +18,7 @@ import pytest
 import uuid
 import json
 from unittest.mock import patch, AsyncMock, MagicMock
-from fastapi.testclient import TestClient
+from tests.conftest import SignedWebhookTestClient
 
 from src.main import app
 from src.core.models import Farmer, Conversation
@@ -35,7 +35,7 @@ from src.ai.prompts import (
     get_non_crop_image_response,
 )
 
-client = TestClient(app)
+client = SignedWebhookTestClient(app)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
