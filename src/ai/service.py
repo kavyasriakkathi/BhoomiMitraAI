@@ -16,6 +16,13 @@ from src.ai.prompts import (
     build_farmer_context,
     get_fallback_response,
     get_unverified_dosage_fallback_response,
+    get_crop_clarification_response,
+)
+from src.ai.crop_context import (
+    resolve_image_crop_context,
+    filter_history_for_vision,
+    detect_crop_mismatch,
+    build_crop_reconsideration_instruction,
 )
 from src.config import get_settings
 from src.ai.gemini_client import generate_response
@@ -726,35 +733,34 @@ async def process_image_message(
     mem_service = FarmerMemoryService(mem_repo)
     memory_context = await mem_service.format_memory_for_system_prompt(farmer.id)
 
-    user_caption = conversation.user_message or ""
+    user_caption = (conversation.user_message or "").strip()
     from src.language.detector import detect_language
     from src.language.languages import normalize_language_code
-    img_lang = detect_language(user_caption, fallback=getattr(farmer, "preferred_language", "te") or "te") if user_caption.strip() else (getattr(farmer, "preferred_language", "te") or "te")
+    img_lang = detect_language(user_caption, fallback=getattr(farmer, "preferred_language", "te") or "te") if user_caption else (getattr(farmer, "preferred_language", "te") or "te")
     img_lang_code = normalize_language_code(img_lang, default=getattr(farmer, "preferred_language", "te") or "te")
     lang_directive = build_target_language_directive(img_lang_code, default=getattr(farmer, "preferred_language", "te") or "te", is_multimodal=True)
 
-    # Add a vision-specific system prompt instruction enforcing JSON and diagnostic safety
-    full_system_prompt = (
-        f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\n"
-        f"{lang_directive}\n\n"
-        "The user has uploaded an image of their crop. Diagnose any visible diseases, pests, or deficiencies.\n"
-        "IMAGE DIAGNOSIS SAFETY RULES:\n"
-        "- Never claim that an image proves a disease with absolute certainty. Use cautious wording like 'appears consistent with', 'may indicate', or 'possible symptoms of'.\n"
-        "- State that visual symptoms alone cannot be 100% confirmed from a single photo and ask the farmer to check front/back of leaf, close-up, or whole plant if uncertain.\n"
-        "- Do not recommend unverified chemical pesticides or dosages unless grounded in trusted knowledge. Mention standard cultural practices and advise checking with a local Agriculture Extension Officer (AEO).\n"
-        "- If the image does not show a crop, plant, leaf, or agricultural subject, set disease_name to 'non_agricultural', confidence_score to 0.0, and politely ask the farmer to send a clear photo of the crop or affected plant part.\n"
-        "You MUST return a strictly valid JSON object matching this exact schema:\n"
-        '{"disease_name": "Name", "confidence_score": 0.85, "severity": "low/medium/high", "symptoms": "Visible symptoms", "treatment_recommendation": "Cautious agronomic steps", "friendly_whatsapp_reply": "Natural language reply for the farmer"}\n'
-        "Provide actionable agronomic advice.\n\n"
-        f"{farmer_context}\n\n{memory_context}"
-    )
-
-    
-    # 2. History
+    # 2. History & Active Crop Context Determination
     history_records = await repo.get_conversation_history(farmer.id)
-    history_records.reverse()
+    # history_records are ordered newest-first (descending)
+    current_conv_id = getattr(conversation, "id", None)
+    active_context = resolve_image_crop_context(
+        user_caption,
+        history_records,
+        current_conversation_id=current_conv_id,
+    )
+    active_crop = active_context.get("crop") if active_context else None
+
+    # Filter history specifically for Vision (prioritizing current topic, eliminating conflicting crops)
+    filtered_history_records = filter_history_for_vision(
+        history_records,
+        active_crop,
+        max_turns=4,
+        current_conversation_id=current_conv_id,
+    )
+    filtered_history_records.reverse()  # chronological order for Gemini contents
     history = []
-    for record in history_records:
+    for record in filtered_history_records:
         if record.user_message:
             history.append({"role": "user", "parts": record.user_message})
         if record.ai_response:
@@ -771,13 +777,57 @@ async def process_image_message(
             )
             if clean_response:
                 history.append({"role": "model", "parts": clean_response})
-            
-    # 3. Call Gemini Multimodal
+
+    # 3. Vision Prompt Scoping & Caption
+    if active_context:
+        active_crop_display = active_context["crop_display_en"]
+        prev_msg = active_context.get("farmer_message", "")
+        crop_scope_instruction = (
+            f"=== CURRENT ACTIVE CONVERSATION CONTEXT ===\n"
+            f"- Active Crop: {active_crop_display}\n"
+            f"- Previous Farmer Message: \"{prev_msg}\"\n"
+            f"MANDATORY INSTRUCTION: Analyze the attached image specifically in the context of the farmer's current {active_crop_display} issue. "
+            f"Do not switch to another crop based only on older conversation history or profile memory."
+        )
+        if not user_caption:
+            caption_to_send = (
+                f"Analyze the attached image specifically in the context of the farmer's current {active_crop_display} issue: '{prev_msg}'. "
+                f"Do not switch to another crop based only on older conversation history."
+            )
+        else:
+            caption_to_send = f"{user_caption}\n[Active Crop Context: {active_crop_display}]"
+    else:
+        active_crop_display = None
+        crop_scope_instruction = (
+            "=== NO ACTIVE CROP CONTEXT ===\n"
+            "The farmer has uploaded an image without specifying the crop name, and there is no preceding conversation establishing the crop.\n"
+            "DO NOT guess or infer the crop from unrelated historical memory or profile memory.\n"
+            "If you can identify both the crop and the disease from visual evidence alone with high confidence (confidence_score >= 0.85), provide the diagnosis.\n"
+            "Otherwise, if the crop identity cannot be determined with certainty, you MUST set confidence_score to low and in 'friendly_whatsapp_reply' ask the farmer to confirm the crop name (e.g., in Telugu: 'ఈ చిత్రం ఏ పంటకు సంబంధించినది? పంట పేరు చెప్పగలరా?')."
+        )
+        caption_to_send = user_caption if user_caption else "Please analyze this image. If crop is not clearly identifiable, ask which crop this is."
+
+    # Add vision-specific system prompt instruction enforcing JSON, crop context, and diagnostic safety
+    full_system_prompt = (
+        f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\n"
+        f"{lang_directive}\n\n"
+        f"{crop_scope_instruction}\n\n"
+        "The user has uploaded an image of their crop. Diagnose any visible diseases, pests, or deficiencies.\n"
+        "IMAGE DIAGNOSIS SAFETY RULES:\n"
+        "- Never claim that an image proves a disease with absolute certainty. Use cautious wording like 'appears consistent with', 'may indicate', or 'possible symptoms of'.\n"
+        "- State that visual symptoms alone cannot be 100% confirmed from a single photo and ask the farmer to check front/back of leaf, close-up, or whole plant if uncertain.\n"
+        "- Do not recommend unverified chemical pesticides or dosages unless grounded in trusted knowledge. Mention standard cultural practices and advise checking with a local Agriculture Extension Officer (AEO).\n"
+        "- If the image does not show a crop, plant, leaf, or agricultural subject, set disease_name to 'non_agricultural', confidence_score to 0.0, and politely ask the farmer to send a clear photo of the crop or affected plant part.\n"
+        "You MUST return a strictly valid JSON object matching this exact schema:\n"
+        '{"disease_name": "Name", "confidence_score": 0.85, "severity": "low/medium/high", "symptoms": "Visible symptoms", "treatment_recommendation": "Cautious agronomic steps", "friendly_whatsapp_reply": "Natural language reply for the farmer"}\n'
+        "Provide actionable agronomic advice.\n\n"
+        f"{farmer_context}\n\n{memory_context}"
+    )
+
+    # 4. Call Gemini Multimodal
     from src.ai.gemini_client import generate_multimodal_response
     from src.ai.prompts import get_non_crop_image_response
     import json
-    
-    caption_to_send = user_caption if user_caption.strip() else "Please analyze this image."
     
     try:
         ai_response_text = await generate_multimodal_response(
@@ -807,6 +857,49 @@ async def process_image_message(
             db.add(conversation)
             await db.commit()
             return reply_text
+
+        # 5. Crop Consistency Guard & Validation / Reconsideration Step
+        if active_crop:
+            combined_resp = f"{diagnosis_data.disease_name} {diagnosis_data.friendly_whatsapp_reply} {diagnosis_data.treatment_recommendation} {diagnosis_data.symptoms}"
+            conflicting_crop = detect_crop_mismatch(active_crop, combined_resp, diagnosis_data.disease_name)
+            if conflicting_crop:
+                logger.warning(
+                    f"[CROP CONSISTENCY GUARD] Active crop is '{active_crop}', but generated response refers to '{conflicting_crop}'. "
+                    f"Triggering second validation/reconsideration step..."
+                )
+                validation_prompt = build_crop_reconsideration_instruction(
+                    active_context["crop_display_en"],
+                    conflicting_crop
+                )
+                try:
+                    reconsidered_text = await generate_multimodal_response(
+                        system_prompt=full_system_prompt,
+                        conversation_history=history,
+                        image_bytes=image_bytes,
+                        mime_type=mime_type,
+                        user_message=validation_prompt
+                    )
+                    if reconsidered_text:
+                        reconsidered_json = json.loads(reconsidered_text)
+                        reconsidered_data = MultimodalDiagnosisResponse(**reconsidered_json)
+                        reconsidered_combined = f"{reconsidered_data.disease_name} {reconsidered_data.friendly_whatsapp_reply} {reconsidered_data.treatment_recommendation}"
+                        if not detect_crop_mismatch(active_crop, reconsidered_combined, reconsidered_data.disease_name):
+                            diagnosis_data = reconsidered_data
+                        else:
+                            # Reconsideration still has crop mismatch or cannot confirm -> ask farmer to confirm
+                            logger.info("[CROP CONSISTENCY GUARD] Reconsideration remained conflicting. Asking farmer for crop clarification.")
+                            diagnosis_data.friendly_whatsapp_reply = get_crop_clarification_response(img_lang_code)
+                except Exception as recon_err:
+                    logger.warning(f"[CROP CONSISTENCY GUARD] Reconsideration call failed: {recon_err}")
+                    diagnosis_data.friendly_whatsapp_reply = get_crop_clarification_response(img_lang_code)
+
+        elif not user_caption:
+            # Image-only without active crop context
+            is_low_conf = (diagnosis_data.confidence_score is None or diagnosis_data.confidence_score < 0.85)
+            is_vague_disease = (not diagnosis_data.disease_name or diagnosis_data.disease_name.lower() in ("unknown", "unidentified", "none", "uncertain"))
+            if is_low_conf or is_vague_disease:
+                logger.info("[IMAGE WITHOUT CONTEXT] No active crop and insufficient confidence. Requesting crop clarification.")
+                diagnosis_data.friendly_whatsapp_reply = get_crop_clarification_response(img_lang_code)
 
         reply_text = diagnosis_data.friendly_whatsapp_reply
 

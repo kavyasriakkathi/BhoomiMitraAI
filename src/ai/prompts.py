@@ -349,6 +349,35 @@ def get_non_crop_image_response(language: str = "te") -> str:
 
 
 # -----------------------------------------------------------------------------
+# 9B. Crop Clarification Responses (13 Languages) - Image-only without context
+# -----------------------------------------------------------------------------
+
+CROP_CLARIFICATION_RESPONSES = {
+    "te": "ఈ చిత్రం ఏ పంటకు సంబంధించినది? పంట పేరు చెప్పగలరా?",
+    "hi": "यह तस्वीर किस फसल से संबंधित है? क्या आप फसल का नाम बता सकते हैं?",
+    "en": "Which crop is this image related to? Could you please share the crop name?",
+    "ta": "இந்தப் புகைப்படம் எந்தப் பயிர் சார்ந்தது? பயிரின் பெயரைச் சொல்ல முடியுமா?",
+    "kn": "ಈ ಚಿತ್ರವು ಯಾವ ಬೆಳೆಗೆ ಸಂಬಂಧಿಸಿದೆ? ಬೆಳೆಯ ಹೆಸರನ್ನು ತಿಳಿಸಬಹುದೇ?",
+    "ml": "ഈ ചിത്രം ഏത് വിളയുമായി ബന്ധപ്പെട്ടതാണ്? വിളയുടെ പേര് പറയാമോ?",
+    "mr": "हा फोटो कोणत्या पिकाचा आहे? कृपया पिकाचे नाव सांगू शकता का?",
+    "bn": "এই ছবিটি কোন ফসলের? অনুগ্রহ করে ফসলের নাম কি বলতে পারেন?",
+    "gu": "આ ફોટો કયા પાકનો છે? શું તમે પાકનું નામ જણાવી શકો છો?",
+    "or": "ଏହି ଫଟୋ କେଉଁ ଫସଲର? ଦୟାକରି ଫସଲର ନାମ କହିପାରିବେ କି?",
+    "pa": "ਇਹ ਤਸਵੀਰ ਕਿਸ ਫ਼ਸਲ ਨਾਲ ਸਬੰਧਤ ਹੈ? ਕੀ ਤੁਸੀਂ ਫ਼ਸਲ ਦਾ ਨਾਮ ਦੱਸ ਸਕਦੇ ਹੋ?",
+    "as": "এই ছবিখন কোনটো শস্যৰ সৈতে সম্পৰ্কিত? অনুগ্ৰহ কৰি শস্যৰ নাম ক'ব পাৰিবনে?",
+    "ur": "یہ تصویر کس فصل سے متعلق ہے؟ کیا آپ فصل کا نام بتا سکتے ہیں؟",
+}
+
+CROP_CLARIFICATION_RESPONSE_TE = CROP_CLARIFICATION_RESPONSES["te"]
+CROP_CLARIFICATION_RESPONSE_EN = CROP_CLARIFICATION_RESPONSES["en"]
+
+
+def get_crop_clarification_response(language: str = "te") -> str:
+    """Return a localized clarification prompt asking the farmer to specify which crop the image shows."""
+    return CROP_CLARIFICATION_RESPONSES.get(language, CROP_CLARIFICATION_RESPONSES["te"])
+
+
+# -----------------------------------------------------------------------------
 # 10. Unverified Fertilizer/Chemical Dosage Fallback Responses (13 Languages)
 # -----------------------------------------------------------------------------
 
