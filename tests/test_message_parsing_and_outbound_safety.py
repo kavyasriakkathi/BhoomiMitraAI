@@ -342,7 +342,7 @@ async def test_non_agricultural_image_returns_safe_reprompt():
 # 4. UNSUPPORTED MEDIA HANDLING
 # ─────────────────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("media_type", ["video", "document", "sticker", "contacts", "location", "interactive"])
+@pytest.mark.parametrize("media_type", ["video", "document", "sticker", "contacts", "interactive"])
 def test_extract_unsupported_media_types(media_type):
     """Verify that unsupported media types are extracted with their type and never crash."""
     msg = MagicMock()
@@ -357,7 +357,28 @@ def test_extract_unsupported_media_types(media_type):
     assert parsed.phone_number == "919876543210"
 
 
-@pytest.mark.parametrize("unsupported_type", ["video", "document", "sticker", "contacts", "location"])
+def test_extract_location_media_type_is_supported():
+    """Verify that location messages are extracted as supported first-class messages with GPS coordinates."""
+    msg = MagicMock()
+    msg.from_ = "919876543210"
+    msg.id = "wamid.SUPPORTED_LOCATION"
+    msg.timestamp = "1700000000"
+    msg.type = "location"
+    msg.location = MagicMock()
+    msg.location.latitude = 18.82
+    msg.location.longitude = 78.71
+    msg.location.name = None
+    msg.location.address = None
+
+    parsed = _extract_message(msg)
+    assert parsed is not None
+    assert parsed.message_type == "location"
+    assert parsed.latitude == 18.82
+    assert parsed.longitude == 78.71
+    assert parsed.phone_number == "919876543210"
+
+
+@pytest.mark.parametrize("unsupported_type", ["video", "document", "sticker", "contacts"])
 @pytest.mark.asyncio
 async def test_unsupported_media_returns_guiding_fallback(unsupported_type):
     """Verify unsupported media types receive guiding response explaining supported formats."""
@@ -390,6 +411,43 @@ async def test_unsupported_media_returns_guiding_fallback(unsupported_type):
             message_text=get_unsupported_media_fallback_response("te"),
         )
         assert "టెక్స్ట్, వాయిస్ మెసేజ్ లేదా పంట ఫోటో" in mock_send.call_args[1]["message_text"]
+
+
+@pytest.mark.asyncio
+async def test_location_media_handled_as_first_class_not_unsupported():
+    """Verify location messages are NOT treated as unsupported media and instead confirm location pin."""
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543210",
+        message_id="wamid.TEST_LOCATION",
+        timestamp="1700000000",
+        message_type="location",
+        latitude=18.82,
+        longitude=78.71,
+    )
+
+    mock_farmer = Farmer(id=uuid.uuid4(), phone_number="919876543210", preferred_language="te")
+    mock_conv = Conversation(id=uuid.uuid4(), farmer_id=mock_farmer.id, message_id=parsed.message_id)
+
+    mock_db = AsyncMock()
+    mock_db_cm = AsyncMock()
+    mock_db_cm.__aenter__.return_value = mock_db
+    mock_db_cm.__aexit__.return_value = None
+
+    with patch("src.gateway.service.AsyncSessionLocal", return_value=mock_db_cm), \
+         patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=False), \
+         patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock, return_value=mock_farmer), \
+         patch("src.gateway.service.store_incoming_message", new_callable=AsyncMock, return_value=mock_conv), \
+         patch("src.gateway.service.send_text_message", new_callable=AsyncMock, return_value="wamid.OUT_LOCATION") as mock_send, \
+         patch("src.gateway.service.mark_message_as_read", new_callable=AsyncMock):
+
+        await process_message_pipeline(parsed)
+
+        mock_send.assert_awaited_once()
+        sent_text = mock_send.call_args[1]["message_text"]
+        # Must NOT return unsupported media fallback
+        assert sent_text != get_unsupported_media_fallback_response("te")
+        # Must confirm location registration
+        assert "లొకేషన్ విజయవంతంగా సేవ్ చేయబడింది" in sent_text
 
 
 # ─────────────────────────────────────────────────────────────────────────────

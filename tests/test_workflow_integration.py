@@ -23,6 +23,9 @@ from src.orders.schemas import OrderRequestCreate, OrderRequestUpdateStatus
 @pytest.mark.asyncio
 async def test_end_to_end_order_and_inventory_lifecycle():
     """Verify order placement, stock deduction on completion, and terminal state locks."""
+    from src.core.database import engine
+    await engine.dispose()
+
     async with AsyncSessionLocal() as db:
         # 1. Setup Farmer
         farmer_id = uuid4()

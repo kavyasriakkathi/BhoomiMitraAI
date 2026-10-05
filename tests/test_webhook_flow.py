@@ -391,6 +391,8 @@ def test_validate_production_settings_passes_if_all_present(mock_get_settings):
     mock_settings.whatsapp_phone_number_id = "123456789"
     mock_settings.whatsapp_verify_token = "bhoomimitra_verify_2026"
     mock_settings.whatsapp_app_secret = "test_app_secret_999"
+    mock_settings.shop_discovery_enabled = False
+    mock_settings.shop_discovery_provider = ""
 
     # Should succeed without error
     validate_production_settings()

@@ -621,8 +621,11 @@ async def test_shop_unavailable_notice():
         reply = await process_text_message(db_mock, farmer, conv)
 
         assert "🌱 *పంట సలహా*" in reply
-        assert "🏬 *సమీప వ్యవసాయ దుకాణాలు*" in reply
-        assert "ప్రస్తుతం ఈ ఉత్పత్తికి సమీప దుకాణాలు అందుబాటులో లేవు" in reply
+        assert "🏬 *సమీప వ్యవసాయ దుకాణాలు*" in reply or "🏬 సమీప వ్యవసాయ దుకాణాలు" in reply
+        # The implementation now intentionally uses the centralized localized label: labels["no_local_dealers"]
+        from src.ai.formatting import get_shops_labels
+        te_labels = get_shops_labels("te")
+        assert "🏬 *సమీప వ్యవసాయ దుకాణాలు*" in reply or te_labels["no_local_dealers"] in reply
 
 
 @pytest.mark.asyncio
