@@ -1,6 +1,7 @@
 from typing import List, Optional, Tuple
 from uuid import UUID
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.models import Farmer
 
@@ -15,7 +16,11 @@ class FarmerRepository:
         return farmer
 
     async def get_by_id(self, farmer_id: UUID) -> Optional[Farmer]:
-        stmt = select(Farmer).where(Farmer.id == farmer_id)
+        stmt = (
+            select(Farmer)
+            .options(selectinload(Farmer.profile))
+            .where(Farmer.id == farmer_id)
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
