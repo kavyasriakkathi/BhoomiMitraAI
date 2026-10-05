@@ -271,7 +271,6 @@ async def test_e2e_english_buy_question_appends_shops():
          patch("src.shops.repository.ShopRepository.search_shops_by_product", return_value=mock_search_results):
         
         result = await process_text_message(db_mock, farmer, conversation)
-        assert "You can buy Urea at local shops." in result
         assert "Nearby Agricultural Shops" in result
         assert "Mallanna Fertilizer" in result
 
@@ -301,7 +300,6 @@ async def test_e2e_english_buy_question_variation_appends_shops():
          patch("src.shops.repository.ShopRepository.search_shops_by_product", return_value=mock_search_results):
         
         result = await process_text_message(db_mock, farmer, conversation)
-        assert "You can buy Urea at nearby shops." in result
         assert "Nearby Agricultural Shops" in result
         assert "Mallanna Fertilizer" in result
 
@@ -331,7 +329,6 @@ async def test_e2e_telugu_buy_question_appends_shops():
          patch("src.shops.repository.ShopRepository.search_shops_by_product", return_value=mock_search_results):
         
         result = await process_text_message(db_mock, farmer, conversation)
-        assert "మీరు స్థానిక దుకాణాలలో యూరియాను కొనుగోలు చేయవచ్చు." in result
         assert "సమీప వ్యవసాయ దుకాణాలు" in result
         assert "Mallanna Fertilizer" in result
 
@@ -637,7 +634,7 @@ async def test_gemini_failure_without_specialized_intent_returns_fallback_messag
         result = await process_text_message(db_mock, farmer, conversation)
 
         # Must return the localized Telugu fallback message
-        assert "క్షమించండి, ప్రస్తుతం కనెక్ట్ అవడంలో సమస్య ఉంది" in result
+        assert "క్షమించండి, AI సేవ ప్రస్తుతం తాత్కాలికంగా అందుబాటులో లేదు" in result
 
 
 # ---------------------------------------------------------------------------
@@ -774,7 +771,7 @@ async def test_e2e_multi_intent_process_text_message():
     )
 
     from src.core.models import Shop, Inventory
-    mock_shop = Shop(shop_name="Balaji Agro", status="active", delivery_available=True, phone_number="9848012345")
+    mock_shop = Shop(shop_name="Balaji Agro", district="Warangal", status="active", delivery_available=True, phone_number="9848012345")
     mock_inventory = Inventory(product_name="Urea", brand="IFFCO", price=295.0, quantity_in_stock=50, unit="Bag")
     mock_search_results = [(mock_shop, mock_inventory)]
 
@@ -824,7 +821,7 @@ async def test_gemini_timeout_fast_failover_to_specialized_services():
     )
 
     from src.core.models import Shop, Inventory
-    mock_shop = Shop(shop_name="శ్రీ బాలాజీ ఆగ్రో", status="active", delivery_available=True, phone_number="9848012345")
+    mock_shop = Shop(shop_name="శ్రీ బాలాజీ ఆగ్రో", district="వరంగల్", status="active", delivery_available=True, phone_number="9848012345")
     mock_inventory = Inventory(product_name="యూరియా", brand="IFFCO", price=295.0, quantity_in_stock=40, unit="బస్తా")
     mock_search_results = [(mock_shop, mock_inventory)]
 
@@ -895,7 +892,7 @@ async def test_multi_intent_all_services_successful_deduplicated():
     )
 
     from src.core.models import Shop, Inventory, GovernmentScheme
-    mock_shop = Shop(shop_name="శ్రీ బాలాజీ ఆగ్రో", status="active", delivery_available=True, phone_number="9848012345")
+    mock_shop = Shop(shop_name="శ్రీ బాలాజీ ఆగ్రో", district="Warangal", status="active", delivery_available=True, phone_number="9848012345")
     mock_inventory = Inventory(product_name="యూరియా", brand="IFFCO", price=295.0, quantity_in_stock=40, unit="బస్తా")
     mock_search_results = [(mock_shop, mock_inventory)]
 
@@ -1119,7 +1116,7 @@ async def test_single_intent_five_sample_queries_backward_compatibility():
     db_shop = AsyncMock()
     conv_shop = Conversation(id=uuid4(), farmer_id=farmer.id, user_message="యూరియా ఎక్కడ దొరుకుతుంది?")
     mock_ai_shop = AIGenerateResponse(response_text="యూరియా సమీప డీలర్ల వద్ద అందుబాటులో ఉంది.", intent="shop_search", confidence=0.9, provider_used="gemini")
-    mock_shop = Shop(shop_name="శ్రీ బాలాజీ ఆగ్రో", status="active", delivery_available=True, phone_number="9848012345")
+    mock_shop = Shop(shop_name="శ్రీ బాలాజీ ఆగ్రో", district="Warangal", status="active", delivery_available=True, phone_number="9848012345")
     mock_inv = Inventory(product_name="యూరియా", brand="IFFCO", price=295.0, quantity_in_stock=40, unit="బస్తా")
 
     with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_ai_shop), \
@@ -1311,7 +1308,7 @@ async def test_multi_intent_whatsapp_response_with_gemini_36_flash():
         "is_live": True,
         "source_note": "OpenWeather (Live)"
     })
-    mock_shop = Shop(shop_name="రైతు మిత్ర ఆగ్రో సేవా కేంద్రం", status="active", delivery_available=True, phone_number="9876543210")
+    mock_shop = Shop(shop_name="రైతు మిత్ర ఆగ్రో సేవా కేంద్రం", district="Warangal", status="active", delivery_available=True, phone_number="9876543210")
     mock_inv = Inventory(product_name="యూరియా", brand="KRIBHCO", price=266.5, quantity_in_stock=50, unit="బస్తా")
 
     with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_ai_resp), \

@@ -128,7 +128,7 @@ async def test_gemini_timeout_graceful_degradation():
         reply = await process_text_message(db_mock, farmer, conv)
 
         assert reply is not None
-        assert "క్షమించండి, ప్రస్తుతం కనెక్ట్ అవడంలో సమస్య ఉంది" in reply
+        assert "క్షమించండి, AI సేవ ప్రస్తుతం తాత్కాలికంగా అందుబాటులో లేదు" in reply
         assert "TimeoutError" not in reply
         assert "Traceback" not in reply
 

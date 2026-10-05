@@ -675,7 +675,7 @@ async def test_multiple_simultaneous_service_failures_clean_handling():
         reply = await process_text_message(db_mock, farmer, conv)
 
         # Must return the safe localized fallback message
-        assert "క్షమించండి, ప్రస్తుతం కనెక్ట్ అవడంలో సమస్య ఉంది" in reply
+        assert "క్షమించండి, AI సేవ ప్రస్తుతం తాత్కాలికంగా అందుబాటులో లేదు" in reply
         assert "Traceback" not in reply
         assert "RuntimeError" not in reply
 
