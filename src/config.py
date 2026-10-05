@@ -88,6 +88,14 @@ class Settings(BaseSettings):
     openweather_api_timeout_seconds: float = Field(default=5.0)
     weather_cache_ttl_seconds: int = Field(default=1800)  # 30 minutes
 
+    # Shop Discovery (Automatic Location-based Places Provider)
+    shop_discovery_enabled: bool = Field(default=False)
+    shop_discovery_provider: str = Field(default="")  # 'google_places', 'mock' (dev/test only)
+    shop_discovery_radius_meters: int = Field(default=25000)  # 25 km
+    google_places_api_key: str = Field(default="")
+    shop_discovery_api_timeout_seconds: float = Field(default=5.0)
+    shop_discovery_cache_ttl_seconds: int = Field(default=604800)  # 7 days
+
     # Authentication & JWT
     jwt_secret_key: str = Field(default="bhoomimitra-ai-secret-key-change-in-production-2026")
     jwt_algorithm: str = Field(default="HS256")

@@ -325,7 +325,25 @@ def _extract_message(msg, sender_name: str = None) -> ParsedIncomingMessage | No
             media_mime_type=media_mime,
         )
 
-    # Unsupported media types (video, document, sticker, contacts, location, interactive, etc.)
+    elif raw_type == "location":
+        base["message_type"] = "location"
+        lat = msg.location.latitude if msg.location else None
+        lng = msg.location.longitude if msg.location else None
+        loc_name = msg.location.name if msg.location else None
+        loc_addr = msg.location.address if msg.location else None
+        coord_text = f"Shared Location: {lat}, {lng}" if lat is not None and lng is not None else "Shared Location"
+        if loc_name or loc_addr:
+            coord_text += f" ({loc_name or loc_addr})"
+        return ParsedIncomingMessage(
+            **base,
+            text_content=coord_text,
+            latitude=lat,
+            longitude=lng,
+            location_name=loc_name,
+            location_address=loc_addr,
+        )
+
+    # Unsupported media types (video, document, sticker, contacts, interactive, etc.)
     return ParsedIncomingMessage(
         **base,
     )

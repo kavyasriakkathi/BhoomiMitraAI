@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, Float, ForeignKey, Text, Integer, Index
+from sqlalchemy import Column, String, Boolean, DateTime, Float, ForeignKey, Text, Integer, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from src.core.database import Base
@@ -411,3 +411,36 @@ class FarmerPushToken(Base):
 
     # Relationships
     farmer = relationship("Farmer", back_populates="push_tokens")
+
+
+class DiscoveredShop(Base):
+    """
+    Externally Discovered Agricultural Shop Model.
+
+    Stores external POIs discovered via maps/places providers.
+    Maintains a strict boundary separating discovered unverified places
+    from BhoomiMitra verified partner shops and inventory.
+    """
+    __tablename__ = "discovered_shops"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_place_id", name="uq_discovered_shops_provider_place_id"),
+        Index("idx_discovered_shops_coords", "latitude", "longitude"),
+        Index("idx_discovered_shops_name", "shop_name"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider = Column(String(50), nullable=False)  # 'google_places', 'mock', 'osm'
+    provider_place_id = Column(String(255), nullable=False)
+    shop_name = Column(String(200), nullable=False)
+    business_type = Column(String(100), nullable=True)  # 'fertilizer_dealer', 'seed_store', etc.
+    address = Column(Text, nullable=True)
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    phone_number = Column(String(50), nullable=True)
+    maps_url = Column(String(500), nullable=True)
+    rating = Column(Float, nullable=True)
+    user_ratings_total = Column(Integer, nullable=True)
+    is_operational = Column(Boolean, default=True, nullable=False)
+
+    discovered_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    last_verified_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)

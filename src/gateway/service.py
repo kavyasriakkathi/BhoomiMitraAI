@@ -152,6 +152,77 @@ async def store_incoming_message(
         return None
 
 
+async def _handle_inbound_location(
+    db: AsyncSession,
+    farmer: Farmer,
+    conversation: Conversation,
+    parsed: ParsedIncomingMessage,
+    language: str,
+) -> str:
+    """
+    Handle WhatsApp native location pin messages.
+    Extracts latitude and longitude, stores in FarmerMemory.gps_coordinates,
+    and returns a localized confirmation.
+    """
+    from src.memory.models import FarmerMemory
+
+    lat = parsed.latitude
+    lng = parsed.longitude
+
+    is_valid = (
+        lat is not None
+        and lng is not None
+        and -90.0 <= lat <= 90.0
+        and -180.0 <= lng <= 180.0
+        and not (lat == 0.0 and lng == 0.0)
+    )
+
+    if not is_valid:
+        logger.warning(f"[LOCATION INBOUND] Malformed coordinates received for farmer {farmer.id}: ({lat}, {lng})")
+        if language == "te":
+            return "⚠️ మీ లొకేషన్ వివరాలు స్పష్టంగా అందలేదు. దయచేసి వాట్సాప్‌లో మీ లొకేషన్ పిన్‌ను మళ్లీ షేర్ చేయండి లేదా మీ గ్రామం/మండలం పేరును టైప్ చేయండి."
+        elif language == "hi":
+            return "⚠️ आपके स्थान का विवरण स्पष्ट नहीं मिल सका। कृपया व्हाट्सएप पर अपना स्थान पिन पुनः साझा करें या अपने गाँव/तहसील का नाम लिखें।"
+        return "⚠️ Could not detect valid coordinates. Please share your WhatsApp location pin again or type your village/town name."
+
+    # Update or create FarmerMemory
+    mem_stmt = select(FarmerMemory).where(FarmerMemory.farmer_id == farmer.id)
+    mem_res = await db.execute(mem_stmt)
+    memory = mem_res.scalar_one_or_none()
+    if not memory:
+        memory = FarmerMemory(farmer_id=farmer.id)
+        db.add(memory)
+
+    memory.gps_coordinates = {
+        "latitude": round(lat, 6),
+        "longitude": round(lng, 6),
+    }
+    db.add(memory)
+    await db.commit()
+    logger.info(f"[LOCATION INBOUND] Saved GPS for farmer {farmer.id}: ({round(lat, 6)}, {round(lng, 6)})")
+
+    if language == "te":
+        return (
+            "📍 ధన్యవాదాలు! మీ లొకేషన్ విజయవంతంగా సేవ్ చేయబడింది.\n\n"
+            "మీరు ఇప్పుడు మీ సమీపంలోని ఎరువులు, విత్తనాల దుకాణాలు "
+            "('నా దగ్గర యూరియా ఎక్కడ దొరుకుతుంది?', 'సమీపంలోని ఎరువుల షాపులు') "
+            "లేదా వాతావరణం మరియు పంట సలహాల గురించి అడగవచ్చు."
+        )
+    elif language == "hi":
+        return (
+            "📍 धन्यवाद! आपका स्थान सफलतापूर्वक सहेज लिया गया है।\n\n"
+            "अब आप अपने नजदीकी खाद व बीज दुकानों "
+            "('मेरे पास खाद की दुकान', 'यूरिया कहां मिलेगा') "
+            "या मौसम और फसल सलाह के बारे में पूछ सकते हैं।"
+        )
+    return (
+        "📍 Thank you! Your location has been saved successfully.\n\n"
+        "You can now ask for nearby agricultural shops "
+        "(e.g. 'fertilizer shops near me', 'where to buy urea') "
+        "or get local weather and crop advisories."
+    )
+
+
 async def process_message_pipeline(
     parsed: ParsedIncomingMessage,
     sender_name: Optional[str] = None
@@ -319,11 +390,15 @@ async def process_message_pipeline(
                             else:
                                 logger.error(f"[PIPELINE STAGE FAILED: Stage 5 - Image Download] Media ID {parsed.media_id} failed download")
                                 ai_response = get_image_fallback_response(active_lang)
+                    elif parsed.message_type == "location":
+                        ai_response = await _handle_inbound_location(
+                            db, farmer, conversation, parsed, active_lang
+                        )
                     elif parsed.text_content and parsed.text_content.strip():
                         ai_response = await process_text_message(
                             db, farmer, conversation
                         )
-                    elif parsed.message_type in ["video", "document", "sticker", "contacts", "location", "interactive", "unsupported"] or parsed.message_type not in ["text", "audio", "image"]:
+                    elif parsed.message_type in ["video", "document", "sticker", "contacts", "interactive", "unsupported"] or parsed.message_type not in ["text", "audio", "image", "location"]:
                         logger.info(f"STAGE 5: Handling unsupported media message type '{parsed.message_type}' for farmer {farmer.id}")
                         ai_response = get_unsupported_media_fallback_response(active_lang)
                     else:
@@ -387,7 +462,7 @@ async def process_message_pipeline(
                     and settings.enable_voice_responses is False
                 )
             )
-            is_supported_inbound = parsed.message_type in ("audio", "text", "image")
+            is_supported_inbound = parsed.message_type in ("audio", "text", "image", "location")
             should_send_voice = (
                 is_supported_inbound
                 and not is_explicitly_disabled

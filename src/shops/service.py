@@ -263,6 +263,75 @@ _KNOWN_DISTRICTS = {
     "విజయనగరం": "Vizianagaram",
 }
 
+# Known Central Coordinates for Telugu Mandals and Districts (Telangana & Andhra Pradesh)
+_KNOWN_COORDINATES = {
+    # Towns / Mandals
+    "korutla": (18.82, 78.71),
+    "కోరుట్ల": (18.82, 78.71),
+    "కోరుట్లలో": (18.82, 78.71),
+    # Telangana Districts / Centers
+    "jagtial": (18.79, 78.91),
+    "జగిత్యాల": (18.79, 78.91),
+    "జగిత్యాలలో": (18.79, 78.91),
+    "warangal": (17.97, 79.59),
+    "hanamkonda": (17.99, 79.56),
+    "వరంగల్": (17.97, 79.59),
+    "వరంగల్లో": (17.97, 79.59),
+    "వరంగల్ లో": (17.97, 79.59),
+    "హనుమకొండ": (17.99, 79.56),
+    "karimnagar": (18.43, 79.13),
+    "కరీంనగర్": (18.43, 79.13),
+    "khammam": (17.24, 80.15),
+    "ఖమ్మం": (17.24, 80.15),
+    "nizamabad": (18.67, 78.09),
+    "నిజామాబాద్": (18.67, 78.09),
+    "nalgonda": (17.05, 79.27),
+    "నల్గొండ": (17.05, 79.27),
+    "mahabubnagar": (16.74, 78.00),
+    "మహబూబ్‌నగర్": (16.74, 78.00),
+    "medak": (18.04, 78.26),
+    "మెదక్": (18.04, 78.26),
+    "adilabad": (19.66, 78.53),
+    "ఆదిలాబాద్": (19.66, 78.53),
+    "rangareddy": (17.30, 78.55),
+    "రంగారెడ్డి": (17.30, 78.55),
+    "hyderabad": (17.38, 78.48),
+    "హైదరాబాద్": (17.38, 78.48),
+    # Andhra Pradesh Districts
+    "guntur": (16.30, 80.43),
+    "గుంటూరు": (16.30, 80.43),
+    "krishna": (16.18, 81.13),
+    "కృష్ణా": (16.18, 81.13),
+    "vijayawada": (16.50, 80.64),
+    "విజయవాడ": (16.50, 80.64),
+    "kurnool": (15.82, 78.03),
+    "కర్నూలు": (15.82, 78.03),
+    "anantapur": (14.68, 77.60),
+    "అనంతపురం": (14.68, 77.60),
+    "kadapa": (14.47, 78.82),
+    "కడప": (14.47, 78.82),
+    "nellore": (14.44, 79.98),
+    "నెల్లూరు": (14.44, 79.98),
+    "prakasam": (15.50, 80.05),
+    "ప్రకాశం": (15.50, 80.05),
+    "visakhapatnam": (17.68, 83.21),
+    "విశాఖపట్నం": (17.68, 83.21),
+}
+
+
+def _is_explicit_nearby_query(query_text: Optional[str]) -> bool:
+    """Detect if query specifically requests shops 'near me' / 'nearby'."""
+    if not query_text or not isinstance(query_text, str):
+        return False
+    q = query_text.lower().strip()
+    nearby_markers = [
+        "near me", "nearby", "near", "daggara", "daggarlo", "na daggara",
+        "దగ్గర", "దగ్గర్లో", "నా దగ్గర", "సమీప", "సమీపంలో",
+        "पास में", "नजदीक", "आसपास", "hathira",
+    ]
+    return any(m in q for m in nearby_markers)
+
+
 # Product keyword normalization mapping (Search indexing only — NOT endorsement)
 _PRODUCT_MAPPING = {
     # Fertilizers
@@ -670,15 +739,27 @@ async def _resolve_farmer_location(
     db, farmer, query_text: str = ""
 ) -> Tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
     """
-    Resolve farmer location using the 4-tier hierarchy:
-    Tier 1: Explicit district/city mentioned in query text (e.g. "Karimnagar", "వరంగల్")
-    Tier 2: FarmerMemory.gps_coordinates (if available)
+    Resolve farmer location using the 5-tier hierarchy:
+    Tier 1: Explicit district/town mentioned in query text (e.g. "Korutla", "Karimnagar", "వరంగల్")
+    Tier 2: FarmerMemory.gps_coordinates (if available from WhatsApp pin drop or past GPS)
     Tier 3: FarmerProfile.district / FarmerMemory.district
     Tier 4: None (all-active fallback)
     """
     # Tier 1: Check query-level explicit district override
     query_district = _extract_district_from_query(query_text) if query_text else None
+
+    # Check if explicit query contains known coordinates (e.g. Korutla, Jagtial, Warangal)
+    if query_text:
+        q_l = query_text.lower()
+        for kw, (k_lat, k_lon) in _KNOWN_COORDINATES.items():
+            if kw in q_l:
+                return k_lat, k_lon, query_district, None
+
     if query_district:
+        d_lower = query_district.lower()
+        if d_lower in _KNOWN_COORDINATES:
+            k_lat, k_lon = _KNOWN_COORDINATES[d_lower]
+            return k_lat, k_lon, query_district, None
         return None, None, query_district, None
 
     if not farmer:
@@ -724,6 +805,21 @@ async def _resolve_farmer_location(
             district = memory.district.strip()
             state = memory.state.strip() if memory.state else None
 
+        # Direct attribute on farmer (e.g. unit tests or mock objects)
+        if not district and getattr(farmer, "district", None):
+            f_dist = getattr(farmer, "district")
+            if isinstance(f_dist, str) and f_dist.strip():
+                district = f_dist.strip()
+                f_state = getattr(farmer, "state", None)
+                if isinstance(f_state, str) and f_state.strip():
+                    state = f_state.strip()
+
+        # If district known but coordinates not set, map from known coordinates
+        if (latitude is None or longitude is None) and district:
+            d_l = district.lower().strip()
+            if d_l in _KNOWN_COORDINATES:
+                latitude, longitude = _KNOWN_COORDINATES[d_l]
+
     except Exception as loc_err:
         logger.warning(f"[SHOPS ENRICH] Failed to resolve farmer location: {loc_err}")
 
@@ -734,11 +830,31 @@ async def _resolve_farmer_location(
 # Pipeline Integration Function — called from ai/service.py
 # ---------------------------------------------------------------------------
 
+_DISCOVERY_LABELS = {
+    "te": {
+        "discovered_shop": "🔎 సమీపంలో గుర్తించబడిన దుకాణం",
+        "stock_unverified_disclaimer": "ప్రస్తుత స్టాక్ను BhoomiMitra నిర్ధారించలేదు.",
+        "verified_partner": "✅ భూమిమిత్ర ధృవీకరించిన షాప్",
+    },
+    "hi": {
+        "discovered_shop": "🔎 नजदीकी खोजी गई दुकान",
+        "stock_unverified_disclaimer": "वर्तमान स्टॉक भूमिमित्र द्वारा सत्यापित नहीं है।",
+        "verified_partner": "✅ भूमिमित्र सत्यापित",
+    },
+    "en": {
+        "discovered_shop": "🔎 Nearby discovered shop",
+        "stock_unverified_disclaimer": "Current stock is not verified by BhoomiMitra.",
+        "verified_partner": "✅ BhoomiMitra Verified",
+    },
+}
+
+
 async def enrich_response_with_shops(
     db,
     query_text: str,
     ai_response: str,
     farmer=None,
+    discovery_orchestrator=None,
 ) -> str:
     """
     Auto-detect product recommendations or shop search intent in the conversation
@@ -751,6 +867,8 @@ async def enrich_response_with_shops(
     - Any exception occurs
     """
     from src.shops.repository import ShopRepository, haversine_distance
+    from src.config import get_settings
+    from src.shops.discovery import ShopDiscoveryOrchestrator, DiscoveredShopItem
 
     query_lower = query_text.lower()
     logger.info(f"[ENRICH SHOPS] Called with query_text: '{query_text}' | ai_response length: {len(ai_response)}")
@@ -769,7 +887,7 @@ async def enrich_response_with_shops(
     matched_product = _detect_product_from_query(query_text, ai_response)
     is_stock_query = _is_explicit_stock_query(query_text)
 
-    # Step 3: Resolve farmer location and language (4-tier hierarchy)
+    # Step 3: Resolve farmer location and language (5-tier hierarchy)
     loc_res = await _resolve_farmer_location(db, farmer, query_text=query_text)
     if len(loc_res) == 5:
         latitude, longitude, district, state, _ = loc_res
@@ -779,6 +897,23 @@ async def enrich_response_with_shops(
     farmer_lang = getattr(farmer, "preferred_language", "en") or "en"
     language = detect_language(query_text, fallback=farmer_lang)
     labels = get_shops_labels(language)
+    disc_labels = _DISCOVERY_LABELS.get(language, _DISCOVERY_LABELS["en"])
+    labels = {**labels, **disc_labels}
+
+    has_farmer_location = (latitude is not None and longitude is not None) or (district is not None)
+
+    # Phase 3 requirement: If farmer asks an explicit nearby query, but NO location can be resolved:
+    # Ask farmer for their location pin or town name.
+    if _is_explicit_nearby_query(query_text) and not has_farmer_location:
+        if language == "te":
+            return "📍 మీ సమీపంలోని వ్యవసాయ దుకాణాలను కనుగొనడానికి, దయచేసి వాట్సాప్‌లో మీ లొకేషన్ పిన్‌ను షేర్ చేయండి లేదా మీ గ్రామం/మండలం పేరును టైప్ చేయండి (ఉదా: 'కోరుట్ల', 'వరంగల్')."
+        elif language == "hi":
+            return "📍 अपने नजदीकी कृषि दुकानों को खोजने के लिए, कृपया व्हाट्सएप पर अपना स्थान पिन साझा करें या अपने गाँव/तहसील का नाम लिखें (जैसे: 'कोरुटला', 'वारंगल')।"
+        return "📍 To find agricultural shops near you, please share your WhatsApp location pin or type your village/town name (e.g., 'Korutla', 'Warangal')."
+
+    # Settings & Discovery feature flag
+    settings = get_settings()
+    discovery_enabled = getattr(settings, "shop_discovery_enabled", False) or (discovery_orchestrator is not None)
 
     matches: List[Tuple[Shop, Optional[Inventory]]] = []
     is_specific_shop_query = False
@@ -822,13 +957,12 @@ async def enrich_response_with_shops(
                 loc_shops = await shop_repo.search_by_location(district=district)
                 if loc_shops:
                     matches = [(s, None) for s in loc_shops]
-                else:
-                    return labels["no_local_dealers"]
             except Exception as db_err:
                 logger.warning(f"[ENRICH SHOPS] Location shop query failed: {db_err}")
-                return labels["no_local_dealers"]
-        else:
-            logger.info("[ENRICH SHOPS] Bypassing shop enrichment - No product keyword matched.")
+
+        # If no verified matches in local DB and discovery is not active/available, exit early
+        if not matches and not (discovery_enabled and latitude is not None and longitude is not None):
+            logger.info("[ENRICH SHOPS] Bypassing shop enrichment - No product keyword matched and no local shops.")
             if not ai_response:
                 return labels["no_local_dealers"]
             return ai_response
@@ -846,15 +980,63 @@ async def enrich_response_with_shops(
             logger.warning(f"[ENRICH SHOPS] DB query failed: {db_err}")
             return ai_response
 
-    if not matches:
+    # Step 4b: External Shop Discovery
+    discovered_items: List[DiscoveredShopItem] = []
+
+    if discovery_enabled and latitude is not None and longitude is not None and not is_specific_shop_query:
+        try:
+            orchestrator = discovery_orchestrator or ShopDiscoveryOrchestrator()
+            verified_shops_list = [s for s, _ in matches]
+            discovered_items = await orchestrator.discover_nearby_agricultural_shops(
+                db=db,
+                latitude=latitude,
+                longitude=longitude,
+                product_query=matched_product,
+                verified_shops=verified_shops_list,
+            )
+        except Exception as disc_err:
+            logger.warning(f"[ENRICH SHOPS] External discovery fail-soft: {disc_err}")
+
+    if not matches and not discovered_items:
         logger.info(f"[ENRICH SHOPS] No active shops found for product '{matched_product}'.")
         if not ai_response:
             return labels["no_local_dealers"]
-        return ai_response
+        return (ai_response + "\n\n" + labels["no_local_dealers"]).strip()
+
+    # Strict Stock Grounding Check:
+    # If this is an explicit live stock query (e.g. "Korutla lo urea undha?")
+    # and no verified partner shop has this item in stock, external discovered shops
+    # must NEVER be assumed or presented as having live stock.
+    has_verified_stock = any(
+        item is not None and item.available and item.quantity_in_stock > 0
+        for _, item in matches
+    )
+    if is_stock_query and not has_verified_stock:
+        if language == "te":
+            stock_unavail_msg = (
+                "🏬 సమాచారం:\n"
+                "ప్రస్తుతం మీ ప్రాంతంలో ధృవీకరించబడిన లైవ్ స్టాక్ సమాచారం అందుబాటులో లేదు. "
+                "ఖచ్చితమైన స్టాక్ లభ్యత కోసం దయచేసి మీ స్థానిక ప్రాథమిక వ్యవసాయ సహకార సంఘం (PACS/సొసైటీ), "
+                "వ్యవసాయ విస్తరణ అధికారి (AEO) లేదా స్థానిక డీలర్‌ను సంప్రదించండి."
+            )
+        elif language == "hi":
+            stock_unavail_msg = (
+                "🏬 सूचना:\n"
+                "वर्तमान में आपके क्षेत्र में सत्यापित लाइव स्टॉक जानकारी उपलब्ध नहीं है। "
+                "कृपया सटीक स्टॉक उपलब्धता के लिए अपने स्थानीय पैक्स (PACS/सोसायटी), "
+                "कृषि विस्तार अधिकारी (AEO) या स्थानीय डीलर से संपर्क करें।"
+            )
+        else:
+            stock_unavail_msg = (
+                "🏬 Notice:\n"
+                "Verified live stock information is currently unavailable for your locality. "
+                "Please contact your local Primary Agricultural Credit Society (PACS), "
+                "Agriculture Extension Officer (AEO), or authorized local dealer for current stock availability."
+            )
+        return (ai_response + "\n\n" + stock_unavail_msg).strip() if ai_response else stock_unavail_msg
 
     # Step 5: Rank & Filter matches by location
     max_radius_km = 50.0
-    has_farmer_location = (latitude is not None and longitude is not None) or (district is not None)
     scored_matches = []
 
     for shop, item in matches:
@@ -877,15 +1059,11 @@ async def enrich_response_with_shops(
             and farmer_dist_canon.lower() == shop_dist.lower()
         )
 
-        # Production Guard: If farmer location is known (GPS, District, or Town):
-        # A shop is ONLY valid if it is within safe radius (<= 50km) or matches the farmer's canonical district.
-        # Unlocalized shops (NULL district/address) or out-of-district shops are strictly suppressed.
         if has_farmer_location:
             is_valid_local = False
             shop_address_lower = (shop.address or "").lower()
             shop_name_lower = (shop.shop_name or "").lower()
 
-            # Town-level exact match (e.g. Korutla)
             town_match = requested_town and (
                 requested_town.lower() in shop_address_lower
                 or requested_town.lower() in shop_name_lower
@@ -921,12 +1099,23 @@ async def enrich_response_with_shops(
         )
         scored_matches.append((sort_key, shop, item, dist))
 
+    # Add discovered shops (Tier C) to scored matches when not a pure stock query
+    if not is_stock_query and discovered_items:
+        for d_shop in discovered_items:
+            d_dist = d_shop.distance_km
+            if d_dist is None and latitude is not None and longitude is not None:
+                d_dist = haversine_distance(latitude, longitude, d_shop.latitude, d_shop.longitude)
+            # Rank 3: Discovered Tier C (below verified partner Rank 0, 1, 2)
+            # Stock rank 2: Below verified items
+            d_sort_key = (3, 2, d_dist if d_dist is not None else 99999.0)
+            scored_matches.append((d_sort_key, d_shop, None, d_dist))
+
     if not scored_matches:
         logger.info(
             f"[ENRICH SHOPS] No local verified shops found within safe radius/district for product '{matched_product}' "
             f"(district: {district}, coords: ({latitude}, {longitude}))."
         )
-        if is_stock_query or requested_town:
+        if is_stock_query or _extract_requested_town(query_text):
             if language == "te":
                 stock_unavail_msg = (
                     "🏬 సమాచారం:\n"
@@ -967,49 +1156,66 @@ async def enrich_response_with_shops(
     shop_entries = []
     for _, shop, item, dist in top:
         dist_str = labels["dist_fmt"].format(dist=dist) if dist is not None else labels["dist_generic"]
-        status_str = labels["status_open"] if shop.status == "active" else labels["status_closed"]
-        delivery_str = labels["delivery_avail"] if shop.delivery_available else labels["delivery_none"]
 
-        time_range = ""
-        if shop.opening_time and shop.closing_time:
-            time_range = f" ({shop.opening_time} - {shop.closing_time})"
-
-        lines = [
-            f"\n• *{shop.shop_name}* ({dist_str})",
-        ]
-        if item is not None:
-            stock_str = _format_stock_string(
-                item.quantity_in_stock, item.minimum_stock_level, item.available, item.unit, labels
-            )
-            lines.append(f"  {labels['product']}: {item.product_name} ({item.brand})")
-            lines.append(f"  {labels['price']}: ₹{item.price:g}/{item.unit} | {stock_str}")
-            if getattr(item, "last_updated", None):
-                v_date = item.last_updated.strftime("%d-%m-%Y")
-                updated_label = labels.get("last_updated", "Last updated")
-                lines.append(f"  🕒 {updated_label}: {v_date}")
-        else:
+        if isinstance(shop, DiscoveredShopItem):
+            # Tier C: Discovered External Shop (Zero fake owner, zero fake inventory, zero fake price)
+            lines = [
+                f"\n• *{shop.shop_name}* ({dist_str})",
+                f"  {labels['discovered_shop']}",
+            ]
             if shop.address:
                 lines.append(f"  📍 {shop.address}")
-            if is_specific_shop_query:
-                if language == "te":
-                    lines.append("  ℹ️ ప్రస్తుత స్టాక్ వివరాలు ధృవీకరించబడలేదు (ధర/స్టాక్ లభ్యత కోసం దుకాణాన్ని సంప్రదించండి)")
-                elif language == "hi":
-                    lines.append("  ℹ️ वर्तमान स्टॉक विवरण असत्यापित है (मूल्य और उपलब्धता के लिए दुकान से संपर्क करें)")
-                else:
-                    lines.append("  ℹ️ Current stock is not verified (Please contact the shop directly for price and availability)")
+            lines.append(f"  ⚠️ {labels['stock_unverified_disclaimer']}")
+            if shop.phone_number:
+                lines.append(f"  {labels['contact']}: {shop.phone_number}")
+            shop_entries.append("\n".join(lines))
+        else:
+            # Verified Partner Shop (Tier A / Tier B)
+            status_str = labels["status_open"] if shop.status == "active" else labels["status_closed"]
+            delivery_str = labels["delivery_avail"] if shop.delivery_available else labels["delivery_none"]
 
-        lines.extend([
-            f"  {labels['contact']}: {shop.phone_number} | {status_str}{time_range}",
-            f"  {labels['delivery']}: {delivery_str}",
-        ])
-        shop_entries.append("\n".join(lines))
+            time_range = ""
+            if shop.opening_time and shop.closing_time:
+                time_range = f" ({shop.opening_time} - {shop.closing_time})"
+
+            lines = [
+                f"\n• *{shop.shop_name}* ({dist_str})",
+            ]
+            if item is not None:
+                # Tier A: Verified partner with live stock
+                stock_str = _format_stock_string(
+                    item.quantity_in_stock, item.minimum_stock_level, item.available, item.unit, labels
+                )
+                lines.append(f"  {labels['product']}: {item.product_name} ({item.brand})")
+                lines.append(f"  {labels['price']}: ₹{item.price:g}/{item.unit} | {stock_str}")
+                if getattr(item, "last_updated", None):
+                    v_date = item.last_updated.strftime("%d-%m-%Y")
+                    updated_label = labels.get("last_updated", "Last updated")
+                    lines.append(f"  🕒 {updated_label}: {v_date}")
+            else:
+                # Tier B: Verified partner without live stock
+                if shop.address:
+                    lines.append(f"  📍 {shop.address}")
+                if is_specific_shop_query:
+                    if language == "te":
+                        lines.append("  ℹ️ ప్రస్తుత స్టాక్ వివరాలు ధృవీకరించబడలేదు (ధర/స్టాక్ లభ్యత కోసం దుకాణాన్ని సంప్రదించండి)")
+                    elif language == "hi":
+                        lines.append("  ℹ️ वर्तमान स्टॉक विवरण असत्यापित है (मूल्य और उपलब्धता के लिए दुकान से संपर्क करें)")
+                    else:
+                        lines.append("  ℹ️ Current stock is not verified (Please contact the shop directly for price and availability)")
+
+            lines.extend([
+                f"  {labels['contact']}: {shop.phone_number} | {status_str}{time_range}",
+                f"  {labels['delivery']}: {delivery_str}",
+            ])
+            shop_entries.append("\n".join(lines))
 
     header_parts = [labels["title"]]
     if all_out_of_stock:
         header_parts.append(labels["all_out_of_stock"])
 
     footer_parts = [labels["footer_disclaimer"]] if has_any_item else []
-    if len(matches) > 3:
+    if len(matches) > 3 or (len(scored_matches) > 3):
         footer_parts.append(labels["more"])
 
     full_block = "\n".join([

@@ -90,6 +90,31 @@ def validate_production_settings():
         logger.critical(error_msg)
         raise RuntimeError(error_msg)
 
+    if getattr(settings, "shop_discovery_enabled", False):
+        prov = (getattr(settings, "shop_discovery_provider", "") or "").lower().strip()
+        if not prov:
+            error_msg = (
+                "[FATAL CONFIG ERROR] SHOP_DISCOVERY_ENABLED is True in production, but "
+                "SHOP_DISCOVERY_PROVIDER is not configured. Server startup aborted."
+            )
+            logger.critical(error_msg)
+            raise RuntimeError(error_msg)
+        if prov != "google_places":
+            error_msg = (
+                f"[FATAL CONFIG ERROR] SHOP_DISCOVERY_ENABLED is True in production, but "
+                f"SHOP_DISCOVERY_PROVIDER is '{prov}'. Only 'google_places' is permitted in production. "
+                "Server startup aborted."
+            )
+            logger.critical(error_msg)
+            raise RuntimeError(error_msg)
+        if not getattr(settings, "google_places_api_key", "").strip():
+            error_msg = (
+                "[FATAL CONFIG ERROR] SHOP_DISCOVERY_ENABLED is True in production, but "
+                "GOOGLE_PLACES_API_KEY is not configured. Server startup aborted."
+            )
+            logger.critical(error_msg)
+            raise RuntimeError(error_msg)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

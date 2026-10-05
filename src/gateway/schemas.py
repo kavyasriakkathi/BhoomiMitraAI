@@ -50,17 +50,26 @@ class WhatsAppImagePayload(BaseModel):
     model_config = {"extra": "ignore"}
 
 
+class WhatsAppLocationPayload(BaseModel):
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    name: Optional[str] = None
+    address: Optional[str] = None
+    model_config = {"extra": "ignore"}
+
+
 class WhatsAppMessage(BaseModel):
     """Represents a single message within the webhook payload."""
     from_: Optional[str] = Field(None, alias="from")  # Sender phone number
     id: Optional[str] = None  # Unique Meta message ID (used for idempotency)
     timestamp: Optional[str] = None
-    type: Optional[str] = "text"  # 'text', 'audio', 'image', 'interactive', 'button'
+    type: Optional[str] = "text"  # 'text', 'audio', 'image', 'location', 'interactive', 'button'
 
     text: Optional[WhatsAppTextPayload] = None
     audio: Optional[WhatsAppAudioPayload] = None
     voice: Optional[WhatsAppAudioPayload] = None
     image: Optional[WhatsAppImagePayload] = None
+    location: Optional[WhatsAppLocationPayload] = None
 
     model_config = {"extra": "ignore", "populate_by_name": True}
 
@@ -107,11 +116,15 @@ class ParsedIncomingMessage(BaseModel):
     phone_number: str
     message_id: str
     timestamp: str
-    message_type: str  # 'text', 'audio', 'image'
+    message_type: str  # 'text', 'audio', 'image', 'location'
     text_content: Optional[str] = None
     media_id: Optional[str] = None
     media_mime_type: Optional[str] = None
     sender_name: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    location_name: Optional[str] = None
+    location_address: Optional[str] = None
     model_config = {"extra": "ignore"}
 
 
