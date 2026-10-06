@@ -1,6 +1,6 @@
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 from datetime import datetime
 from src.main import app
@@ -11,6 +11,7 @@ from src.schemes.schemas import (
     SchemeApplicationResponse,
 )
 from src.schemes.service import SchemeService
+from src.core.models import Farmer, FarmerProfile
 from src.schemes.dependencies import get_scheme_service
 
 client = TestClient(app)
@@ -388,3 +389,57 @@ def test_scheme_structured_fields_verification():
         assert s["eligibility_criteria"] and len(s["eligibility_criteria"]) > 5
         assert s["required_documents"] and len(s["required_documents"]) > 5
         assert s["official_portal_url"].startswith("http")
+
+
+@pytest.mark.asyncio
+async def test_eligibility_explicitly_queries_farmer_profile_without_lazy_loading():
+    """Regression test: eligibility must not trigger Farmer.profile lazy loading."""
+    farmer_id = uuid4()
+
+    farmer = Farmer(id=farmer_id)
+    profile = FarmerProfile(
+        id=uuid4(),
+        farmer_id=farmer_id,
+        full_name="Ramesh Gowda",
+        state="Telangana",
+        district="Jagtial",
+        land_size_acres=2.5,
+    )
+
+    scheme = _mock_scheme_response(
+        min_land_acres=0.0,
+        max_land_acres=5.0,
+        state="All India",
+    )
+
+    farmer_repository = AsyncMock()
+    farmer_repository.get_by_id.return_value = farmer
+
+    session_result = MagicMock()
+    session_result.scalar_one_or_none.return_value = profile
+
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=session_result)
+    farmer_repository.session = session
+
+    scheme_repository = AsyncMock()
+    scheme_repository.seed_default_schemes_if_empty.return_value = [scheme]
+
+    service = SchemeService(scheme_repository, farmer_repository)
+
+    result = await service.evaluate_farmer_eligibility(farmer_id)
+
+    assert result.farmer_id == farmer_id
+    assert result.farmer_name == "Ramesh Gowda"
+    assert result.state == "Telangana"
+    assert result.district == "Jagtial"
+    assert result.land_size_acres == 2.5
+    assert result.eligible_schemes_count == 1
+
+    farmer_repository.get_by_id.assert_awaited_once_with(farmer_id)
+    session.execute.assert_awaited_once()
+
+    assert profile.full_name == "Ramesh Gowda"
+    assert profile.state == "Telangana"
+    assert profile.district == "Jagtial"
+    assert profile.land_size_acres == 2.5

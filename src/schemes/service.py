@@ -1,6 +1,7 @@
 from typing import List, Optional, Tuple
 from uuid import UUID
 from fastapi import HTTPException, status
+from sqlalchemy import select
 from src.core.models import GovernmentScheme, SchemeApplication, Farmer, FarmerProfile
 from src.schemes.repository import SchemeRepository
 from src.farmers.repository import FarmerRepository
@@ -57,10 +58,10 @@ class SchemeService:
         # Seed defaults
         schemes = await self.repository.seed_default_schemes_if_empty()
 
-        import inspect
-        profile = getattr(farmer, "profile", None)
-        if inspect.iscoroutine(profile):
-            profile = await profile
+        profile_result = await self.farmer_repository.session.execute(
+            select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
+        )
+        profile = profile_result.scalar_one_or_none()
         farmer_state = (profile.state if profile and isinstance(getattr(profile, "state", None), str) and profile.state else "Telangana").strip()
         farmer_district = (profile.district if profile and isinstance(getattr(profile, "district", None), str) and profile.district else "Jagtial").strip()
         farmer_land = profile.land_size_acres if profile and getattr(profile, "land_size_acres", None) is not None else 5.0

@@ -924,3 +924,47 @@ async def test_language_detector_module_import_and_pipeline_integration():
             to_phone="919876543210",
             message_text="పురుగు నివారణకు సిఫార్సు చేయబడిన మందులు...",
         )
+
+@pytest.mark.asyncio
+async def test_inbound_location_saves_gps_coordinates():
+    """Verify a valid WhatsApp location is persisted to FarmerMemory."""
+    from unittest.mock import MagicMock, AsyncMock
+    from src.gateway.service import _handle_inbound_location
+    from src.memory.models import FarmerMemory
+
+    farmer = Farmer(id=uuid.uuid4(), phone_number="919876543210")
+
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543210",
+        message_id="wamid.LOCATION_SAVE_TEST",
+        timestamp="1700000000",
+        message_type="location",
+        text_content="Shared Location: 17.123456, 78.654321",
+        latitude=17.123456,
+        longitude=78.654321,
+    )
+
+    memory = FarmerMemory(farmer_id=farmer.id)
+
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = memory
+
+    mock_db = AsyncMock()
+    mock_db.execute.return_value = mock_result
+
+    conversation = MagicMock()
+
+    response = await _handle_inbound_location(
+        mock_db,
+        farmer,
+        conversation,
+        parsed,
+        "te",
+    )
+
+    assert memory.gps_coordinates == {
+        "latitude": 17.123456,
+        "longitude": 78.654321,
+    }
+    mock_db.commit.assert_awaited_once()
+    assert "విజయవంతంగా సేవ్" in response
