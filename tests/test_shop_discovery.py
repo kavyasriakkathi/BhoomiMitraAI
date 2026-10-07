@@ -908,7 +908,8 @@ def test_config_mock_strictly_forbidden_in_production():
         assert "strictly forbidden in production" in str(exc_info.value)
 
 
-# ===========================================================================
+# ====================================================================
+
 # LOCATION PRIORITY REGRESSION TESTS (Requirement G)
 # ===========================================================================
 
@@ -1403,3 +1404,45 @@ async def test_audit_enrich_shops_cannot_contain_fabricated_gemini_data():
 
 
 
+@pytest.mark.asyncio
+async def test_discovered_shop_includes_google_maps_directions_link():
+    """Discovered shops include a Google Maps directions link."""
+    mock_db = _make_clean_mock_db()
+
+    farmer = Farmer(id=uuid4(), preferred_language="en")
+    farmer.district = "Jagtial"
+
+    discovered_shop = DiscoveredShopItem(
+        provider="mock",
+        provider_place_id="maps_test_1",
+        shop_name="Maps Test Fertilizers",
+        address="Main Road, Jagtial",
+        latitude=18.7940,
+        longitude=78.9160,
+        phone_number="+91 9000000000",
+        distance_km=1.0,
+    )
+
+    mock_provider = MockShopDiscoveryProvider(
+        injected_shops=[discovered_shop]
+    )
+    orchestrator = ShopDiscoveryOrchestrator(provider=mock_provider)
+
+    with patch(
+        "src.shops.service._resolve_farmer_location",
+        new=AsyncMock(
+            return_value=(18.8000, 78.9200, "Jagtial", "Telangana")
+        ),
+    ):
+        res = await enrich_response_with_shops(
+            db=mock_db,
+            query_text="fertilizer shops near me",
+            ai_response="",
+            farmer=farmer,
+            discovery_orchestrator=orchestrator,
+        )
+
+    assert "Maps Test Fertilizers" in res
+    assert "https://www.google.com/maps/dir/?" in res
+    assert "destination=18.794%2C78.916" in res
+    assert "origin=18.8%2C78.92" in res

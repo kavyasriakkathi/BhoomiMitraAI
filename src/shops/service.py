@@ -1,5 +1,6 @@
 import re
 from typing import Optional, List, Tuple, Dict
+from urllib.parse import urlencode
 from uuid import UUID
 from fastapi import HTTPException, status
 from src.core.logging import logger
@@ -14,6 +15,29 @@ from src.shops.schemas import (
     FarmerShopSearchResponse,
     FarmerShopSearchResult,
 )
+
+
+def _build_discovered_shop_maps_url(
+    shop,
+    origin_latitude: Optional[float] = None,
+    origin_longitude: Optional[float] = None,
+) -> Optional[str]:
+    """Build a safe Google Maps link for a discovered external shop."""
+    if shop.maps_url and shop.maps_url.startswith("https://"):
+        return shop.maps_url
+
+    if shop.latitude is None or shop.longitude is None:
+        return None
+
+    params = {
+        "api": "1",
+        "destination": f"{shop.latitude},{shop.longitude}",
+    }
+
+    if origin_latitude is not None and origin_longitude is not None:
+        params["origin"] = f"{origin_latitude},{origin_longitude}"
+
+    return "https://www.google.com/maps/dir/?" + urlencode(params)
 
 
 class ShopService:
@@ -1452,6 +1476,15 @@ async def enrich_response_with_shops(
             lines.append(f"  ⚠️ {labels['stock_unverified_disclaimer']}")
             if shop.phone_number:
                 lines.append(f"  {labels['contact']}: {shop.phone_number}")
+
+            maps_url = _build_discovered_shop_maps_url(
+                shop,
+                origin_latitude=latitude,
+                origin_longitude=longitude,
+            )
+            if maps_url:
+                lines.append(f"  🗺️ Directions: {maps_url}")
+
             shop_entries.append("\n".join(lines))
         else:
             # Verified Partner Shop (Tier A / Tier B)

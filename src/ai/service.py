@@ -686,7 +686,7 @@ def _finalize_whatsapp_response(response_text: str, max_chars: int = 1600) -> st
         if any(m in block for m in ["🌡️", "🌤️", "🌦️"]):
             return 2
         if "🏬" in block:
-            return 3
+            return 2
         if any(m in block for m in ["🏛️", "📜"]):
             return 4
         return 5
