@@ -27,7 +27,7 @@ import pytest
 from uuid import uuid4
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.core.models import Farmer, Conversation, Shop, Inventory, DiscoveredShop
+from src.core.models import Farmer, Conversation, Shop, Inventory, DiscoveredShop, FarmerProfile
 from src.memory.models import FarmerMemory
 from src.config import Settings
 from src.gateway.schemas import ParsedIncomingMessage
@@ -906,3 +906,500 @@ def test_config_mock_strictly_forbidden_in_production():
             get_discovery_provider()
 
         assert "strictly forbidden in production" in str(exc_info.value)
+
+
+# ===========================================================================
+# LOCATION PRIORITY REGRESSION TESTS (Requirement G)
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_regression_explicit_narapally_resolves_and_google_places_receives_coordinates():
+    """
+    Regression 1: Query 'Narapally lo fertilizer shops unnaya?'
+    Expected:
+    - explicit location = Narapally
+    - Google Places receives Narapally coordinates (~17.4059, ~78.6180)
+    - stored Korutla coordinates are NOT used
+    - 25 km radius preserved
+    - results calculated from Narapally location.
+    """
+    mock_db = _make_clean_mock_db()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+
+    narapally_shop = DiscoveredShopItem(
+        provider="google_places",
+        provider_place_id="gp_narapally_1",
+        shop_name="Sri Balaji Agro Agencies - Narapally",
+        address="Warangal Highway, Narapally, Hyderabad",
+        latitude=17.4065,
+        longitude=78.6185,
+        distance_km=0.1,
+    )
+    mock_provider = MockShopDiscoveryProvider(injected_shops=[narapally_shop])
+    spy_search_nearby = AsyncMock(wraps=mock_provider.search_nearby)
+    mock_provider.search_nearby = spy_search_nearby
+    orchestrator = ShopDiscoveryOrchestrator(provider=mock_provider)
+
+    res = await enrich_response_with_shops(
+        db=mock_db,
+        query_text="Narapally lo fertilizer shops unnaya?",
+        ai_response="",
+        farmer=farmer,
+        discovery_orchestrator=orchestrator,
+    )
+
+    assert spy_search_nearby.called
+    called_args, called_kwargs = spy_search_nearby.call_args
+    called_lat = called_kwargs.get("latitude") if "latitude" in called_kwargs else called_args[0]
+    called_lon = called_kwargs.get("longitude") if "longitude" in called_kwargs else called_args[1]
+    called_radius = called_kwargs.get("radius_meters") if "radius_meters" in called_kwargs else called_args[2]
+
+    # Coordinates match Narapally, NOT Korutla
+    assert abs(called_lat - 17.4059) < 0.05
+    assert abs(called_lon - 78.6180) < 0.05
+    assert abs(called_lat - 18.82) > 1.0  # Over 100km away from Korutla (lat: 18.82)
+    assert abs(called_lon - 78.71) > 0.05
+    # Preserves 25 km radius
+    assert called_radius == 25000
+
+    # Results calculated from Narapally location
+    assert "Sri Balaji Agro Agencies - Narapally" in res
+
+
+@pytest.mark.asyncio
+async def test_regression_nearby_query_uses_current_gps():
+    """
+    Regression 2: Query 'నా దగ్గరలో ఎరువుల షాపులు ఉన్నాయా?'
+    Expected:
+    - no explicit place in query text
+    - uses current/recent GPS if available from FarmerMemory.
+    """
+    mock_db = _make_clean_mock_db()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+
+    gps_lat, gps_lon = 18.825, 78.715
+    mock_memory = FarmerMemory(farmer_id=farmer.id)
+    mock_memory.gps_coordinates = {"latitude": gps_lat, "longitude": gps_lon}
+
+    exec_res = MagicMock()
+    exec_res.scalar_one_or_none.return_value = mock_memory
+    exec_res.scalars.return_value.all.return_value = []
+    mock_db.execute = AsyncMock(return_value=exec_res)
+
+    shop = DiscoveredShopItem(
+        provider="google_places",
+        provider_place_id="gp_gps_2",
+        shop_name="Rythu Bandhu Fertilizer Shop",
+        address="Near Bus Stand",
+        latitude=18.826,
+        longitude=78.716,
+        distance_km=0.15,
+    )
+    mock_provider = MockShopDiscoveryProvider(injected_shops=[shop])
+    spy_search_nearby = AsyncMock(wraps=mock_provider.search_nearby)
+    mock_provider.search_nearby = spy_search_nearby
+    orchestrator = ShopDiscoveryOrchestrator(provider=mock_provider)
+
+    res = await enrich_response_with_shops(
+        db=mock_db,
+        query_text="నా దగ్గరలో ఎరువుల షాపులు ఉన్నాయా?",
+        ai_response="",
+        farmer=farmer,
+        discovery_orchestrator=orchestrator,
+    )
+
+    assert spy_search_nearby.called
+    called_args, called_kwargs = spy_search_nearby.call_args
+    called_lat = called_kwargs.get("latitude") if "latitude" in called_kwargs else called_args[0]
+    called_lon = called_kwargs.get("longitude") if "longitude" in called_kwargs else called_args[1]
+
+    # Used the farmer's recent GPS
+    assert abs(called_lat - gps_lat) < 0.001
+    assert abs(called_lon - gps_lon) < 0.001
+    assert "Rythu Bandhu Fertilizer Shop" in res
+
+
+@pytest.mark.asyncio
+async def test_regression_explicit_narapally_overrides_stored_korutla_gps():
+    """
+    Regression 3: Query with explicit Narapally + stored Korutla GPS
+    Expected:
+    - Narapally wins!
+    - Stored Korutla GPS from FarmerMemory is NOT used.
+    """
+    mock_db = _make_clean_mock_db()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+
+    # Stored Korutla GPS in memory
+    mock_memory = FarmerMemory(farmer_id=farmer.id)
+    mock_memory.gps_coordinates = {"latitude": 18.820, "longitude": 78.710}
+
+    exec_res = MagicMock()
+    exec_res.scalar_one_or_none.return_value = mock_memory
+    exec_res.scalars.return_value.all.return_value = []
+    mock_db.execute = AsyncMock(return_value=exec_res)
+
+    narapally_shop = DiscoveredShopItem(
+        provider="google_places",
+        provider_place_id="gp_narapally_3",
+        shop_name="Narapally Agro Agency",
+        address="Main Road, Narapally",
+        latitude=17.406,
+        longitude=78.618,
+        distance_km=0.1,
+    )
+    mock_provider = MockShopDiscoveryProvider(injected_shops=[narapally_shop])
+    spy_search_nearby = AsyncMock(wraps=mock_provider.search_nearby)
+    mock_provider.search_nearby = spy_search_nearby
+    orchestrator = ShopDiscoveryOrchestrator(provider=mock_provider)
+
+    res = await enrich_response_with_shops(
+        db=mock_db,
+        query_text="Narapally lo fertilizer shops unnaya?",
+        ai_response="",
+        farmer=farmer,
+        discovery_orchestrator=orchestrator,
+    )
+
+    assert spy_search_nearby.called
+    called_args, called_kwargs = spy_search_nearby.call_args
+    called_lat = called_kwargs.get("latitude") if "latitude" in called_kwargs else called_args[0]
+    called_lon = called_kwargs.get("longitude") if "longitude" in called_kwargs else called_args[1]
+
+    # Narapally coordinates won!
+    assert abs(called_lat - 17.4059) < 0.05
+    assert abs(called_lon - 78.6180) < 0.05
+    # Stored Korutla coordinates were ignored
+    assert abs(called_lat - 18.820) > 0.5
+    assert "Narapally Agro Agency" in res
+
+
+@pytest.mark.asyncio
+async def test_regression_no_explicit_location_no_reliable_gps_asks_location():
+    """
+    Regression 4: Query with no explicit location and no reliable GPS
+    Expected:
+    - Ask user to share current WhatsApp location rather than searching Korutla.
+    """
+    mock_db = _make_clean_mock_db()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+
+    # DB has stored profile district 'Korutla', but NO GPS
+    mock_profile = FarmerProfile(farmer_id=farmer.id, district="Korutla")
+    exec_res = MagicMock()
+    exec_res.scalar_one_or_none.return_value = mock_profile
+    exec_res.scalars.return_value.all.return_value = []
+    mock_db.execute = AsyncMock(return_value=exec_res)
+
+    mock_provider = MockShopDiscoveryProvider()
+    spy_search_nearby = AsyncMock(wraps=mock_provider.search_nearby)
+    mock_provider.search_nearby = spy_search_nearby
+    orchestrator = ShopDiscoveryOrchestrator(provider=mock_provider)
+
+    res = await enrich_response_with_shops(
+        db=mock_db,
+        query_text="నా దగ్గరలో ఎరువుల షాపులు ఉన్నాయా?",
+        ai_response="",
+        farmer=farmer,
+        discovery_orchestrator=orchestrator,
+    )
+
+    # Provider was NOT called with Korutla coordinates
+    assert not spy_search_nearby.called
+    # Farmer prompted to share current WhatsApp location
+    assert "లొకేషన్ పిన్‌ను షేర్ చేయండి" in res or "గ్రామం/మండలం పేరును టైప్ చేయండి" in res
+
+
+@pytest.mark.asyncio
+async def test_regression_existing_explicit_korutla_continues_working():
+    """
+    Regression 5: Existing explicit-location queries such as Korutla must continue working.
+    """
+    mock_db = _make_clean_mock_db()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+
+    korutla_shop = DiscoveredShopItem(
+        provider="google_places",
+        provider_place_id="gp_korutla_5",
+        shop_name="Korutla Kisan Traders",
+        address="Market Yard, Korutla",
+        latitude=18.825,
+        longitude=78.714,
+        distance_km=0.5,
+    )
+    mock_provider = MockShopDiscoveryProvider(injected_shops=[korutla_shop])
+    spy_search_nearby = AsyncMock(wraps=mock_provider.search_nearby)
+    mock_provider.search_nearby = spy_search_nearby
+    orchestrator = ShopDiscoveryOrchestrator(provider=mock_provider)
+
+    res = await enrich_response_with_shops(
+        db=mock_db,
+        query_text="Korutla lo fertilizer shops unnaya?",
+        ai_response="",
+        farmer=farmer,
+        discovery_orchestrator=orchestrator,
+    )
+
+    assert spy_search_nearby.called
+    called_args, called_kwargs = spy_search_nearby.call_args
+    called_lat = called_kwargs.get("latitude") if "latitude" in called_kwargs else called_args[0]
+    called_lon = called_kwargs.get("longitude") if "longitude" in called_kwargs else called_args[1]
+
+    # Korutla coordinates used
+    assert abs(called_lat - 18.82) < 0.05
+    assert abs(called_lon - 78.71) < 0.05
+    assert "Korutla Kisan Traders" in res
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query",
+    [
+        "Narapally lo fertilizer shops kavali",
+        "fertilizer shops near Narapally",
+        "Narapally daggara fertilizer shops",
+        "Narapally దగ్గర ఎరువుల షాపులు ఉన్నాయా?",
+        "నారపల్లిలో ఎరువుల షాపులు ఉన్నాయా?",
+        "నారపల్లి లో ఎరువుల షాపులు ఉన్నాయా?",
+    ],
+)
+async def test_regression_telugu_and_romanized_patterns(query):
+    """
+    Regression E: Support common Telugu/Romanized patterns for Narapally:
+    - 'Narapally lo fertilizer shops kavali'
+    - 'fertilizer shops near Narapally'
+    - 'Narapally daggara fertilizer shops'
+    - 'Narapally దగ్గర ఎరువుల షాపులు ఉన్నాయా?'
+    - 'నారపల్లిలో ఎరువుల షాపులు ఉన్నాయా?'
+    - 'నారపల్లి లో ఎరువుల షాపులు ఉన్నాయా?'
+    All must resolve Narapally coordinates (~17.4059, ~78.6180) and override any stored GPS.
+    """
+    mock_db = _make_clean_mock_db()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+
+    # Stored Korutla GPS in memory must be overridden by all patterns
+    mock_memory = FarmerMemory(farmer_id=farmer.id)
+    mock_memory.gps_coordinates = {"latitude": 18.820, "longitude": 78.710}
+
+    exec_res = MagicMock()
+    exec_res.scalar_one_or_none.return_value = mock_memory
+    exec_res.scalars.return_value.all.return_value = []
+    mock_db.execute = AsyncMock(return_value=exec_res)
+
+    narapally_shop = DiscoveredShopItem(
+        provider="google_places",
+        provider_place_id="gp_narapally_patterns",
+        shop_name="Narapally Rythu Seva",
+        address="Narapally, Hyderabad",
+        latitude=17.406,
+        longitude=78.618,
+        distance_km=0.2,
+    )
+    mock_provider = MockShopDiscoveryProvider(injected_shops=[narapally_shop])
+    spy_search_nearby = AsyncMock(wraps=mock_provider.search_nearby)
+    mock_provider.search_nearby = spy_search_nearby
+    orchestrator = ShopDiscoveryOrchestrator(provider=mock_provider)
+
+    res = await enrich_response_with_shops(
+        db=mock_db,
+        query_text=query,
+        ai_response="",
+        farmer=farmer,
+        discovery_orchestrator=orchestrator,
+    )
+
+    assert spy_search_nearby.called, f"Failed to detect explicit place in query: {query}"
+    called_args, called_kwargs = spy_search_nearby.call_args
+    called_lat = called_kwargs.get("latitude") if "latitude" in called_kwargs else called_args[0]
+    called_lon = called_kwargs.get("longitude") if "longitude" in called_kwargs else called_args[1]
+
+    assert abs(called_lat - 17.4059) < 0.05, f"Incorrect latitude {called_lat} for query: {query}"
+    assert abs(called_lon - 78.6180) < 0.05, f"Incorrect longitude {called_lon} for query: {query}"
+    assert "Narapally Rythu Seva" in res
+
+
+@pytest.mark.asyncio
+async def test_regression_arbitrary_unlisted_location_dynamic_geocoding():
+    """
+    Requirement: DO NOT hardcode Narapally. The resolver must work for arbitrary locations.
+    Tests dynamic geocoding for an arbitrary unlisted town via discovery provider.
+    """
+    mock_db = _make_clean_mock_db()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+
+    # Arbitrary town coordinates provided dynamically by provider
+    arbitrary_coords = {"ghatkesar": (17.452, 78.685)}
+    shop = DiscoveredShopItem(
+        provider="google_places",
+        provider_place_id="gp_ghatkesar_1",
+        shop_name="Ghatkesar Agro Services",
+        address="Ghatkesar Mandal",
+        latitude=17.453,
+        longitude=78.686,
+        distance_km=0.3,
+    )
+    mock_provider = MockShopDiscoveryProvider(
+        injected_shops=[shop],
+        custom_geocodes=arbitrary_coords,
+    )
+    spy_search_nearby = AsyncMock(wraps=mock_provider.search_nearby)
+    mock_provider.search_nearby = spy_search_nearby
+    orchestrator = ShopDiscoveryOrchestrator(provider=mock_provider)
+
+    res = await enrich_response_with_shops(
+        db=mock_db,
+        query_text="Ghatkesar lo fertilizer shops unnaya?",
+        ai_response="",
+        farmer=farmer,
+        discovery_orchestrator=orchestrator,
+    )
+
+    assert spy_search_nearby.called
+    called_args, called_kwargs = spy_search_nearby.call_args
+    called_lat = called_kwargs.get("latitude") if "latitude" in called_kwargs else called_args[0]
+    called_lon = called_kwargs.get("longitude") if "longitude" in called_kwargs else called_args[1]
+
+    # Dynamically resolved Ghatkesar coordinates
+    assert abs(called_lat - 17.452) < 0.01
+    assert abs(called_lon - 78.685) < 0.01
+    assert "Ghatkesar Agro Services" in res
+
+
+@pytest.mark.parametrize(
+    "phrase,expected_location",
+    [
+        ("Narapally lo", "Narapally"),
+        ("Narapally lo fertilizer shops", "Narapally"),
+        ("Narapally daggara", "Narapally"),
+        ("Narapally దగ్గర", "Narapally"),
+        ("నారపల్లిలో", "నారపల్లి"),
+        ("నారపల్లి లో", "నారపల్లి"),
+        ("near Narapally", "Narapally"),
+    ],
+)
+def test_explicit_location_phrase_extraction(phrase, expected_location):
+    """
+    Direct test for requirement E:
+    Ensure _extract_explicit_location_from_query correctly extracts the place name
+    from all required Telugu and Romanized pattern variants.
+    """
+    from src.shops.service import _extract_explicit_location_from_query
+    extracted = _extract_explicit_location_from_query(phrase)
+    assert extracted is not None, f"Failed to extract location from '{phrase}'"
+    assert extracted.lower() == expected_location.lower(), f"Expected '{expected_location}', got '{extracted}' for '{phrase}'"
+
+
+def test_audit_sanitizer_removes_fabricated_shop_data():
+    """
+    Audit test: Verify that _sanitize_ai_response_for_shops strips:
+    - Hallucinated shop names ('Venkata Sai Fertilizers', 'Sri Rama Agri Inputs')
+    - Fake phone numbers ('9849012345', '9849054321')
+    - Fake stock claims ('Urea, DAP, NPK available')
+    While preserving legitimate agronomic advice.
+    """
+    from src.shops.service import _sanitize_ai_response_for_shops
+
+    fake_text = (
+        "Here are fertilizer shops near Narapally:\n"
+        "• Venkata Sai Fertilizers - Phone: 9849012345 (Urea, DAP, NPK available)\n"
+        "• Sri Rama Agri Inputs - Phone: 9849054321 (Urea, DAP, NPK available)"
+    )
+    assert _sanitize_ai_response_for_shops(fake_text) == ""
+
+    mixed_text = (
+        "వరి పంటకు ఎకరాకు 50 కేజీల యూరియా వేయాలి.\n"
+        "• Venkata Sai Fertilizers - Phone: 9849012345 (Urea, DAP, NPK available)"
+    )
+    cleaned_mixed = _sanitize_ai_response_for_shops(mixed_text)
+    assert "వరి పంటకు ఎకరాకు 50 కేజీల యూరియా వేయాలి." in cleaned_mixed
+    assert "Venkata Sai" not in cleaned_mixed
+    assert "9849012345" not in cleaned_mixed
+    assert "Urea, DAP, NPK available" not in cleaned_mixed
+
+
+def test_audit_decision_engine_detects_fertilizer_near_by_shops_intent():
+    """
+    Audit test: Verify that 'fertilizer near by shops' and related variants
+    are recognized as SHOPS intent and flagged as pure shop queries,
+    bypassing general LLM generation entirely.
+    """
+    from src.ai.decision_engine import AIDecisionEngine, FarmerIntent
+
+    de = AIDecisionEngine()
+    test_queries = [
+        "fertilizer near by shops",
+        "fertilizer nearby shops",
+        "fertilizer shops near me",
+        "fertilizer shops near Narapally",
+        "Narapally lo fertilizer shops unnaya?",
+    ]
+    for q in test_queries:
+        intents = de.detect_all_intents(q)
+        assert FarmerIntent.SHOPS in intents, f"Query '{q}' failed to detect SHOPS intent! Detected: {intents}"
+
+
+@pytest.mark.asyncio
+async def test_audit_enrich_shops_cannot_contain_fabricated_gemini_data():
+    """
+    Audit test: End-to-end verification that enrich_response_with_shops:
+    1. Removes any upstream hallucinated shop names and phone numbers
+    2. Resolves Narapally coordinates
+    3. Strictly uses discovered shop provider data
+    4. Never claims Urea/DAP/NPK stock for discovered shops
+    5. Disclaims that live stock is not verified
+    6. Does not invent phone numbers
+    """
+    mock_db = _make_clean_mock_db()
+    farmer = Farmer(id=uuid4(), preferred_language="en")
+
+    narapally_shop = DiscoveredShopItem(
+        provider="google_places",
+        provider_place_id="gp_narapally_audit_1",
+        shop_name="Authentic Narapally Agro Center",
+        address="Near Main Road, Narapally, Hyderabad, Telangana",
+        latitude=17.4060,
+        longitude=78.6180,
+        phone_number=None,  # No phone in Google Places
+        distance_km=0.3,
+    )
+    mock_provider = MockShopDiscoveryProvider(injected_shops=[narapally_shop])
+    orchestrator = ShopDiscoveryOrchestrator(provider=mock_provider)
+
+    hallucinated_upstream_ai = (
+        "Here are fertilizer shops near Narapally:\n"
+        "• Venkata Sai Fertilizers - Phone: 9849012345 (Urea, DAP, NPK available)\n"
+        "• Sri Rama Agri Inputs - Phone: 9849054321 (Urea, DAP, NPK available)"
+    )
+
+    result = await enrich_response_with_shops(
+        db=mock_db,
+        query_text="fertilizer near by shops near Narapally",
+        ai_response=hallucinated_upstream_ai,
+        farmer=farmer,
+        discovery_orchestrator=orchestrator,
+    )
+
+    # 1. Hallucinated shops and phone numbers must be completely absent
+    assert "Venkata Sai Fertilizers" not in result
+    assert "Sri Rama Agri Inputs" not in result
+    assert "9849012345" not in result
+    assert "9849054321" not in result
+
+    # 2. Authentic provider shop is present
+    assert "Authentic Narapally Agro Center" in result
+
+    # 3. Discovered shop stock must be explicitly disclaimed as unverified
+    assert "Current stock is not verified by BhoomiMitra" in result or "స్టాక్ ధృవీకరించబడలేదు" in result
+
+    # 4. Zero fabricated inventory claims for discovered shop
+    assert "Urea, DAP, NPK available" not in result
+    assert "Urea" not in result
+    assert "DAP" not in result
+    assert "NPK" not in result
+
+    # 5. Never called "Verified" - labeled as Nearby discovered shop
+    assert "Nearby discovered shop" in result or "సమీపంలో కనుగొనబడిన దుకాణం" in result
+    assert "BhoomiMitra Verified" not in result
+
+
+

@@ -6,7 +6,7 @@ against BhoomiMitra verified partner shops, database persistence in `discovered_
 and fail-soft error containment.
 """
 import re
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -186,3 +186,19 @@ class ShopDiscoveryOrchestrator:
             await db.flush()
         except Exception as persist_err:
             logger.warning(f"[DISCOVERY PERSIST] Non-fatal error persisting discovered shops: {persist_err}")
+
+    async def geocode_location(self, location_name: str) -> Optional[Tuple[float, float]]:
+        """
+        Geocode location name using configured discovery provider.
+        """
+        if not location_name:
+            return None
+        if self.provider and hasattr(self.provider, "geocode_location"):
+            try:
+                coords = await self.provider.geocode_location(location_name)
+                if coords:
+                    return coords
+            except Exception as geo_err:
+                logger.warning(f"[DISCOVERY ORCHESTRATOR] Geocode failed for '{location_name}': {geo_err}")
+        return None
+

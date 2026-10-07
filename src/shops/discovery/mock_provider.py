@@ -2,7 +2,7 @@
 BhoomiMitra AI — Mock Shop Discovery Provider
 Used for local testing, offline workflows, and deterministic unit/regression test suites.
 """
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict
 from src.core.logging import logger
 from src.shops.repository import haversine_distance
 from src.shops.discovery.base import ShopDiscoveryProvider
@@ -15,9 +15,15 @@ class MockShopDiscoveryProvider(ShopDiscoveryProvider):
     Supports injecting specific mock results or simulating provider outages for fail-soft tests.
     """
 
-    def __init__(self, should_fail: bool = False, injected_shops: Optional[List[DiscoveredShopItem]] = None):
+    def __init__(
+        self,
+        should_fail: bool = False,
+        injected_shops: Optional[List[DiscoveredShopItem]] = None,
+        custom_geocodes: Optional[Dict[str, Tuple[float, float]]] = None,
+    ):
         self.should_fail = should_fail
         self._injected_shops = injected_shops
+        self._custom_geocodes = custom_geocodes or {}
 
     def set_injected_shops(self, shops: Optional[List[DiscoveredShopItem]]) -> None:
         self._injected_shops = shops
@@ -123,3 +129,24 @@ class MockShopDiscoveryProvider(ShopDiscoveryProvider):
 
         # Fallback coordinate for mock (e.g. Korutla center: 18.82, 78.71)
         return await self.search_nearby(18.8200, 78.7100, radius_meters=radius_meters, query=text_query)
+
+    async def geocode_location(self, location_name: str) -> Optional[Tuple[float, float]]:
+        if self.should_fail or not location_name:
+            return None
+        loc_l = location_name.lower().strip()
+        if hasattr(self, "_custom_geocodes") and self._custom_geocodes and loc_l in self._custom_geocodes:
+            return self._custom_geocodes[loc_l]
+        mock_coords = {
+            "narapally": (17.4059, 78.6180),
+            "నారపల్లి": (17.4059, 78.6180),
+            "korutla": (18.8200, 78.7100),
+            "కోరుట్ల": (18.8200, 78.7100),
+            "jagtial": (18.7900, 78.9100),
+            "జగిత్యాల": (18.7900, 78.9100),
+            "warangal": (17.9700, 79.5900),
+            "వరంగల్": (17.9700, 79.5900),
+            "hyderabad": (17.3850, 78.4867),
+            "హైదరాబాద్": (17.3850, 78.4867),
+        }
+        return mock_coords.get(loc_l)
+

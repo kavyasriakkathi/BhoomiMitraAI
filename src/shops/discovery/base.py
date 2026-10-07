@@ -39,3 +39,13 @@ class ShopDiscoveryProvider(ABC):
         Never raises exceptions; returns empty list on error.
         """
         pass
+
+    async def geocode_location(
+        self,
+        location_name: str,
+    ) -> Optional[tuple[float, float]]:
+        """
+        Geocode a location or town name to (latitude, longitude).
+        Default implementation returns None.
+        """
+        return None

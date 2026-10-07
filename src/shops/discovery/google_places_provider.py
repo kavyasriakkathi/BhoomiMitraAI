@@ -4,7 +4,7 @@ BhoomiMitra AI — Google Places Discovery Provider (Places API New)
 Integrates with the Google Places API (New) Text Search / Nearby Search
 to discover local agricultural shops. Handles timeouts, errors, and rate limits fail-soft.
 """
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import httpx
 from src.core.logging import logger
 from src.shops.repository import haversine_distance
@@ -186,3 +186,38 @@ class GooglePlacesDiscoveryProvider(ShopDiscoveryProvider):
         except Exception as exc:
             logger.warning(f"[GOOGLE PLACES] Text search error: {exc}. Fail-soft returning [].")
             return []
+
+    async def geocode_location(self, location_name: str) -> Optional[Tuple[float, float]]:
+        """
+        Geocode a location or town name to (latitude, longitude) using Google Places API (New).
+        """
+        if not self.api_key or not location_name:
+            return None
+
+        clean_name = location_name.strip()
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": self.api_key,
+            "X-Goog-FieldMask": "places.location,places.displayName,places.formattedAddress",
+        }
+        payload = {
+            "textQuery": f"{clean_name}, Telangana, India",
+            "maxResultCount": 1,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                resp = await client.post(self.SEARCH_TEXT_URL, json=payload, headers=headers)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    places = data.get("places", [])
+                    if places:
+                        loc = places[0].get("location", {})
+                        p_lat = loc.get("latitude")
+                        p_lng = loc.get("longitude")
+                        if p_lat is not None and p_lng is not None:
+                            logger.info(f"[GOOGLE PLACES] Geocoded '{clean_name}' -> ({p_lat}, {p_lng})")
+                            return float(p_lat), float(p_lng)
+        except Exception as exc:
+            logger.warning(f"[GOOGLE PLACES] Failed to geocode location '{clean_name}': {exc}")
+        return None
+

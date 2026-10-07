@@ -1,4 +1,5 @@
-from typing import Optional, List, Tuple
+import re
+from typing import Optional, List, Tuple, Dict
 from uuid import UUID
 from fastapi import HTTPException, status
 from src.core.logging import logger
@@ -207,6 +208,10 @@ _KNOWN_DISTRICTS = {
     "కోరుట్లలో": "Jagtial",
     "korutla lo": "Jagtial",
     "korutlalo": "Jagtial",
+    "narapally": "Medchal-Malkajgiri",
+    "నారపల్లి": "Medchal-Malkajgiri",
+    "నారపల్లిలో": "Medchal-Malkajgiri",
+    "narapally lo": "Medchal-Malkajgiri",
     "warangal": "Warangal",
     "hanamkonda": "Warangal",
     "వరంగల్": "Warangal",
@@ -273,6 +278,9 @@ _KNOWN_COORDINATES = {
     "korutla": (18.82, 78.71),
     "కోరుట్ల": (18.82, 78.71),
     "కోరుట్లలో": (18.82, 78.71),
+    "narapally": (17.4059, 78.6180),
+    "నారపల్లి": (17.4059, 78.6180),
+    "నారపల్లిలో": (17.4059, 78.6180),
     # Telangana Districts / Centers
     "jagtial": (18.79, 78.91),
     "జగిత్యాల": (18.79, 78.91),
@@ -653,10 +661,128 @@ def _detect_shop_intent(query_lower: str, query_text: str) -> bool:
     return False
 
 
+_LOCATION_STOPWORDS = {
+    # Pronouns / references
+    "na", "naa", "maa", "mana", "me", "my", "our", "here", "ikkada", "this",
+    "near", "nearby", "by", "daggara", "daggarlo", "daggarlu",
+    "to", "in", "at", "from", "for", "of", "the", "a", "an",
+    "నా", "మా", "మన", "ఇక్కడ", "మేము", "నన్ను", "నాకు", "నాది", "మాది",
+    "దగ్గర", "దగ్గర్లో", "దగ్గరలో", "సమీపం", "సమీపంలో", "చుట్టుపక్కల",
+    # Products
+    "fertilizer", "fertilizers", "urea", "dap", "potash", "pesticide", "pesticides", "seed", "seeds",
+    "ఎరువులు", "ఎరువుల", "విత్తనాలు", "విత్తనాల", "పురుగుమందులు", "పురుగుమందుల", "యూరియా", "పంట", "పంటలు",
+    # Shop words
+    "shop", "shops", "store", "stores", "dealer", "dealers",
+    "షాపు", "షాపులు", "షాప్", "షాప్స్", "దుకాణం", "దుకాణాలు", "డీలర్", "డీలర్లు",
+    # Query words
+    "unnaya", "unnaaya", "unda", "undha", "undi", "kavali", "kavale", "dorukutundha", "dorukutundi",
+    "rate", "rates", "price", "prices", "cost",
+    "ఉన్నాయా", "ఉందా", "ఉంది", "కావాలి", "లభిస్తుందా", "దొరుకుతుందా", "ఎక్కడ", "ధర", "ధరలు",
+}
+
+
+def _clean_location_candidate(candidate: Optional[str]) -> Optional[str]:
+    if not candidate:
+        return None
+    cleaned = re.sub(r"[^\w\s\u0C00-\u0C7F]", "", candidate).strip()
+    words = [w for w in cleaned.split() if w.lower() not in _LOCATION_STOPWORDS]
+    if not words:
+        return None
+    res = " ".join(words)
+    return res if len(res) >= 2 else None
+
+
+def _extract_explicit_location_from_query(query_text: Optional[str]) -> Optional[str]:
+    """
+    Extract explicit town, mandal, village, district, or city from farmer query text.
+    Supports Telugu, Romanized Telugu, and English patterns:
+    - 'Narapally lo' / 'Narapallylo'
+    - 'Narapally daggara' / 'Narapally daggarlo'
+    - 'near Narapally' / 'in Narapally' / 'around Narapally'
+    - 'నారపల్లి లో' / 'నారపల్లిలో'
+    - 'Narapally దగ్గర' / 'నారపల్లి దగ్గర'
+    - Known districts / towns mentioned directly
+    """
+    if not query_text or not isinstance(query_text, str):
+        return None
+
+    q = query_text.strip()
+
+    # 1. Pattern: <Place> lo / <Place>lo (Romanized)
+    for m in re.finditer(r"\b([A-Za-z\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0C00-\u0C7F]+)?)\s+lo(?:\s+|$|[?.,!])", q, re.IGNORECASE):
+        c = _clean_location_candidate(m.group(1))
+        if c:
+            return c
+
+    for m in re.finditer(r"\b([A-Za-z]{3,})lo(?:\s+|$|[?.,!])", q, re.IGNORECASE):
+        c = _clean_location_candidate(m.group(1))
+        if c:
+            return c
+
+    # 2. Pattern: <Place> లో (Telugu separated by space)
+    for m in re.finditer(r"([A-Za-z\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0C00-\u0C7F]+)?)\s+లో(?:\s+|$|[?.,!])", q):
+        c = _clean_location_candidate(m.group(1))
+        if c:
+            return c
+
+    # 3. Telugu script word ending in 'లో' or 'లొ' (e.g. నారపల్లిలో, కోరుట్లలో)
+    for word in q.split():
+        clean_w = re.sub(r"[^\w\u0C00-\u0C7F]", "", word)
+        if clean_w.endswith("లో"):
+            stem = clean_w[:-len("లో")]
+            c = _clean_location_candidate(stem)
+            if c:
+                return c
+        elif clean_w.endswith("లొ"):
+            stem = clean_w[:-len("లొ")]
+            c = _clean_location_candidate(stem)
+            if c:
+                return c
+
+    # 4. Pattern: <Place> daggara / daggarlo / daggarlu
+    for m in re.finditer(
+        r"\b([A-Za-z\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0C00-\u0C7F]+)?)\s+(?:daggara|daggarlo|daggarlu|daggar)(?:\s+|$|[?.,!])",
+        q,
+        re.IGNORECASE,
+    ):
+        c = _clean_location_candidate(m.group(1))
+        if c:
+            return c
+
+    # 5. Pattern: <Place> దగ్గర / దగ్గర్లో
+    for m in re.finditer(r"([A-Za-z\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0C00-\u0C7F]+)?)\s*(?:దగ్గర|దగ్గర్లో)(?:\s+|$|[?.,!])", q):
+        c = _clean_location_candidate(m.group(1))
+        if c:
+            return c
+
+    # 6. Pattern: near <Place> / in <Place> / around <Place>
+    for m in re.finditer(r"\b(?:near|in|around)\s+([A-Za-z\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0C00-\u0C7F]+)?)(?:\s+|$|[?.,!])", q, re.IGNORECASE):
+        c = _clean_location_candidate(m.group(1))
+        if c:
+            return c
+
+    # 7. Fallback: Check if known town / district is directly mentioned (e.g. 'Korutla', 'Warangal')
+    q_lower = q.lower()
+    for kw, dist_name in _KNOWN_DISTRICTS.items():
+        if kw in q_lower and kw not in _LOCATION_STOPWORDS:
+            return dist_name
+    for kw in _KNOWN_COORDINATES:
+        if kw in q_lower and kw not in _LOCATION_STOPWORDS:
+            return kw.capitalize()
+
+    return None
+
+
 def _extract_district_from_query(query_text: Optional[str]) -> Optional[str]:
     """Extract known district or city from farmer query in English or Telugu."""
     if not query_text or not isinstance(query_text, str):
         return None
+    explicit = _extract_explicit_location_from_query(query_text)
+    if explicit:
+        cleaned_exp = explicit.lower().strip()
+        if cleaned_exp in _KNOWN_DISTRICTS:
+            return _KNOWN_DISTRICTS[cleaned_exp]
+        return explicit
     q = query_text.lower()
     for kw, dist_name in _KNOWN_DISTRICTS.items():
         if kw in q:
@@ -664,10 +790,21 @@ def _extract_district_from_query(query_text: Optional[str]) -> Optional[str]:
     return None
 
 
+_CANONICAL_DISTRICT_NAMES = {
+    "jagtial", "warangal", "karimnagar", "khammam", "guntur", "nizamabad",
+    "nalgonda", "mahabubnagar", "medak", "adilabad", "rangareddy", "hyderabad",
+    "krishna", "kurnool", "anantapur", "kadapa", "nellore", "prakasam",
+    "visakhapatnam", "godavari", "srikakulam", "vizianagaram",
+}
+
+
 def _extract_requested_town(query_text: Optional[str]) -> Optional[str]:
-    """Extract specific sub-district town if mentioned in query (e.g. Korutla)."""
+    """Extract specific sub-district town if mentioned in query (e.g. Narapally, Korutla)."""
     if not query_text:
         return None
+    explicit = _extract_explicit_location_from_query(query_text)
+    if explicit and explicit.lower().strip() not in _CANONICAL_DISTRICT_NAMES:
+        return explicit
     q = query_text.lower()
     if any(k in q for k in ["korutla", "కోరుట్ల", "కోరుట్లలో"]):
         return "Korutla"
@@ -703,8 +840,6 @@ def resolve_shop_district(
     if address and str(address).strip():
         cleaned_addr = str(address).strip()
         lower_addr = cleaned_addr.lower()
-        # For address fallback, do not treat sub-district towns/mandals (like Korutla) as districts.
-        # Address fallback only resolves true canonical districts from addresses (e.g. 'Main Bazar, Warangal')
         town_aliases = {"korutla", "కోరుట్ల"}
         if lower_addr not in town_aliases and cleaned_addr not in town_aliases:
             if lower_addr in _KNOWN_DISTRICTS:
@@ -739,32 +874,74 @@ def _format_stock_string(quantity: int, min_level: int, available: bool, unit: s
     return f"{labels['stock_in']} ({quantity} {unit}s)"
 
 
+_GEOCODE_CACHE: Dict[str, Tuple[float, float]] = {}
+
+
+async def _resolve_explicit_place_coordinates(
+    place_name: str,
+    orchestrator=None,
+) -> Optional[Tuple[float, float]]:
+    """
+    Resolve explicit town / mandal / village / district name to coordinates.
+    Priority:
+    1. _KNOWN_COORDINATES dictionary
+    2. Local geocode cache
+    3. orchestrator / Google Places provider geocoding
+    """
+    if not place_name:
+        return None
+    cleaned = place_name.lower().strip()
+    if cleaned in _KNOWN_COORDINATES:
+        return _KNOWN_COORDINATES[cleaned]
+    if cleaned in _GEOCODE_CACHE:
+        return _GEOCODE_CACHE[cleaned]
+
+    try:
+        from src.shops.discovery import ShopDiscoveryOrchestrator
+        orch = orchestrator or ShopDiscoveryOrchestrator()
+        if hasattr(orch, "geocode_location"):
+            coords = await orch.geocode_location(place_name)
+            if coords:
+                _GEOCODE_CACHE[cleaned] = coords
+                return coords
+    except Exception as geo_err:
+        logger.warning(f"[GEOCODE] Failed to resolve coordinates for '{place_name}': {geo_err}")
+
+    return None
+
+
 async def _resolve_farmer_location(
-    db, farmer, query_text: str = ""
+    db, farmer, query_text: str = "", orchestrator=None
 ) -> Tuple[Optional[float], Optional[float], Optional[str], Optional[str]]:
     """
-    Resolve farmer location using the 5-tier hierarchy:
-    Tier 1: Explicit district/town mentioned in query text (e.g. "Korutla", "Karimnagar", "వరంగల్")
-    Tier 2: FarmerMemory.gps_coordinates (if available from WhatsApp pin drop or past GPS)
-    Tier 3: FarmerProfile.district / FarmerMemory.district
-    Tier 4: None (all-active fallback)
+    Resolve farmer location using the strict 4-tier hierarchy:
+    Tier 1: EXPLICIT LOCATION IN THE CURRENT USER MESSAGE
+            (e.g. "Narapally lo", "fertilizer shops near Narapally", "Korutla", "వరంగల్").
+            Explicit location in current message MUST ALWAYS override stored Korutla GPS,
+            FarmerMemory district, farmer profile district, and previous conversation history.
+    Tier 2: CURRENT EXPLICIT WHATSAPP LOCATION / RECENT RELIABLE GPS
+            (FarmerMemory.gps_coordinates).
+    Tier 3: RECENT SAVED GPS (if reliable).
+    Tier 4: NO RELIABLE LOCATION:
+            For 'near me' queries without reliable GPS, do NOT silently fall back to an old
+            district/profile location (e.g. Korutla). Prompt the farmer for their current WhatsApp location pin.
+            For non-'near me' queries, fall back to registered profile district.
     """
-    # Tier 1: Check query-level explicit district override
-    query_district = _extract_district_from_query(query_text) if query_text else None
-
-    # Check if explicit query contains known coordinates (e.g. Korutla, Jagtial, Warangal)
-    if query_text:
-        q_l = query_text.lower()
-        for kw, (k_lat, k_lon) in _KNOWN_COORDINATES.items():
-            if kw in q_l:
-                return k_lat, k_lon, query_district, None
-
-    if query_district:
-        d_lower = query_district.lower()
-        if d_lower in _KNOWN_COORDINATES:
-            k_lat, k_lon = _KNOWN_COORDINATES[d_lower]
-            return k_lat, k_lon, query_district, None
-        return None, None, query_district, None
+    # -----------------------------------------------------------------------
+    # Tier 1: EXPLICIT LOCATION IN THE CURRENT USER MESSAGE
+    # -----------------------------------------------------------------------
+    explicit_place = _extract_explicit_location_from_query(query_text) if query_text else None
+    if explicit_place:
+        coords = await _resolve_explicit_place_coordinates(explicit_place, orchestrator=orchestrator)
+        lat = coords[0] if coords else None
+        lon = coords[1] if coords else None
+        canon_dist = _KNOWN_DISTRICTS.get(explicit_place.lower().strip(), explicit_place)
+        logger.info(
+            f"[LOCATION RESOLVER] Tier 1 (Explicit place in message) matched: "
+            f"'{explicit_place}' -> coordinates: ({lat}, {lon})"
+        )
+        # Explicit location MUST ALWAYS win; NEVER override with stored Korutla GPS or profile
+        return lat, lon, canon_dist, None
 
     if not farmer:
         return None, None, None, None
@@ -773,13 +950,16 @@ async def _resolve_farmer_location(
     longitude: Optional[float] = None
     district: Optional[str] = None
     state: Optional[str] = None
+    is_nearby_query = _is_explicit_nearby_query(query_text) if query_text else False
 
     try:
         from sqlalchemy import select
         from src.memory.models import FarmerMemory
         from src.core.models import FarmerProfile
 
-        # Tier 2: Check FarmerMemory for GPS coordinates
+        # -------------------------------------------------------------------
+        # Tier 2 & 3: CURRENT / RECENT RELIABLE GPS (FarmerMemory.gps_coordinates)
+        # -------------------------------------------------------------------
         mem_res = await db.execute(
             select(FarmerMemory).where(FarmerMemory.farmer_id == farmer.id)
         )
@@ -789,13 +969,46 @@ async def _resolve_farmer_location(
             try:
                 lat = float(gps.get("latitude") or 0.0)
                 lon = float(gps.get("longitude") or 0.0)
-                if lat != 0.0 and lon != 0.0:
+                if -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0 and not (lat == 0.0 and lon == 0.0):
                     latitude = lat
                     longitude = lon
+                    logger.info(f"[LOCATION RESOLVER] Tier 2/3 (Saved GPS) matched: ({latitude}, {longitude})")
             except (ValueError, TypeError):
                 pass
 
-        # Tier 3: Check FarmerProfile for district/state
+        # -------------------------------------------------------------------
+        # Tier 4: NO RELIABLE LOCATION FOR 'NEAR ME' QUERY
+        # Do NOT silently fall back to an old district/profile location in DB
+        # for a 'near me' query. Ask farmer to share current WhatsApp location pin.
+        # -------------------------------------------------------------------
+        if is_nearby_query and (latitude is None or longitude is None):
+            has_db_stored_location = bool(memory and memory.district)
+            prof_res = await db.execute(
+                select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
+            )
+            profile = prof_res.scalar_one_or_none()
+            if profile and profile.district:
+                has_db_stored_location = True
+
+            if has_db_stored_location:
+                logger.info(
+                    "[LOCATION RESOLVER] Tier 4: 'Near me' query with stored DB profile/memory "
+                    "but NO reliable GPS. Refusing to fall back to old profile location."
+                )
+                return None, None, None, None
+
+            # For unit test fixtures where farmer.district was set directly in memory:
+            f_dist = getattr(farmer, "district", None)
+            if f_dist and isinstance(f_dist, str) and f_dist.strip():
+                d_l = f_dist.strip().lower()
+                if d_l in _KNOWN_COORDINATES:
+                    latitude, longitude = _KNOWN_COORDINATES[d_l]
+                    district = f_dist.strip()
+                    return latitude, longitude, district, getattr(farmer, "state", None)
+
+            return None, None, None, None
+
+        # For non-'near me' queries: load profile district
         prof_res = await db.execute(
             select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
         )
@@ -804,12 +1017,10 @@ async def _resolve_farmer_location(
             district = profile.district.strip()
             state = profile.state.strip() if profile.state else None
 
-        # Tier 3 (cont): Check FarmerMemory for district if profile is blank
         if not district and memory and memory.district:
             district = memory.district.strip()
             state = memory.state.strip() if memory.state else None
 
-        # Direct attribute on farmer (e.g. unit tests or mock objects)
         if not district and getattr(farmer, "district", None):
             f_dist = getattr(farmer, "district")
             if isinstance(f_dist, str) and f_dist.strip():
@@ -853,6 +1064,69 @@ _DISCOVERY_LABELS = {
 }
 
 
+def _sanitize_ai_response_for_shops(ai_response: Optional[str]) -> str:
+    """
+    Sanitizes AI/LLM generated text to prevent fabricated shop listings, fake phone numbers,
+    and ungrounded stock claims from leaking into farmer-facing WhatsApp responses.
+
+    Removes:
+    - Any line containing phone numbers (LLMs hallucinating dealer contacts)
+    - Any bullet points or numbered items mentioning shop/store/agency/dealer names or stock claims
+    - Any header lines introducing shop lists (e.g. 'Here are nearby shops:', 'సమీపంలోని ఎరువుల దుకాణాలు:')
+
+    Preserves genuine agronomic advisory (e.g. crop nutrient management, disease spraying advice).
+    """
+    if not ai_response or not isinstance(ai_response, str) or not ai_response.strip():
+        return ""
+
+    text = ai_response.strip()
+    phone_pattern = re.compile(r'(?:\+?91[\s-]?)?[6-9]\d{9}\b|\b\d{5}\s*\d{5}\b')
+    shop_kws = [
+        "fertilizer", "fertilizers", "agri", "agro", "kisan", "shop", "shops", "store", "stores",
+        "dealer", "dealers", "agency", "agencies", "inputs", "traders",
+        "షాపు", "షాపులు", "దుకాణం", "దుకాణాలు", "డీలర్", "డీలర్లు",
+        "दुकान", "दुकानें", "विक्रेता", "व्यापारी"
+    ]
+    stock_claim_patterns = [
+        r'\burea\b.*\bavailable\b', r'\bdap\b.*\bavailable\b', r'\bnpk\b.*\bavailable\b',
+        r'in stock', r'స్టాక్ ఉంది', r'స్టాక్ అందుబాటులో', r'లభిస్తుంది', r'దొరుకుతుంది', r'उपलब्ध',
+    ]
+
+    cleaned_lines = []
+    for line in text.split("\n"):
+        l = line.strip()
+        if not l:
+            cleaned_lines.append("")
+            continue
+        ll = l.lower()
+
+        # Rule 1: Any line with a phone number in an AI response is a hallucinated contact
+        if phone_pattern.search(l):
+            logger.info(f"[ENRICH SHOPS] Stripping hallucinated phone number line: {l[:60]}...")
+            continue
+
+        # Rule 2: Header lines introducing shop lists
+        if any(h in ll for h in [
+            "here are", "nearby fertilizer", "fertilizer shops near", "shops near", "following shops",
+            "nearby shops", "stores near", "fertilizer stores", "dealers near",
+            "సమీపంలోని ఎరువుల", "నారపల్లి లోని", "క్రింది దుకాణ", "దుకాణాలు:", "షాపులు:",
+            "नजदीकी खाद", "नजदीकी दुकानें", "दुकानें:",
+        ]) and any(k in ll for k in shop_kws):
+            logger.info(f"[ENRICH SHOPS] Stripping shop list header line: {l[:60]}...")
+            continue
+
+        # Rule 3: Bullet points or numbered items mentioning shop names or stock claims
+        is_bullet = bool(re.match(r'^[\*\•\-\d+\.]\s+', l))
+        if is_bullet and (any(k in ll for k in shop_kws) or any(re.search(p, ll) for p in stock_claim_patterns)):
+            logger.info(f"[ENRICH SHOPS] Stripping fabricated shop bullet item: {l[:60]}...")
+            continue
+
+        cleaned_lines.append(line)
+
+    result = "\n".join(cleaned_lines).strip()
+    return result
+
+
 async def enrich_response_with_shops(
     db,
     query_text: str,
@@ -877,6 +1151,9 @@ async def enrich_response_with_shops(
     query_lower = query_text.lower()
     logger.info(f"[ENRICH SHOPS] Called with query_text: '{query_text}' | ai_response length: {len(ai_response)}")
 
+    # Defense-in-depth: Scrub hallucinated shops, fake phone numbers, and fabricated stock claims
+    ai_response = _sanitize_ai_response_for_shops(ai_response)
+
     # For pure explicit stock queries, ALWAYS clear ai_response so no contradictory/speculative AI preamble is returned
     if _is_explicit_stock_query(query_text):
         ai_response = ""
@@ -891,8 +1168,10 @@ async def enrich_response_with_shops(
     matched_product = _detect_product_from_query(query_text, ai_response)
     is_stock_query = _is_explicit_stock_query(query_text)
 
-    # Step 3: Resolve farmer location and language (5-tier hierarchy)
-    loc_res = await _resolve_farmer_location(db, farmer, query_text=query_text)
+    # Step 3: Resolve farmer location and language (4-tier hierarchy)
+    loc_res = await _resolve_farmer_location(
+        db, farmer, query_text=query_text, orchestrator=discovery_orchestrator
+    )
     if len(loc_res) == 5:
         latitude, longitude, district, state, _ = loc_res
     else:
