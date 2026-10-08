@@ -58,31 +58,38 @@ class OpenWeatherClient:
             logger.info(f"[WEATHER CLIENT] Cache HIT for location='{location_label}'")
             return cached
 
-        # 2. Keyless Fallback Mock Data Generator
-        if not self.api_key:
-            settings = get_settings()
-            if settings.app_env != "production":
-                logger.info(
-                    f"[WEATHER CLIENT] OPENWEATHER_API_KEY not configured — "
-                    f"generating mock weather data for '{location_label}' (Non-prod fallback)."
-                )
-                mock_data = self._generate_mock_data(latitude, longitude, district, state)
-                await self._set_in_cache(latitude, longitude, district, state, mock_data)
-                return mock_data
-            else:
-                logger.warning(
-                    f"[WEATHER CLIENT] OPENWEATHER_API_KEY not configured in production. "
-                    f"Weather query for '{location_label}' returning None."
-                )
-                return None
+        # 2. Call OpenWeatherMap Live API if API key is present
+        if self.api_key:
+            live_data = await self._call_api(latitude, longitude, district, state)
+            if live_data is not None:
+                await self._set_in_cache(latitude, longitude, district, state, live_data)
+                return live_data
+            return None
 
-        # 3. Call Live API
-        live_data = await self._call_api(latitude, longitude, district, state)
-        if live_data is not None:
-            await self._set_in_cache(latitude, longitude, district, state, live_data)
-            return live_data
+        # 3. If API key is not configured and coordinates exist, fetch real-time weather via Open-Meteo
+        if latitude is not None and longitude is not None:
+            open_meteo_data = await self._fetch_open_meteo(latitude, longitude, location_label)
+            if open_meteo_data is not None:
+                logger.info(f"[WEATHER CLIENT] Live Open-Meteo weather succeeded for '{location_label}'.")
+                await self._set_in_cache(latitude, longitude, district, state, open_meteo_data)
+                return open_meteo_data
 
-        return None
+        # 4. Keyless Fallback Mock Data Generator (Non-prod only)
+        settings = get_settings()
+        if settings.app_env != "production":
+            logger.info(
+                f"[WEATHER CLIENT] OPENWEATHER_API_KEY not configured — "
+                f"generating mock weather data for '{location_label}' (Non-prod fallback)."
+            )
+            mock_data = self._generate_mock_data(latitude, longitude, district, state)
+            await self._set_in_cache(latitude, longitude, district, state, mock_data)
+            return mock_data
+        else:
+            logger.warning(
+                f"[WEATHER CLIENT] OPENWEATHER_API_KEY not configured in production. "
+                f"Weather query for '{location_label}' returning None."
+            )
+            return None
 
     # ------------------------------------------------------------------
     # Internal: API Call
@@ -134,6 +141,93 @@ class OpenWeatherClient:
             return None
         except Exception as exc:
             logger.warning(f"[WEATHER CLIENT] Unexpected error: {exc}")
+            return None
+
+    async def _fetch_open_meteo(
+        self,
+        latitude: float,
+        longitude: float,
+        loc_name: str,
+    ) -> Optional[Dict]:
+        """Fetch live weather from Open-Meteo (keyless global weather service)."""
+        try:
+            url = (
+                f"https://api.open-meteo.com/v1/forecast"
+                f"?latitude={latitude}&longitude={longitude}"
+                f"&current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m"
+                f"&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
+                f"&timezone=auto"
+            )
+            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                resp = await client.get(url)
+                if resp.status_code != 200:
+                    logger.warning(f"[WEATHER CLIENT] Open-Meteo responded with status {resp.status_code}")
+                    return None
+                data = resp.json()
+
+            curr = data.get("current", {})
+            daily = data.get("daily", {})
+
+            code = curr.get("weather_code", 0)
+            if code == 0:
+                cond_desc, cond_code = "Clear Sky", 800
+            elif code in (1, 2, 3):
+                cond_desc, cond_code = "Partly Cloudy", 802
+            elif code in (45, 48):
+                cond_desc, cond_code = "Foggy", 741
+            elif code in (51, 53, 55, 61, 63, 65, 80, 81, 82):
+                cond_desc, cond_code = "Rain", 500
+            elif code in (95, 96, 99):
+                cond_desc, cond_code = "Thunderstorm", 200
+            else:
+                cond_desc, cond_code = "Cloudy", 803
+
+            now = datetime.utcnow()
+            forecast = []
+            daily_times = daily.get("time", [])
+            daily_max = daily.get("temperature_2m_max", [])
+            daily_codes = daily.get("weather_code", [])
+
+            for i, d_date in enumerate(daily_times[1:5]):
+                t_max = daily_max[i + 1] if i + 1 < len(daily_max) else curr.get("temperature_2m", 28.0)
+                c_code = daily_codes[i + 1] if i + 1 < len(daily_codes) else 0
+                if c_code == 0:
+                    d_desc, d_slot_code = "Clear Sky", 800
+                elif c_code in (1, 2, 3):
+                    d_desc, d_slot_code = "Partly Cloudy", 802
+                elif c_code >= 50:
+                    d_desc, d_slot_code = "Rain", 500
+                else:
+                    d_desc, d_slot_code = "Cloudy", 803
+
+                for h in (9, 12, 15, 18):
+                    forecast.append({
+                        "dt_txt": f"{d_date} {h:02d}:00:00",
+                        "temp": round(float(t_max), 1),
+                        "humidity": int(curr.get("relative_humidity_2m", 60)),
+                        "description": d_desc,
+                        "condition_code": d_slot_code,
+                    })
+
+            return {
+                "location_name": loc_name,
+                "latitude": latitude,
+                "longitude": longitude,
+                "current": {
+                    "temp": round(float(curr.get("temperature_2m", 28.0)), 1),
+                    "feels_like": round(float(curr.get("apparent_temperature", 29.0)), 1),
+                    "humidity": int(curr.get("relative_humidity_2m", 60)),
+                    "wind_speed": round(float(curr.get("wind_speed_10m", 10.0)), 1),
+                    "description": cond_desc,
+                    "condition_code": cond_code,
+                },
+                "forecast": forecast,
+                "data_available": True,
+                "is_live": True,
+                "source_note": "Live Weather (Open-Meteo)",
+            }
+        except Exception as exc:
+            logger.warning(f"[WEATHER CLIENT] Open-Meteo live fetch failed: {exc}")
             return None
 
     # ------------------------------------------------------------------

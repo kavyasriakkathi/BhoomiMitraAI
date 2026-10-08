@@ -575,8 +575,10 @@ async def enrich_response_with_weather(
     # If no location information is resolved, ask for district
     if (latitude is None or longitude is None) and not district:
         logger.info("[WEATHER ENRICH] Weather intent detected but no location resolved. Appending location prompt.")
+        if not ai_response:
+            return labels["ask_location"]
         if "location" not in ai_response.lower() and "ప్రాంతం" not in ai_response and "జిల్లా" not in ai_response and "district" not in ai_response.lower():
-            return ai_response + "\n\n" + labels["ask_location"]
+            return (ai_response + "\n\n" + labels["ask_location"]).strip()
         return ai_response
 
     # Step 3: Fetch Weather Forecast
@@ -602,10 +604,10 @@ async def enrich_response_with_weather(
         if weather_data and weather_data.data_available:
             logger.info(f"[WEATHER ENRICH] Appending weather data for location '{weather_data.location_name}'.")
             weather_block = svc.format_whatsapp_reply(weather_data, language=language)
-            return ai_response + "\n\n" + weather_block
+            return (ai_response + "\n\n" + weather_block).strip() if ai_response else weather_block
 
         logger.info("[WEATHER ENRICH] Weather data unavailable. Appending honest fallback.")
-        return ai_response + "\n\n" + labels["no_data"]
+        return (ai_response + "\n\n" + labels["no_data"]).strip() if ai_response else labels["no_data"]
 
     except Exception as exc:
         logger.warning(f"[WEATHER ENRICH] Weather enrichment failed: {exc}")

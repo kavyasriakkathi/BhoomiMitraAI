@@ -59,3 +59,5 @@ class MarketPriceQueryResponse(BaseModel):
     source_note: str                                # Human-readable freshness note
     is_live: bool                                   # True = from API, False = from local DB or cache
     is_today_requested: bool = False                # True if user specifically queried for today's price
+    explicit_location: Optional[str] = None         # Preserves farmer's explicitly mentioned query location
+    raw_commodity: Optional[str] = None             # Preserves farmer's raw crop word from query (e.g. 'cotton', 'పత్తి')

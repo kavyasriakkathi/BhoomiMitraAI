@@ -1035,7 +1035,15 @@ class AIDecisionEngine:
             and not has_schemes
             and not has_stock_alert
         )
-        if not is_pure_stock_or_shop_query:
+        is_pure_weather_query = (
+            has_weather
+            and not has_crop_advice
+            and not has_market
+            and not has_shops
+            and not has_schemes
+            and not has_stock_alert
+        )
+        if not (is_pure_stock_or_shop_query or is_pure_weather_query):
             from src.ai.repository import AIRepository
             from src.ai.service import AIService
             from src.ai.schemas import AIGenerateRequest
@@ -1140,7 +1148,8 @@ class AIDecisionEngine:
         elif primary_intent == FarmerIntent.GOVERNMENT_SCHEMES and "🏛️" not in ai_response_text:
             ai_response_text = get_schemes_fallback_response(language)
         elif primary_intent == FarmerIntent.WEATHER and not any(w in ai_response_text for w in ["🌡️", "🌤️", "🌦️"]):
-            ai_response_text = get_weather_fallback_response(language)
+            if not any(k in ai_response_text for k in ["📍", "లొకేషన్", "జిల్లా", "location", "district"]):
+                ai_response_text = get_weather_fallback_response(language)
         elif primary_intent == FarmerIntent.SHOPS and "🏬" not in ai_response_text:
             ai_response_text = get_shops_fallback_response(language)
         elif primary_intent == FarmerIntent.STOCK_ALERT and not any(s in ai_response_text for s in ["🔔", "🏬", "✅", "ℹ️"]):

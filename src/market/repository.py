@@ -315,6 +315,7 @@ class MarketPriceRepository:
         district: Optional[str] = None,
         state: Optional[str] = None,
         limit_days: int = 3,
+        strict_location: bool = False,
     ) -> List[MarketPrice]:
         """
         Return the most relevant market price records for a commodity using strict geographic hierarchy.
@@ -326,6 +327,9 @@ class MarketPriceRepository:
           4. Same-state records from latest available date (no date cutoff).
           5. National records with current date cutoff (price_date >= cutoff).
           6. Any national records from latest available date (no date cutoff).
+
+        If strict_location is True, only returns records matching the requested district/location.
+        Never falls back to state or national records.
         """
         cutoff = datetime.utcnow() - timedelta(days=limit_days)
         base_commodity_filter = [MarketPrice.commodity.ilike(f"%{commodity}%")]
@@ -368,6 +372,15 @@ class MarketPriceRepository:
                     f"for '{commodity}' in '{district}'"
                 )
                 return district_all
+
+            # When a specific/explicit location was requested by the farmer,
+            # never substitute unrelated markets from other parts of the state or country.
+            if strict_location:
+                logger.info(
+                    f"[MARKET REPO] Strict location requested for '{district}' — "
+                    "no matching records found, suppressing state/national fallback."
+                )
+                return []
 
         # 3. Same-state records with current date cutoff
         if state:
