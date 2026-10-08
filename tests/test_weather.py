@@ -596,3 +596,134 @@ async def test_enrich_weather_conversational_district_followup():
 
     assert "Weather Information (Warangal)" in result
     assert "Temperature: 30.2°C" in result
+
+
+# ---------------------------------------------------------------------------
+# 22. Regression: OpenWeather failure cascades to Open-Meteo fallback
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_openweather_failed_falls_back_to_open_meteo_live():
+    """When OpenWeather API key is present but returns failure (e.g. 401 or timeout),
+
+    the client must fall through to Open-Meteo instead of returning None.
+    """
+    from src.weather.openweather_client import OpenWeatherClient
+
+    client = OpenWeatherClient(
+        api_key="expired_or_invalid_key",
+        api_url="https://api.openweathermap.org/data/2.5/forecast",
+    )
+
+    open_meteo_mock = {
+        "location_name": "16.5123,80.6432",
+        "latitude": 16.5123,
+        "longitude": 80.6432,
+        "current": {
+            "temp": 29.5,
+            "feels_like": 31.0,
+            "humidity": 68,
+            "wind_speed": 11.2,
+            "description": "Clear Sky",
+            "condition_code": 800,
+        },
+        "forecast": [],
+        "data_available": True,
+        "is_live": True,
+        "source_note": "Live Weather (Open-Meteo)",
+    }
+
+    with patch.object(client, "_get_from_cache", new_callable=AsyncMock, return_value=None), \
+         patch.object(client, "_call_api", new_callable=AsyncMock, return_value=None) as mock_owm, \
+         patch.object(client, "_fetch_open_meteo", new_callable=AsyncMock, return_value=open_meteo_mock) as mock_om, \
+         patch.object(client, "_set_in_cache", new_callable=AsyncMock):
+
+        data = await client.fetch_weather(latitude=16.5123, longitude=80.6432)
+
+        # 1. OpenWeather was attempted
+        mock_owm.assert_awaited_once_with(16.5123, 80.6432, None, None)
+        # 2. Open-Meteo was invoked as fallback
+        mock_om.assert_awaited_once_with(16.5123, 80.6432, "16.5123,80.6432")
+        # 3. Valid live data was produced
+        assert data is not None
+        assert data["data_available"] is True
+        assert data["is_live"] is True
+        assert data["current"]["temp"] == 29.5
+        assert data["source_note"] == "Live Weather (Open-Meteo)"
+
+
+# ---------------------------------------------------------------------------
+# 23. Regression: _fetch_open_meteo includes required descriptive User-Agent
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_fetch_open_meteo_sends_user_agent_header():
+    """_fetch_open_meteo must send a custom User-Agent to avoid datacenter 403 blocks."""
+    from src.weather.openweather_client import OpenWeatherClient
+
+    client = OpenWeatherClient(api_key="", api_url="")
+
+    fake_response = MagicMock()
+    fake_response.status_code = 200
+    fake_response.json.return_value = {
+        "current": {
+            "temperature_2m": 27.5,
+            "relative_humidity_2m": 60,
+            "apparent_temperature": 28.5,
+            "weather_code": 0,
+            "wind_speed_10m": 9.5,
+        },
+        "daily": {
+            "time": ["2026-10-08", "2026-10-09"],
+            "temperature_2m_max": [31.0, 30.5],
+            "weather_code": [0, 1],
+        },
+    }
+
+    recorded_headers = {}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout=5.0, headers=None):
+            nonlocal recorded_headers
+            recorded_headers = headers or {}
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url):
+            return fake_response
+
+    with patch("httpx.AsyncClient", FakeAsyncClient):
+        result = await client._fetch_open_meteo(latitude=18.7891, longitude=78.1234, loc_name="18.7891,78.1234")
+
+    assert result is not None
+    assert result["data_available"] is True
+    assert result["current"]["temp"] == 27.5
+    assert "User-Agent" in recorded_headers
+    assert recorded_headers["User-Agent"] == "BhoomiMitraAI/1.0 (https://bhoomimitra.org; contact@bhoomimitra.org)"
+
+
+# ---------------------------------------------------------------------------
+# 24. Regression: All providers failing produces honest fallback response
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_all_weather_providers_fail_honest_fallback_pipeline():
+    """When both OpenWeather and Open-Meteo fail in production, system returns honest unavailable fallback."""
+    from src.weather.service import enrich_response_with_weather
+    from src.weather.openweather_client import OpenWeatherClient
+
+    farmer = _make_mock_farmer(language="en")
+    db = _mock_db_with_location(memory_gps={"latitude": 17.4093, "longitude": 78.6496})
+
+    with patch.object(OpenWeatherClient, "fetch_weather", new_callable=AsyncMock, return_value=None):
+        result = await enrich_response_with_weather(
+            db, "weather forecast", "", farmer
+        )
+
+    assert "Weather forecast is currently unavailable for this location" in result
+    assert "1800-180-1551" in result
+    assert "🌡️" not in result

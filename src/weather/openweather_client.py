@@ -64,9 +64,12 @@ class OpenWeatherClient:
             if live_data is not None:
                 await self._set_in_cache(latitude, longitude, district, state, live_data)
                 return live_data
-            return None
+            logger.warning(
+                f"[WEATHER CLIENT] OpenWeatherMap failed for '{location_label}'. "
+                "Falling back to alternative weather provider if available."
+            )
 
-        # 3. If API key is not configured and coordinates exist, fetch real-time weather via Open-Meteo
+        # 3. Live fallback provider (Open-Meteo) when valid GPS coordinates exist
         if latitude is not None and longitude is not None:
             open_meteo_data = await self._fetch_open_meteo(latitude, longitude, location_label)
             if open_meteo_data is not None:
@@ -74,22 +77,22 @@ class OpenWeatherClient:
                 await self._set_in_cache(latitude, longitude, district, state, open_meteo_data)
                 return open_meteo_data
 
-        # 4. Keyless Fallback Mock Data Generator (Non-prod only)
-        settings = get_settings()
-        if settings.app_env != "production":
-            logger.info(
-                f"[WEATHER CLIENT] OPENWEATHER_API_KEY not configured — "
-                f"generating mock weather data for '{location_label}' (Non-prod fallback)."
-            )
-            mock_data = self._generate_mock_data(latitude, longitude, district, state)
-            await self._set_in_cache(latitude, longitude, district, state, mock_data)
-            return mock_data
-        else:
-            logger.warning(
-                f"[WEATHER CLIENT] OPENWEATHER_API_KEY not configured in production. "
-                f"Weather query for '{location_label}' returning None."
-            )
-            return None
+        # 4. Keyless Fallback Mock Data Generator (Non-prod only, when no API key configured)
+        if not self.api_key:
+            settings = get_settings()
+            if settings.app_env != "production":
+                logger.info(
+                    f"[WEATHER CLIENT] OPENWEATHER_API_KEY not configured — "
+                    f"generating mock weather data for '{location_label}' (Non-prod fallback)."
+                )
+                mock_data = self._generate_mock_data(latitude, longitude, district, state)
+                await self._set_in_cache(latitude, longitude, district, state, mock_data)
+                return mock_data
+
+        logger.warning(
+            f"[WEATHER CLIENT] Weather query for '{location_label}' returning None (all providers exhausted)."
+        )
+        return None
 
     # ------------------------------------------------------------------
     # Internal: API Call
@@ -158,7 +161,10 @@ class OpenWeatherClient:
                 f"&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max"
                 f"&timezone=auto"
             )
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+            headers = {
+                "User-Agent": "BhoomiMitraAI/1.0 (https://bhoomimitra.org; contact@bhoomimitra.org)",
+            }
+            async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=headers) as client:
                 resp = await client.get(url)
                 if resp.status_code != 200:
                     logger.warning(f"[WEATHER CLIENT] Open-Meteo responded with status {resp.status_code}")
