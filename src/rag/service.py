@@ -727,14 +727,34 @@ class RAGService:
 
         from src.weather.service import _extract_district_from_query
         query_district = _extract_district_from_query(message)
-        has_gps = bool(farmer_mem_dict and getattr(farmer_mem_dict, "gps_coordinates", None))
+        has_gps = False
+        lat, lon = None, None
+        gps_coords = getattr(farmer_mem_dict, "gps_coordinates", None) if farmer_mem_dict else None
+        if isinstance(gps_coords, dict):
+            try:
+                lat = float(gps_coords.get("latitude") or 0.0)
+                lon = float(gps_coords.get("longitude") or 0.0)
+                if lat != 0.0 and lon != 0.0:
+                    has_gps = True
+            except (ValueError, TypeError):
+                has_gps = False
+
         effective_district = None
         if query_district:
             effective_district = query_district
-        elif not has_gps and profile and profile.district:
+            loc_str = f"District: {effective_district}"
+        elif has_gps:
+            loc_str = f"GPS: ({round(lat, 6)}, {round(lon, 6)})"
+        elif profile and profile.district:
             effective_district = profile.district
+            loc_str = f"District: {effective_district}"
+        elif farmer_mem_dict and getattr(farmer_mem_dict, "district", None):
+            effective_district = farmer_mem_dict.district
+            loc_str = f"District: {effective_district}"
+        else:
+            loc_str = "District: Not set"
 
-        profile_context = f"Crop: {crop or 'General'}, State: {state or 'All India'}, District: {effective_district or 'Not set'}"
+        profile_context = f"Crop: {crop or 'General'}, State: {state or 'All India'}, {loc_str}"
 
         # 2. Retrieve Top 5 Highest-Ranked Knowledge Chunks via Hybrid Search
         search_results = await self.hybrid_search_knowledge(

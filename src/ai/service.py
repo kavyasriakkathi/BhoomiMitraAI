@@ -427,8 +427,11 @@ class AIService:
             effective_district = None
             if query_district:
                 effective_district = query_district
-            elif not has_gps and profile and profile.district:
-                effective_district = profile.district
+            elif not has_gps:
+                if profile and profile.district:
+                    effective_district = profile.district
+                elif memory_obj and getattr(memory_obj, "district", None):
+                    effective_district = memory_obj.district
 
             # Build farmer context string
             farmer_context = build_farmer_context(
@@ -436,6 +439,7 @@ class AIService:
                 district=effective_district,
                 state=getattr(profile, "state", None) if profile else None,
                 land_size=getattr(profile, "land_size_acres", None) if profile else None,
+                gps_coordinates=memory_obj.gps_coordinates if (has_gps and memory_obj) else None,
             )
 
             # Build enriched RAG query for short follow-ups (e.g. "ఎకరానికి ఎంత కావాలి?" / "ఈ వ్యాధికి ఎంత మందు వేయాలి?")
@@ -763,14 +767,18 @@ async def process_image_message(
     effective_district = None
     if query_district:
         effective_district = query_district
-    elif not has_gps and profile and profile.district:
-        effective_district = profile.district
+    elif not has_gps:
+        if profile and profile.district:
+            effective_district = profile.district
+        elif memory_obj and getattr(memory_obj, "district", None):
+            effective_district = memory_obj.district
 
     farmer_context = build_farmer_context(
         crop=getattr(profile, "current_crop", None) if profile else None,
         district=effective_district,
         state=getattr(profile, "state", None) if profile else None,
         land_size=getattr(profile, "land_size_acres", None) if profile else None,
+        gps_coordinates=memory_obj.gps_coordinates if (has_gps and memory_obj) else None,
     )
     from src.language.detector import detect_language
     from src.language.languages import normalize_language_code

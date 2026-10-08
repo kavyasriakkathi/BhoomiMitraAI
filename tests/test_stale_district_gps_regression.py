@@ -19,7 +19,7 @@ import pytest
 from uuid import uuid4
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.core.models import Farmer, Conversation, FarmerProfile
+from src.core.models import Farmer, Conversation, FarmerProfile, Farm
 from src.memory.models import FarmerMemory
 from src.gateway.schemas import ParsedIncomingMessage
 from src.gateway.service import _handle_inbound_location
@@ -31,8 +31,8 @@ from src.memory.service import FarmerMemoryService
 from src.memory.repository import FarmerMemoryRepository
 
 
-def _make_mock_db_with_farmer_data(farmer, memory=None, profile=None):
-    """Create a mock AsyncSession that returns memory and profile appropriately."""
+def _make_mock_db_with_farmer_data(farmer, memory=None, profile=None, farms=None):
+    """Create a mock AsyncSession that returns memory, profile, and farms appropriately."""
     mock_db = AsyncMock()
 
     async def _execute_mock(stmt):
@@ -45,8 +45,8 @@ def _make_mock_db_with_farmer_data(farmer, memory=None, profile=None):
             res.scalar_one_or_none.return_value = profile
             res.scalars.return_value.all.return_value = [profile] if profile else []
         elif "farms" in stmt_str or "Farm" in stmt_str:
-            res.scalar_one_or_none.return_value = None
-            res.scalars.return_value.all.return_value = []
+            res.scalar_one_or_none.return_value = farms[0] if farms else None
+            res.scalars.return_value.all.return_value = farms or []
         elif "crop_health" in stmt_str or "CropHealth" in stmt_str:
             res.scalar_one_or_none.return_value = None
             res.scalars.return_value.all.return_value = []
@@ -351,8 +351,10 @@ async def test_explicit_query_location_still_overrides_gps():
 @pytest.mark.asyncio
 async def test_refresh_memory_does_not_resurrect_stale_district_when_gps_present():
     """
+    Test 6:
     Verify FarmerMemoryService.refresh_farmer_memory does NOT overwrite
-    the cleared district with an old profile/farm district if GPS is present.
+    the cleared district with an old profile/farm district if GPS is present,
+    and does NOT overwrite new WhatsApp GPS with old farm coordinates.
     """
     from datetime import datetime
     farmer_id = uuid4()
@@ -391,10 +393,17 @@ async def test_refresh_memory_does_not_resurrect_stale_district_when_gps_present
         confidence_scores={},
         gps_coordinates={"latitude": 17.409305, "longitude": 78.649556},
     )
-    # Stale profile in DB
+    # Stale profile and farm in DB with old Korutla district and coordinates
     profile = FarmerProfile(farmer_id=farmer_id, district="Korutla")
+    farm = Farm(
+        id=uuid4(),
+        farmer_id=farmer_id,
+        district="Korutla",
+        latitude=18.82,
+        longitude=78.71,
+    )
 
-    mock_db = _make_mock_db_with_farmer_data(None, memory=memory, profile=profile)
+    mock_db = _make_mock_db_with_farmer_data(None, memory=memory, profile=profile, farms=[farm])
     repo = FarmerMemoryRepository(mock_db)
     service = FarmerMemoryService(repo)
 
@@ -402,6 +411,85 @@ async def test_refresh_memory_does_not_resurrect_stale_district_when_gps_present
          patch.object(repo, "save", new_callable=AsyncMock, side_effect=lambda m: m):
         refreshed = await service.refresh_farmer_memory(farmer_id)
 
-    # District must NOT have been resurrected to Korutla
+    # District must NOT have been resurrected to Korutla from profile or farm
     assert memory.district is None
     assert refreshed.district is None
+    # GPS coordinates must remain the authoritative WhatsApp GPS (not overwritten by old farm)
+    assert memory.gps_coordinates == {"latitude": 17.409305, "longitude": 78.649556}
+
+
+@pytest.mark.asyncio
+async def test_rag_prompt_construction_does_not_leak_stale_district_when_gps_present():
+    """
+    Requirement 7:
+    Check RAG prompt construction so stale district cannot leak there when current GPS exists.
+    """
+    from src.rag.service import RAGService
+    from src.rag.repository import RAGRepository
+
+    farmer_id = uuid4()
+    farmer = Farmer(id=farmer_id, phone_number="919848011234", preferred_language="te")
+    from datetime import datetime
+    memory = FarmerMemory(
+        id=uuid4(),
+        farmer_id=farmer_id,
+        created_at=datetime.utcnow(),
+        last_updated=datetime.utcnow(),
+        preferred_language="te",
+        preferred_voice="Google-te-IN-Standard-A",
+        voice_speed=1.0,
+        voice_gender="FEMALE",
+        farm_size=5.0,
+        village=None,
+        district=None,
+        state=None,
+        soil_type=None,
+        water_source=None,
+        irrigation_method=None,
+        primary_crops=["Cotton"],
+        secondary_crops=[],
+        crop_history=[],
+        disease_history=[],
+        pesticide_history=[],
+        fertilizer_history=[],
+        yield_history=[],
+        favorite_shops=[],
+        purchase_history=[],
+        preferred_brands=[],
+        government_schemes_used=[],
+        expert_consultation_history=[],
+        conversation_summary=None,
+        frequently_asked_questions=[],
+        ai_learned_preferences={},
+        risk_factors=[],
+        confidence_scores={},
+        gps_coordinates={"latitude": 17.409305, "longitude": 78.649556},
+    )
+    # Stale profile in DB
+    profile = FarmerProfile(farmer_id=farmer_id, district="Korutla", current_crop="Cotton", state="Telangana")
+
+    mock_db = _make_mock_db_with_farmer_data(farmer, memory=memory, profile=profile)
+    rag_repo = RAGRepository(mock_db)
+    rag_service = RAGService(rag_repo)
+
+    captured_system_prompts = []
+
+    async def _mock_generate(system_prompt, conversation_history, user_message, **kwargs):
+        captured_system_prompts.append(system_prompt)
+        return "ప్రత్తి పంటలో సలహా..."
+
+    with patch("src.ai.gemini_client.generate_response", side_effect=_mock_generate), \
+         patch.object(rag_service, "hybrid_search_knowledge", new_callable=AsyncMock, return_value=[]):
+        res = await rag_service.generate_rag_response(
+            farmer_id=farmer_id,
+            message="ప్రత్తి పంటకు ఎంత ఎరువు వేయాలి?",
+        )
+
+    assert len(captured_system_prompts) == 1
+    sys_prompt = captured_system_prompts[0]
+    # Korutla district must NOT be present anywhere in the RAG prompt
+    assert "Korutla" not in sys_prompt
+    assert "District: Korutla" not in sys_prompt
+    # Must include GPS coordinates
+    assert "17.409305" in sys_prompt
+    assert "78.649556" in sys_prompt

@@ -412,6 +412,7 @@ def build_farmer_context(
     district: str = None,
     state: str = None,
     land_size: float = None,
+    gps_coordinates: dict = None,
 ) -> str:
     """
     Build a context block to prepend to the conversation,
@@ -422,6 +423,14 @@ def build_farmer_context(
         parts.append(f"Current Crop: {crop}")
     if district:
         parts.append(f"District: {district}")
+    elif gps_coordinates and isinstance(gps_coordinates, dict):
+        try:
+            lat = float(gps_coordinates.get("latitude") or 0.0)
+            lon = float(gps_coordinates.get("longitude") or 0.0)
+            if lat != 0.0 and lon != 0.0:
+                parts.append(f"GPS: ({round(lat, 6)}, {round(lon, 6)})")
+        except (ValueError, TypeError):
+            pass
     if state:
         parts.append(f"State: {state}")
     if land_size:

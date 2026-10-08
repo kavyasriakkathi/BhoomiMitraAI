@@ -232,13 +232,30 @@ class FarmerMemoryService:
         memory = await self.get_memory(farmer_id)
         session = self.repository.session
 
+        # Check if memory has valid active GPS coordinates
+        has_gps = False
+        if memory.gps_coordinates and isinstance(memory.gps_coordinates, dict):
+            try:
+                lat = float(memory.gps_coordinates.get("latitude") or 0.0)
+                lon = float(memory.gps_coordinates.get("longitude") or 0.0)
+                if lat != 0.0 and lon != 0.0:
+                    has_gps = True
+            except (ValueError, TypeError):
+                has_gps = False
+
+        if has_gps:
+            # Authoritative GPS exists: ensure stale district is cleared and cannot be resurrected
+            memory.district = None
+            if isinstance(memory.confidence_scores, dict) and "district" in memory.confidence_scores:
+                memory.confidence_scores.pop("district", None)
+
         # 1. Sync from FarmerProfile
         res_prof = await session.execute(
             select(FarmerProfile).where(FarmerProfile.farmer_id == farmer_id)
         )
         profile = res_prof.scalar_one_or_none()
         if profile:
-            if profile.district and not memory.district and not memory.gps_coordinates:
+            if profile.district and not memory.district and not has_gps:
                 memory.district = profile.district
             if profile.state and not memory.state:
                 memory.state = profile.state
@@ -257,7 +274,7 @@ class FarmerMemoryService:
         for farm in farms:
             if farm.village and not memory.village:
                 memory.village = farm.village
-            if farm.district and not memory.district and not memory.gps_coordinates:
+            if farm.district and not memory.district and not has_gps:
                 memory.district = farm.district
             if farm.state and not memory.state:
                 memory.state = farm.state
@@ -267,7 +284,7 @@ class FarmerMemoryService:
                 memory.irrigation_method = farm.irrigation_type
             if farm.land_size_acres and not memory.farm_size:
                 memory.farm_size = farm.land_size_acres
-            if farm.latitude and farm.longitude:
+            if farm.latitude and farm.longitude and not has_gps:
                 memory.gps_coordinates = {"latitude": farm.latitude, "longitude": farm.longitude}
 
             # Fetch crops for farm
