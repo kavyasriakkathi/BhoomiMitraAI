@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
+from sqlalchemy.inspection import inspect as sa_inspect
 from sqlalchemy.exc import IntegrityError
 from src.core.models import Farmer, FarmerProfile, Conversation
 from src.core.database import AsyncSessionLocal
@@ -63,9 +65,12 @@ async def get_or_create_farmer(
     This is the implicit registration step — the first WhatsApp message
     from a farmer automatically creates their account.
     Handles concurrent inserts gracefully via IntegrityError rollback.
+    Eagerly loads FarmerProfile to prevent async lazy loading IO errors.
     """
     result = await db.execute(
-        select(Farmer).where(Farmer.phone_number == phone_number)
+        select(Farmer)
+        .options(selectinload(Farmer.profile))
+        .where(Farmer.phone_number == phone_number)
     )
     farmer = result.scalar_one_or_none()
 
@@ -86,15 +91,24 @@ async def get_or_create_farmer(
         )
         db.add(profile)
         await db.commit()
-        await db.refresh(farmer)
 
-        logger.info(f"New farmer registered: {farmer.id} ({phone_number})")
-        return farmer
+        # Eagerly load FarmerProfile for the newly registered farmer
+        res = await db.execute(
+            select(Farmer)
+            .options(selectinload(Farmer.profile))
+            .where(Farmer.id == farmer.id)
+        )
+        new_farmer = res.scalar_one()
+
+        logger.info(f"New farmer registered: {new_farmer.id} ({phone_number})")
+        return new_farmer
     except IntegrityError:
         await db.rollback()
-        # Concurrent insert occurred, re-query the newly created farmer
+        # Concurrent insert occurred, re-query the newly created farmer with eager profile loading
         res = await db.execute(
-            select(Farmer).where(Farmer.phone_number == phone_number)
+            select(Farmer)
+            .options(selectinload(Farmer.profile))
+            .where(Farmer.phone_number == phone_number)
         )
         existing_farmer = res.scalar_one_or_none()
         if existing_farmer:
@@ -204,18 +218,23 @@ async def _handle_inbound_location(
         memory.confidence_scores.pop("district", None)
     db.add(memory)
 
-    # Also clear stale district in FarmerProfile if present
-    from src.core.models import FarmerProfile
-    prof_stmt = select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
-    prof_res = await db.execute(prof_stmt)
-    profile = prof_res.scalar_one_or_none()
-    if profile and profile.district:
+    # Clear stale district in FarmerProfile if present
+    # FarmerProfile is eagerly loaded on farmer in Stage 2
+    profile = None
+    insp = sa_inspect(farmer)
+    if insp is not None and hasattr(insp, "unloaded") and "profile" in insp.unloaded:
+        # Fallback query if farmer was loaded without eager profile loading
+        prof_stmt = select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
+        prof_res = await db.execute(prof_stmt)
+        profile = prof_res.scalar_one_or_none()
+    else:
+        profile = getattr(farmer, "profile", None)
+
+    if profile and getattr(profile, "district", None):
         logger.info(f"[LOCATION INBOUND] Cleared stale profile district '{profile.district}' for farmer {farmer.id}.")
         profile.district = None
         db.add(profile)
 
-    if hasattr(farmer, "profile") and farmer.profile and hasattr(farmer.profile, "district"):
-        farmer.profile.district = None
     if hasattr(farmer, "district"):
         farmer.district = None
 

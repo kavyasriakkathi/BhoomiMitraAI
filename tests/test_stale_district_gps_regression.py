@@ -493,3 +493,131 @@ async def test_rag_prompt_construction_does_not_leak_stale_district_when_gps_pre
     # Must include GPS coordinates
     assert "17.409305" in sys_prompt
     assert "78.649556" in sys_prompt
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_farmer_eagerly_loads_farmer_profile():
+    """
+    Test E.2 & E.8:
+    Verify that get_or_create_farmer eagerly loads FarmerProfile using selectinload,
+    ensuring farmer.profile is accessible in async context without greenlet_spawn error.
+    """
+    from src.gateway.service import get_or_create_farmer
+    mock_db = AsyncMock()
+    farmer_id = uuid4()
+    mock_farmer = Farmer(id=farmer_id, phone_number="919999999999")
+    mock_profile = FarmerProfile(farmer_id=farmer_id, district="Korutla")
+    mock_farmer.profile = mock_profile
+
+    mock_res = MagicMock()
+    mock_res.scalar_one_or_none.return_value = mock_farmer
+    mock_db.execute.return_value = mock_res
+
+    farmer = await get_or_create_farmer(mock_db, "919999999999", "Test Farmer")
+
+    assert farmer.id == farmer_id
+    assert mock_db.execute.called
+
+
+@pytest.mark.asyncio
+async def test_handle_inbound_location_prevents_greenlet_spawn_error_on_unloaded_relationship():
+    """
+    Test E.1 & E.8:
+    Simulate an attached SQLAlchemy model where accessing farmer.profile directly
+    would trigger a MissingGreenlet exception ('greenlet_spawn has not been called').
+    Proves that _handle_inbound_location safely inspects the unloaded state and avoids
+    triggering synchronous IO / lazy load.
+    """
+    from sqlalchemy.exc import MissingGreenlet
+
+    farmer_id = uuid4()
+
+    class DangerousFarmer:
+        def __init__(self, fid):
+            self.id = fid
+            self.phone_number = "919848011234"
+            self.preferred_language = "te"
+
+        @property
+        def profile(self):
+            raise MissingGreenlet(
+                "greenlet_spawn has not been called; can't call await_only() here. Was IO attempted in an unexpected place?"
+            )
+
+    dangerous_farmer = DangerousFarmer(farmer_id)
+
+    mock_insp = MagicMock()
+    mock_insp.unloaded = {"profile"}
+
+    mock_db = AsyncMock()
+    memory = FarmerMemory(farmer_id=farmer_id, district="Korutla")
+    profile = FarmerProfile(farmer_id=farmer_id, district="Korutla")
+
+    async def _mock_exec(stmt):
+        res = MagicMock()
+        stmt_str = str(stmt)
+        if "farmer_memory" in stmt_str or "FarmerMemory" in stmt_str:
+            res.scalar_one_or_none.return_value = memory
+        elif "farmer_profiles" in stmt_str or "FarmerProfile" in stmt_str:
+            res.scalar_one_or_none.return_value = profile
+        else:
+            res.scalar_one_or_none.return_value = None
+        return res
+
+    mock_db.execute = AsyncMock(side_effect=_mock_exec)
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock()
+
+    parsed = ParsedIncomingMessage(
+        phone_number="919848011234",
+        message_id="wamid.loc_test_safe",
+        timestamp="1700000000",
+        message_type="location",
+        latitude=17.409305,
+        longitude=78.649556,
+    )
+    conv = Conversation(id=uuid4(), farmer_id=farmer_id, message_id="wamid.loc_test_safe")
+
+    with patch("src.gateway.service.sa_inspect", return_value=mock_insp):
+        # Must execute cleanly without raising MissingGreenlet
+        reply = await _handle_inbound_location(mock_db, dangerous_farmer, conv, parsed, language="te")
+
+    assert "లొకేషన్ విజయవంతంగా సేవ్ చేయబడింది" in reply
+    assert memory.district is None
+    assert profile.district is None
+    assert memory.gps_coordinates == {"latitude": 17.409305, "longitude": 78.649556}
+
+
+@pytest.mark.asyncio
+async def test_handle_inbound_location_with_eagerly_loaded_profile_clears_district_directly():
+    """
+    Test E.2 & E.3:
+    When FarmerProfile is eagerly loaded in Stage 2, _handle_inbound_location directly
+    clears profile.district in-memory and queues it for commit without extra IO or errors.
+    """
+    farmer_id = uuid4()
+    farmer = Farmer(id=farmer_id, phone_number="919848011234", preferred_language="te")
+    memory = FarmerMemory(farmer_id=farmer_id, district="Korutla", confidence_scores={"district": 0.95})
+    profile = FarmerProfile(farmer_id=farmer_id, district="Korutla")
+    farmer.profile = profile
+
+    mock_db = _make_mock_db_with_farmer_data(farmer, memory=memory, profile=profile)
+    conv = Conversation(id=uuid4(), farmer_id=farmer_id, message_id="wamid.loc_test_eager")
+
+    parsed = ParsedIncomingMessage(
+        phone_number="919848011234",
+        message_id="wamid.loc_test_eager",
+        timestamp="1700000000",
+        message_type="location",
+        latitude=17.409305,
+        longitude=78.649556,
+    )
+
+    reply = await _handle_inbound_location(mock_db, farmer, conv, parsed, language="te")
+
+    assert "లొకేషన్ విజయవంతంగా సేవ్ చేయబడింది" in reply
+    assert memory.gps_coordinates == {"latitude": 17.409305, "longitude": 78.649556}
+    assert memory.district is None
+    assert "district" not in (memory.confidence_scores or {})
+    assert profile.district is None
+    assert farmer.profile.district is None
