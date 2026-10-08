@@ -180,7 +180,7 @@ def extract_query_dosage_topics(query: str) -> dict:
 
     # 1. Detect crop
     crop = None
-    if any(k in t for k in ["వరి", "వరికి", "వరిలో", "వరిపంట", "paddy", "rice", "vari", "dhan", "धान", "நெல்", "ಭತ್ತ"]):
+    if any(k in t for k in ["వరి", "వరికి", "వరిలో", "వరిపంట", "రి పంటకు", "రి పంట", "paddy", "rice", "vari", "dhan", "धान", "நெல்", "ಭత్త"]):
         crop = "paddy"
     elif any(k in t for k in ["పత్తి", "పత్తికి", "పత్తిలో", "cotton", "patti", "kapas", "कपास", "பருத்தி", "ಹತ್ತಿ"]):
         crop = "cotton"

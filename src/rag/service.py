@@ -832,6 +832,8 @@ CROP_ALIASES: List[Tuple[str, str]] = [
     # Single-word English and Telugu aliases
     ("paddy", "Paddy"),
     ("rice", "Paddy"),
+    ("రి పంటకు", "Paddy"),
+    ("రి పంట", "Paddy"),
     ("వరి", "Paddy"),
     ("cotton", "Cotton"),
     ("పత్తి", "Cotton"),
