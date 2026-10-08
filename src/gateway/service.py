@@ -193,13 +193,37 @@ async def _handle_inbound_location(
         memory = FarmerMemory(farmer_id=farmer.id)
         db.add(memory)
 
+    old_district = getattr(memory, "district", None)
     memory.gps_coordinates = {
         "latitude": round(lat, 6),
         "longitude": round(lng, 6),
     }
+    # Authoritative current location: clear stale district so older district cannot override new GPS
+    memory.district = None
+    if isinstance(memory.confidence_scores, dict) and "district" in memory.confidence_scores:
+        memory.confidence_scores.pop("district", None)
     db.add(memory)
+
+    # Also clear stale district in FarmerProfile if present
+    from src.core.models import FarmerProfile
+    prof_stmt = select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
+    prof_res = await db.execute(prof_stmt)
+    profile = prof_res.scalar_one_or_none()
+    if profile and profile.district:
+        logger.info(f"[LOCATION INBOUND] Cleared stale profile district '{profile.district}' for farmer {farmer.id}.")
+        profile.district = None
+        db.add(profile)
+
+    if hasattr(farmer, "profile") and farmer.profile and hasattr(farmer.profile, "district"):
+        farmer.profile.district = None
+    if hasattr(farmer, "district"):
+        farmer.district = None
+
     await db.commit()
-    logger.info(f"[LOCATION INBOUND] Saved GPS for farmer {farmer.id}: ({round(lat, 6)}, {round(lng, 6)})")
+    logger.info(
+        f"[LOCATION INBOUND] Saved GPS for farmer {farmer.id}: ({round(lat, 6)}, {round(lng, 6)})"
+        + (f" (cleared stale district '{old_district}')" if old_district else "")
+    )
 
     if language == "te":
         return (

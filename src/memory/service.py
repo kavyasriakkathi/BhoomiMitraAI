@@ -238,7 +238,7 @@ class FarmerMemoryService:
         )
         profile = res_prof.scalar_one_or_none()
         if profile:
-            if profile.district and not memory.district:
+            if profile.district and not memory.district and not memory.gps_coordinates:
                 memory.district = profile.district
             if profile.state and not memory.state:
                 memory.state = profile.state
@@ -257,7 +257,7 @@ class FarmerMemoryService:
         for farm in farms:
             if farm.village and not memory.village:
                 memory.village = farm.village
-            if farm.district and not memory.district:
+            if farm.district and not memory.district and not memory.gps_coordinates:
                 memory.district = farm.district
             if farm.state and not memory.state:
                 memory.state = farm.state

@@ -402,20 +402,41 @@ class AIService:
             # 3. Farmer profile current_crop
             effective_crop = query_crop or (recent_context_crop if recent_context_crop else (getattr(profile, "current_crop", None) if profile else None))
 
-            # Build farmer context string
-            farmer_context = build_farmer_context(
-                crop=effective_crop or (getattr(profile, "current_crop", None) if profile else None),
-                district=getattr(profile, "district", None) if profile else None,
-                state=getattr(profile, "state", None) if profile else None,
-                land_size=getattr(profile, "land_size_acres", None) if profile else None,
-            )
-
             # 3. Fetch farmer long-term memory context
             from src.memory.service import FarmerMemoryService
             from src.memory.repository import FarmerMemoryRepository
             mem_repo = FarmerMemoryRepository(self.repository.session)
             mem_service = FarmerMemoryService(mem_repo)
+            memory_obj = await mem_service.get_memory(request.farmer_id)
             memory_context = await mem_service.format_memory_for_system_prompt(request.farmer_id)
+
+            # Location Priority for farmer context:
+            # 1. Explicit location in current user message (highest priority)
+            # 2. If memory has active GPS coordinates, treat GPS as authoritative current location; do not let older profile district override
+            # 3. Farmer profile district (fallback only when no GPS and no explicit location in query)
+            from src.weather.service import _extract_district_from_query
+            query_district = _extract_district_from_query(request.message)
+
+            has_gps = False
+            if memory_obj and memory_obj.gps_coordinates and isinstance(memory_obj.gps_coordinates, dict):
+                lat = memory_obj.gps_coordinates.get("latitude")
+                lon = memory_obj.gps_coordinates.get("longitude")
+                if lat is not None and lon is not None and not (lat == 0.0 and lon == 0.0):
+                    has_gps = True
+
+            effective_district = None
+            if query_district:
+                effective_district = query_district
+            elif not has_gps and profile and profile.district:
+                effective_district = profile.district
+
+            # Build farmer context string
+            farmer_context = build_farmer_context(
+                crop=effective_crop or (getattr(profile, "current_crop", None) if profile else None),
+                district=effective_district,
+                state=getattr(profile, "state", None) if profile else None,
+                land_size=getattr(profile, "land_size_acres", None) if profile else None,
+            )
 
             # Build enriched RAG query for short follow-ups (e.g. "ఎకరానికి ఎంత కావాలి?" / "ఈ వ్యాధికి ఎంత మందు వేయాలి?")
             rag_query = request.message
@@ -720,20 +741,37 @@ async def process_image_message(
     
     # 1. Fetch farmer profile
     profile = await repo.get_farmer_profile(farmer.id)
-    farmer_context = build_farmer_context(
-        crop=getattr(profile, "current_crop", None) if profile else None,
-        district=getattr(profile, "district", None) if profile else None,
-        state=getattr(profile, "state", None) if profile else None,
-        land_size=getattr(profile, "land_size_acres", None) if profile else None,
-    )
-    
+    user_caption = (conversation.user_message or "").strip()
+
     from src.memory.service import FarmerMemoryService
     from src.memory.repository import FarmerMemoryRepository
     mem_repo = FarmerMemoryRepository(db)
     mem_service = FarmerMemoryService(mem_repo)
+    memory_obj = await mem_service.get_memory(farmer.id)
     memory_context = await mem_service.format_memory_for_system_prompt(farmer.id)
 
-    user_caption = (conversation.user_message or "").strip()
+    from src.weather.service import _extract_district_from_query
+    query_district = _extract_district_from_query(user_caption) if user_caption else None
+
+    has_gps = False
+    if memory_obj and memory_obj.gps_coordinates and isinstance(memory_obj.gps_coordinates, dict):
+        lat = memory_obj.gps_coordinates.get("latitude")
+        lon = memory_obj.gps_coordinates.get("longitude")
+        if lat is not None and lon is not None and not (lat == 0.0 and lon == 0.0):
+            has_gps = True
+
+    effective_district = None
+    if query_district:
+        effective_district = query_district
+    elif not has_gps and profile and profile.district:
+        effective_district = profile.district
+
+    farmer_context = build_farmer_context(
+        crop=getattr(profile, "current_crop", None) if profile else None,
+        district=effective_district,
+        state=getattr(profile, "state", None) if profile else None,
+        land_size=getattr(profile, "land_size_acres", None) if profile else None,
+    )
     from src.language.detector import detect_language
     from src.language.languages import normalize_language_code
     img_lang = detect_language(user_caption, fallback=getattr(farmer, "preferred_language", "te") or "te") if user_caption else (getattr(farmer, "preferred_language", "te") or "te")

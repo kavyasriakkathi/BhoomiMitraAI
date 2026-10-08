@@ -553,8 +553,8 @@ async def enrich_response_with_weather(
                 except (ValueError, TypeError):
                     pass
 
-            # 2. Check FarmerProfile for district/state
-            if not district:
+            # 2. Check FarmerProfile for district/state (only if no GPS coordinates)
+            if not district and (latitude is None or longitude is None):
                 profile_result = await db.execute(
                     select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
                 )
@@ -564,8 +564,8 @@ async def enrich_response_with_weather(
                     district = profile.district.strip()
                     state = profile.state.strip() if profile.state else None
 
-            # 3. Check FarmerMemory for district/state if profile has none
-            if not district and memory and memory.district:
+            # 3. Check FarmerMemory for district/state if profile has none and no GPS
+            if not district and (latitude is None or longitude is None) and memory and memory.district:
                 district = memory.district.strip()
                 state = memory.state.strip() if memory.state else None
 

@@ -725,7 +725,16 @@ class RAGService:
         farmer_mem_dict = await mem_service.get_memory_response(farmer_id)
         memory_context = await mem_service.format_memory_for_system_prompt(farmer_id)
 
-        profile_context = f"Crop: {crop or 'General'}, State: {state or 'All India'}, District: {profile.district if profile else 'Not set'}"
+        from src.weather.service import _extract_district_from_query
+        query_district = _extract_district_from_query(message)
+        has_gps = bool(farmer_mem_dict and getattr(farmer_mem_dict, "gps_coordinates", None))
+        effective_district = None
+        if query_district:
+            effective_district = query_district
+        elif not has_gps and profile and profile.district:
+            effective_district = profile.district
+
+        profile_context = f"Crop: {crop or 'General'}, State: {state or 'All India'}, District: {effective_district or 'Not set'}"
 
         # 2. Retrieve Top 5 Highest-Ranked Knowledge Chunks via Hybrid Search
         search_results = await self.hybrid_search_knowledge(

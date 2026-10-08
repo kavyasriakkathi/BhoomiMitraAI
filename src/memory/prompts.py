@@ -67,7 +67,20 @@ def build_memory_context_prompt(memory) -> str:
     geo_parts = []
     if memory.village:
         geo_parts.append(f"Village: {memory.village}")
-    if memory.district:
+
+    has_gps = False
+    if memory.gps_coordinates and isinstance(memory.gps_coordinates, dict):
+        try:
+            lat = float(memory.gps_coordinates.get("latitude") or 0.0)
+            lon = float(memory.gps_coordinates.get("longitude") or 0.0)
+            if lat != 0.0 and lon != 0.0:
+                geo_parts.append(f"GPS: ({round(lat, 6)}, {round(lon, 6)})")
+                has_gps = True
+        except (ValueError, TypeError):
+            pass
+
+    # Include district only when no conflicting GPS coordinates are present
+    if memory.district and not has_gps:
         geo_parts.append(f"District: {memory.district}")
     if memory.state:
         geo_parts.append(f"State: {memory.state}")

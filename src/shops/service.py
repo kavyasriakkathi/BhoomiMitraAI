@@ -1008,26 +1008,27 @@ async def _resolve_farmer_location(
 
             return None, None, None, None
 
-        # For non-'near me' queries: load profile district
-        prof_res = await db.execute(
-            select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
-        )
-        profile = prof_res.scalar_one_or_none()
-        if profile and profile.district:
-            district = profile.district.strip()
-            state = profile.state.strip() if profile.state else None
+        # For non-'near me' queries: load profile district ONLY IF NO RELIABLE GPS
+        if latitude is None or longitude is None:
+            prof_res = await db.execute(
+                select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
+            )
+            profile = prof_res.scalar_one_or_none()
+            if profile and profile.district:
+                district = profile.district.strip()
+                state = profile.state.strip() if profile.state else None
 
-        if not district and memory and memory.district:
-            district = memory.district.strip()
-            state = memory.state.strip() if memory.state else None
+            if not district and memory and memory.district:
+                district = memory.district.strip()
+                state = memory.state.strip() if memory.state else None
 
-        if not district and getattr(farmer, "district", None):
-            f_dist = getattr(farmer, "district")
-            if isinstance(f_dist, str) and f_dist.strip():
-                district = f_dist.strip()
-                f_state = getattr(farmer, "state", None)
-                if isinstance(f_state, str) and f_state.strip():
-                    state = f_state.strip()
+            if not district and getattr(farmer, "district", None):
+                f_dist = getattr(farmer, "district")
+                if isinstance(f_dist, str) and f_dist.strip():
+                    district = f_dist.strip()
+                    f_state = getattr(farmer, "state", None)
+                    if isinstance(f_state, str) and f_state.strip():
+                        state = f_state.strip()
 
         # If district known but coordinates not set, map from known coordinates
         if (latitude is None or longitude is None) and district:
