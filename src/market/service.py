@@ -252,10 +252,12 @@ _MARKET_LOCATION_STOPWORDS = {
     "వేరుశనగ", "గోధుమ", "ఉల్లి", "ఉల్లిపాయ", "టమాటా", "చెరుకు", "అరటి", "జొన్న", "శనగ",
     "patti", "patthi", "dhara", "dhare", "rate", "rates", "price", "prices", "cost",
     "రేటు", "రేట్లు", "ధర", "ధరలు", "ఖరీదు", "అమ్మకం",
-    # Question / conversational / verbs
+    # Question / conversational / verbs / conjunctions
     "entha", "enti", "undha", "undi", "unnaya", "how", "much", "what", "is", "are",
     "cheppandi", "cheppu", "teliyacheyandi", "please", "tell", "show", "give", "kavali", "telusukovalani",
+    "and", "also", "or", "but", "then", "today", "yesterday", "tomorrow", "now",
     "ఎంత", "ఏంటి", "ఉందా", "ఉంది", "ఉన్నాయా", "చెప్పండి", "చెప్పు", "తెలియజేయండి",
+    "మరియు", "ఇంకా", "కానీ", "కూడా", "మరి", "లేదా", "ఈరోజు", "నిన్న", "రేపు", "ఇప్పుడు",
     "market", "mandi", "మార్కెట్", "మండి", "మార్కెట్లో", "మార్కెట్ లో",
 }
 

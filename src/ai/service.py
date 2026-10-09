@@ -368,6 +368,9 @@ class AIService:
 
     async def generate_ai_response(self, request: AIGenerateRequest) -> AIGenerateResponse:
         service_start_time = time.time()
+        rag_snippets = []
+        is_dosage_req = False
+        user_lang = "te"
         try:
             # 1. Fetch farmer profile for context
             profile = await self.repository.get_farmer_profile(request.farmer_id)
@@ -428,8 +431,9 @@ class AIService:
             if query_district:
                 effective_district = query_district
             elif not has_gps:
-                if profile and profile.district:
-                    effective_district = profile.district
+                profile_dist = getattr(profile, "district", None) if profile else None
+                if profile_dist:
+                    effective_district = profile_dist
                 elif memory_obj and getattr(memory_obj, "district", None):
                     effective_district = memory_obj.district
 
