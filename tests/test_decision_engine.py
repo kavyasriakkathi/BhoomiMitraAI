@@ -288,6 +288,30 @@ async def test_missing_market_price_data_returns_exact_fallback():
 
 
 @pytest.mark.asyncio
+async def test_decision_engine_korutla_market_prices_not_overwritten():
+    """Verify that when user asks for 'Korutla market prices', decision engine preserves location guidance with 📍 and does not overwrite with generic fallback."""
+    db_mock = AsyncMock()
+    mock_scalar = MagicMock()
+    mock_scalar.scalars.return_value.all.return_value = []
+    mock_scalar.scalars.return_value.first.return_value = None
+    db_mock.execute.return_value = mock_scalar
+
+    farmer = Farmer(id=uuid4(), preferred_language="en")
+    conversation = Conversation(id=uuid4(), farmer_id=farmer.id, user_message="Korutla market prices")
+
+    with patch("src.market.repository.MarketPriceRepository.get_prices_by_location", new_callable=AsyncMock, return_value=[]), \
+         patch("src.market.repository.MarketPriceRepository.seed_default_prices_if_empty", new_callable=AsyncMock), \
+         patch("src.market.agmarknet_client.AgmarknetClient.fetch_prices", new_callable=AsyncMock, return_value=[]), \
+         patch("src.ai.service.AIService.generate_ai_response", side_effect=Exception("LLM offline")):
+
+        result = await process_text_message(db_mock, farmer, conversation)
+
+        assert "Korutla" in result
+        assert "📍" in result
+        assert "Market price information is currently unavailable. Please try again after some time" not in result
+
+
+@pytest.mark.asyncio
 async def test_missing_weather_data_returns_exact_fallback():
     """Verify that when weather service fails, the localized fallback is provided without hallucinated temperatures."""
     db_mock = AsyncMock()

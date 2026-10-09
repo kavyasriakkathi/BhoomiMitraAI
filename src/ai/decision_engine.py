@@ -1143,7 +1143,7 @@ class AIDecisionEngine:
         # 6. Fallback Protection for Missing / Incomplete Responses
         ai_response_text = ai_response_text.strip() if ai_response_text else ""
 
-        if primary_intent == FarmerIntent.MARKET_PRICE and not any(k in ai_response_text for k in ["📊", "⚠️"]):
+        if primary_intent == FarmerIntent.MARKET_PRICE and not any(k in ai_response_text for k in ["📊", "⚠️", "📍"]):
             ai_response_text = get_market_fallback_response(language)
         elif primary_intent == FarmerIntent.GOVERNMENT_SCHEMES and "🏛️" not in ai_response_text:
             ai_response_text = get_schemes_fallback_response(language)

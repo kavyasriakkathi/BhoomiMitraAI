@@ -50,7 +50,7 @@ class MarketPriceQueryResponse(BaseModel):
     Includes data freshness metadata and source notes so the
     farmer always knows whether they are seeing live or cached data.
     """
-    commodity: str
+    commodity: Optional[str] = None
     district: Optional[str] = None
     state: Optional[str] = None
     results: List[MarketPriceResponse]

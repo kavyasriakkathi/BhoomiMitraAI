@@ -83,7 +83,7 @@ class AgmarknetClient:
 
     async def fetch_prices(
         self,
-        commodity: str,
+        commodity: Optional[str] = None,
         state: Optional[str] = None,
         district: Optional[str] = None,
         is_today_requested: bool = False,
@@ -203,8 +203,9 @@ class AgmarknetClient:
             "api-key": self.api_key,
             "format": "json",
             "limit": 100,
-            "filters[commodity]": commodity,
         }
+        if commodity:
+            params["filters[commodity]"] = commodity
         if resolved_state:
             params["filters[state.keyword]"] = resolved_state
         if district:
@@ -335,7 +336,7 @@ class AgmarknetClient:
 
     def _cache_key(
         self,
-        commodity: str,
+        commodity: Optional[str],
         state: Optional[str],
         district: Optional[str],
     ) -> str:
@@ -346,12 +347,12 @@ class AgmarknetClient:
             district = None
         if not state and district:
             state = _DISTRICT_STATE_MAP.get(district.strip().lower(), state)
-        raw = f"market_price:{commodity.lower()}:{(state or '').lower()}:{(district or '').lower()}"
+        raw = f"market_price:{(commodity or '').lower()}:{(state or '').lower()}:{(district or '').lower()}"
         return "agmarknet:" + hashlib.md5(raw.encode()).hexdigest()[:16]
 
     async def _get_from_cache(
         self,
-        commodity: str,
+        commodity: Optional[str],
         state: Optional[str],
         district: Optional[str],
     ) -> Optional[List[dict]]:
@@ -373,7 +374,7 @@ class AgmarknetClient:
 
     async def _set_in_cache(
         self,
-        commodity: str,
+        commodity: Optional[str],
         state: Optional[str],
         district: Optional[str],
         records: List[dict],

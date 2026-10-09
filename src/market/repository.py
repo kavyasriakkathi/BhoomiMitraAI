@@ -78,6 +78,18 @@ DEFAULT_MARKET_PRICES = [
         "unit": "Quintal",
         "source": "manual_seed",
     },
+    {
+        "commodity": "Paddy",
+        "commodity_telugu": "వరి",
+        "market_name": "Jagtial Mandi",
+        "district": "Jagtial",
+        "state": "Telangana",
+        "min_price": 2250.0,
+        "max_price": 2420.0,
+        "modal_price": 2360.0,
+        "unit": "Quintal",
+        "source": "manual_seed",
+    },
     # Chilli (Telangana Mandis)
     {
         "commodity": "Chilli",
@@ -316,17 +328,19 @@ class MarketPriceRepository:
         state: Optional[str] = None,
         limit_days: int = 3,
         strict_location: bool = False,
+        exact_location: Optional[str] = None,
     ) -> List[MarketPrice]:
         """
         Return the most relevant market price records for a commodity using strict geographic hierarchy.
 
         Priority Hierarchy:
-          1. Exact district records with current date cutoff (price_date >= cutoff).
-          2. Exact district records from latest available local DB date (no date cutoff).
-          3. Same-state records with current date cutoff (price_date >= cutoff).
-          4. Same-state records from latest available date (no date cutoff).
-          5. National records with current date cutoff (price_date >= cutoff).
-          6. Any national records from latest available date (no date cutoff).
+          1. Exact town/mandi records (if exact_location provided, e.g. 'Korutla Mandi').
+          2. Exact district records with current date cutoff (price_date >= cutoff).
+          3. Exact district records from latest available local DB date (no date cutoff).
+          4. Same-state records with current date cutoff (price_date >= cutoff).
+          5. Same-state records from latest available date (no date cutoff).
+          6. National records with current date cutoff (price_date >= cutoff).
+          7. Any national records from latest available date (no date cutoff).
 
         If strict_location is True, only returns records matching the requested district/location.
         Never falls back to state or national records.
@@ -336,10 +350,46 @@ class MarketPriceRepository:
 
         if district:
             from src.market.service import normalize_district_name, infer_state_from_district
-            district = normalize_district_name(district)
+            norm_dist = normalize_district_name(district)
+            if norm_dist and district.lower() != norm_dist.lower() and not exact_location:
+                exact_location = district
+            district = norm_dist
             state = infer_state_from_district(district, state)
 
-        # 1. Exact district records with current date cutoff
+        # 1. Exact town / mandi records (e.g. Korutla Mandi)
+        if exact_location and (not district or exact_location.lower() != district.lower()):
+            exact_recent = await self._query_prices(
+                base_commodity_filter + [
+                    MarketPrice.price_date >= cutoff,
+                    or_(
+                        MarketPrice.district.ilike(f"%{exact_location}%"),
+                        MarketPrice.market_name.ilike(f"%{exact_location}%"),
+                    ),
+                ]
+            )
+            if exact_recent:
+                logger.info(
+                    f"[MARKET REPO] Priority 1: Found {len(exact_recent)} recent exact-location records "
+                    f"for '{commodity}' in '{exact_location}'"
+                )
+                return exact_recent
+
+            exact_all = await self._query_prices(
+                base_commodity_filter + [
+                    or_(
+                        MarketPrice.district.ilike(f"%{exact_location}%"),
+                        MarketPrice.market_name.ilike(f"%{exact_location}%"),
+                    ),
+                ]
+            )
+            if exact_all:
+                logger.info(
+                    f"[MARKET REPO] Priority 2: Found {len(exact_all)} exact-location records (all-time) "
+                    f"for '{commodity}' in '{exact_location}'"
+                )
+                return exact_all
+
+        # 2. District records with current date cutoff
         if district:
             district_recent = await self._query_prices(
                 base_commodity_filter + [
@@ -352,12 +402,12 @@ class MarketPriceRepository:
             )
             if district_recent:
                 logger.info(
-                    f"[MARKET REPO] Priority 1: Found {len(district_recent)} recent district-level records "
+                    f"[MARKET REPO] Priority 3: Found {len(district_recent)} recent district-level records "
                     f"for '{commodity}' in '{district}'"
                 )
                 return district_recent
 
-            # 2. Exact district records from latest available local DB date (all-time)
+            # Exact district records from latest available local DB date (all-time)
             district_all = await self._query_prices(
                 base_commodity_filter + [
                     or_(
@@ -368,7 +418,7 @@ class MarketPriceRepository:
             )
             if district_all:
                 logger.info(
-                    f"[MARKET REPO] Priority 2: Found {len(district_all)} district-level records (all-time) "
+                    f"[MARKET REPO] Priority 4: Found {len(district_all)} district-level records (all-time) "
                     f"for '{commodity}' in '{district}'"
                 )
                 return district_all
@@ -377,7 +427,7 @@ class MarketPriceRepository:
             # never substitute unrelated markets from other parts of the state or country.
             if strict_location:
                 logger.info(
-                    f"[MARKET REPO] Strict location requested for '{district}' — "
+                    f"[MARKET REPO] Strict location requested for '{exact_location or district}' — "
                     "no matching records found, suppressing state/national fallback."
                 )
                 return []
@@ -440,6 +490,83 @@ class MarketPriceRepository:
                 f"for '{commodity}'"
             )
         return national_all
+
+    async def get_prices_by_location(
+        self,
+        location: str,
+        state: Optional[str] = None,
+        limit_days: int = 3,
+        strict_location: bool = True,
+    ) -> List[MarketPrice]:
+        """
+        Return available market price records for a location across all commodities.
+        Priority Hierarchy:
+          1. Exact district/market records with current date cutoff (price_date >= cutoff).
+          2. Exact district/market records from latest available local DB date (all-time).
+        Deduplicates by commodity, returning the most recent record for each distinct commodity.
+        """
+        if not location or not isinstance(location, str):
+            return []
+
+        cutoff = datetime.utcnow() - timedelta(days=limit_days)
+        from src.market.service import normalize_district_name, infer_state_from_district
+        norm_location = normalize_district_name(location)
+        search_loc = norm_location if norm_location else location
+        state = infer_state_from_district(search_loc, state)
+
+        # If location is a town that normalizes to a district (e.g. Korutla -> Jagtial),
+        # prioritize exact town first, then fall back to district
+        if location and norm_location and location.lower() != norm_location.lower():
+            exact_filter = or_(
+                MarketPrice.district.ilike(f"%{location}%"),
+                MarketPrice.market_name.ilike(f"%{location}%"),
+            )
+            records = await self._query_prices_all([MarketPrice.price_date >= cutoff, exact_filter])
+            if not records:
+                records = await self._query_prices_all([exact_filter])
+            if not records:
+                dist_filter = or_(
+                    MarketPrice.district.ilike(f"%{norm_location}%"),
+                    MarketPrice.market_name.ilike(f"%{norm_location}%"),
+                )
+                records = await self._query_prices_all([MarketPrice.price_date >= cutoff, dist_filter])
+                if not records:
+                    records = await self._query_prices_all([dist_filter])
+        else:
+            location_filter = or_(
+                MarketPrice.district.ilike(f"%{search_loc}%"),
+                MarketPrice.market_name.ilike(f"%{search_loc}%"),
+            )
+
+            # 1. Recent records with cutoff
+            records = await self._query_prices_all([MarketPrice.price_date >= cutoff, location_filter])
+            if not records:
+                # 2. Latest records all-time
+                records = await self._query_prices_all([location_filter])
+
+        if not records and not strict_location and state:
+            state_recent = await self._query_prices_all([MarketPrice.price_date >= cutoff, MarketPrice.state.ilike(f"%{state}%")])
+            records = state_recent if state_recent else await self._query_prices_all([MarketPrice.state.ilike(f"%{state}%")])
+
+        # Deduplicate to keep the latest record per commodity
+        seen_commodities = set()
+        deduped = []
+        for r in records:
+            comm_key = r.commodity.strip().lower()
+            if comm_key not in seen_commodities:
+                seen_commodities.add(comm_key)
+                deduped.append(r)
+        return deduped
+
+    async def _query_prices_all(self, filters: list, limit: int = 30) -> List[MarketPrice]:
+        """Execute a price query with the given filters, sorted newest-first."""
+        result = await self.db.execute(
+            select(MarketPrice)
+            .where(and_(*filters))
+            .order_by(MarketPrice.price_date.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
 
     async def _query_prices(self, filters: list) -> List[MarketPrice]:
         """Execute a price query with the given filters, sorted newest-first."""

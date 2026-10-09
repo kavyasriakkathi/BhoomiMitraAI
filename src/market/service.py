@@ -406,30 +406,45 @@ def resolve_gps_to_nearest_district(lat: float, lon: float) -> Optional[str]:
     return closest_dist
 
 
+TOWN_TO_DISTRICT_MAP = {
+    "korutla": "Jagtial",
+    "కోరుట్ల": "Jagtial",
+    "metpally": "Jagtial",
+    "మెట్పల్లి": "Jagtial",
+    "sircilla": "Rajanna Sircilla",
+    "సిరిసిల్ల": "Rajanna Sircilla",
+}
+
+
 def normalize_district_name(raw_district: Optional[str]) -> Optional[str]:
     """
-    Normalize Telugu and English district/location names to canonical English names
-    without replacing specific sub-district towns/villages (e.g. Korutla, Metpally)
-    with their parent districts.
+    Normalize Telugu and English district/location names to canonical English district names.
+    Maps sub-district towns/mandals (e.g. Korutla, Metpally) to their administrative districts (e.g. Jagtial).
     """
     if not raw_district or not isinstance(raw_district, str):
         return None
     d = raw_district.strip()
-    if d in TELUGU_TO_ENGLISH_PLACES:
-        return TELUGU_TO_ENGLISH_PLACES[d]
     d_lower = d.lower()
+    if d_lower in TOWN_TO_DISTRICT_MAP:
+        return TOWN_TO_DISTRICT_MAP[d_lower]
+    if d in TELUGU_TO_ENGLISH_PLACES:
+        eng_p = TELUGU_TO_ENGLISH_PLACES[d]
+        if eng_p.lower() in TOWN_TO_DISTRICT_MAP:
+            return TOWN_TO_DISTRICT_MAP[eng_p.lower()]
+        return eng_p
     if d_lower in TELUGU_TO_ENGLISH_PLACES:
-        return TELUGU_TO_ENGLISH_PLACES[d_lower]
+        eng_p = TELUGU_TO_ENGLISH_PLACES[d_lower]
+        if eng_p.lower() in TOWN_TO_DISTRICT_MAP:
+            return TOWN_TO_DISTRICT_MAP[eng_p.lower()]
+        return eng_p
     from src.weather.service import _KNOWN_DISTRICTS
-    town_aliases = {"korutla", "కోరుట్ల", "metpally", "మెట్పల్లి"}
-    if d_lower not in town_aliases:
-        if d in _KNOWN_DISTRICTS:
-            return _KNOWN_DISTRICTS[d]
-        if d_lower in _KNOWN_DISTRICTS:
-            return _KNOWN_DISTRICTS[d_lower]
-        for kw, canon in _KNOWN_DISTRICTS.items():
-            if kw not in town_aliases and (kw in d_lower or kw in d):
-                return canon
+    if d in _KNOWN_DISTRICTS:
+        return _KNOWN_DISTRICTS[d]
+    if d_lower in _KNOWN_DISTRICTS:
+        return _KNOWN_DISTRICTS[d_lower]
+    for kw, canon in _KNOWN_DISTRICTS.items():
+        if kw in d_lower or kw in d:
+            return canon
     return d[0].upper() + d[1:] if len(d) > 1 and d.isascii() else d
 
 
@@ -665,7 +680,7 @@ class MarketService:
 
     async def get_prices_for_query(
         self,
-        commodity: str,
+        commodity: Optional[str] = None,
         district: Optional[str] = None,
         state: Optional[str] = None,
         is_today_requested: bool = False,
@@ -699,11 +714,102 @@ class MarketService:
             f"state='{state}', is_today_requested={is_today_requested}, explicit_location='{explicit_location}', today_ist={today_ist}"
         )
 
-        # Step 1: Try live API
+        # Handle queries where no commodity is specified (location-level multi-commodity query)
+        if not commodity:
+            target_loc = explicit_location or district
+            if not target_loc:
+                return MarketPriceQueryResponse(
+                    commodity=None,
+                    district=district,
+                    state=state,
+                    results=[],
+                    data_available=False,
+                    data_freshness_hours=None,
+                    source_note="No commodity or location provided.",
+                    is_live=False,
+                    is_today_requested=is_today_requested,
+                    explicit_location=explicit_location,
+                    raw_commodity=raw_commodity,
+                )
+
+            # Query local DB for this location across all commodities
+            db_records = await self.repository.get_prices_by_location(
+                location=target_loc,
+                state=state,
+                strict_location=bool(explicit_location),
+            )
+
+            if explicit_location and db_records:
+                loc_candidates = {explicit_location.lower()}
+                if district:
+                    loc_candidates.add(district.lower())
+                matching_multi = [
+                    r for r in db_records
+                    if any(
+                        cand in getattr(r, "district", "").lower()
+                        or cand in getattr(r, "market_name", "").lower()
+                        for cand in loc_candidates
+                    )
+                ]
+                exact_multi = [
+                    r for r in matching_multi
+                    if explicit_location.lower() in getattr(r, "district", "").lower()
+                    or explicit_location.lower() in getattr(r, "market_name", "").lower()
+                ]
+                db_records = exact_multi if exact_multi else matching_multi
+
+            if not db_records:
+                logger.info(
+                    f"[MARKET SERVICE] No price data found in DB for location='{target_loc}'"
+                )
+                return MarketPriceQueryResponse(
+                    commodity=None,
+                    district=district,
+                    state=state,
+                    results=[],
+                    data_available=False,
+                    data_freshness_hours=None,
+                    source_note=f"No price data available for {target_loc}.",
+                    is_live=False,
+                    is_today_requested=is_today_requested,
+                    explicit_location=explicit_location,
+                    raw_commodity=raw_commodity,
+                )
+
+            dates = [
+                r.price_date
+                for r in db_records
+                if getattr(r, "price_date", None) and isinstance(r.price_date, datetime)
+            ]
+            newest = max(dates) if dates else None
+            freshness_hours = (
+                round((datetime.utcnow() - newest).total_seconds() / 3600, 1)
+                if newest
+                else 0.0
+            )
+
+            results = [MarketPriceResponse.model_validate(r) for r in db_records]
+
+            return MarketPriceQueryResponse(
+                commodity=None,
+                district=district,
+                state=state,
+                results=results,
+                data_available=True,
+                data_freshness_hours=freshness_hours,
+                source_note=f"Local database (data is ~{freshness_hours}h old)",
+                is_live=False,
+                is_today_requested=is_today_requested,
+                explicit_location=explicit_location,
+                raw_commodity=raw_commodity,
+            )
+
+        # Step 1: Try live API with canonical district (e.g. Jagtial for Korutla)
+        api_district = normalize_district_name(district) if district else district
         api_records = await self.client.fetch_prices(
             commodity=commodity,
             state=state,
-            district=district,
+            district=api_district,
             is_today_requested=is_today_requested,
         )
         if api_records is None:
@@ -711,12 +817,25 @@ class MarketService:
 
         # If explicit_location is provided, filter live API records to ensure they match requested location
         if explicit_location and api_records:
-            loc_lower = explicit_location.lower()
+            norm_explicit = normalize_district_name(explicit_location)
+            loc_candidates = {explicit_location.lower()}
+            if norm_explicit:
+                loc_candidates.add(norm_explicit.lower())
+            if district:
+                loc_candidates.add(district.lower())
             matching_api = [
                 r for r in api_records
-                if loc_lower in r.get("district", "").lower() or loc_lower in r.get("market", "").lower()
+                if any(
+                    cand in r.get("district", "").lower() or cand in r.get("market", "").lower()
+                    for cand in loc_candidates
+                )
             ]
-            api_records = matching_api
+            exact_api = [
+                r for r in matching_api
+                if explicit_location.lower() in r.get("district", "").lower()
+                or explicit_location.lower() in r.get("market", "").lower()
+            ]
+            api_records = exact_api if exact_api else matching_api
 
         has_today_live = any(is_record_from_today(r.get("arrival_date")) for r in api_records if isinstance(r, dict)) if api_records else False
         logger.info(
@@ -792,13 +911,26 @@ class MarketService:
         # If explicit_location is provided, enforce strict location matching:
         # Never silently accept state-wide fallback records (e.g. Warangal) for a different requested village/town.
         if explicit_location and db_records:
-            loc_lower = explicit_location.lower()
+            norm_explicit = normalize_district_name(explicit_location)
+            loc_candidates = {explicit_location.lower()}
+            if norm_explicit:
+                loc_candidates.add(norm_explicit.lower())
+            if district:
+                loc_candidates.add(district.lower())
             matching_db = [
                 r for r in db_records
-                if loc_lower in getattr(r, "district", "").lower()
-                or loc_lower in getattr(r, "market_name", "").lower()
+                if any(
+                    cand in getattr(r, "district", "").lower()
+                    or cand in getattr(r, "market_name", "").lower()
+                    for cand in loc_candidates
+                )
             ]
-            db_records = matching_db
+            exact_db = [
+                r for r in matching_db
+                if explicit_location.lower() in getattr(r, "district", "").lower()
+                or explicit_location.lower() in getattr(r, "market_name", "").lower()
+            ]
+            db_records = exact_db if exact_db else matching_db
 
         if not db_records:
             logger.info(
@@ -941,21 +1073,47 @@ class MarketService:
         labels = get_market_labels(language)
         commodity = query_response.commodity
 
-        commodity_display = commodity
-        if language == "te":
-            for kw, canon in COMMODITY_MAP.items():
-                if canon.lower() == commodity.lower() and any(ord(c) > 127 for c in kw):
-                    commodity_display = kw
-                    break
-        elif language in ["hi", "ta", "kn", "mr", "bn", "gu", "or", "pa", "as", "ur"]:
-            for kw, canon in COMMODITY_MAP.items():
-                if canon.lower() == commodity.lower() and any(ord(c) > 127 for c in kw):
-                    commodity_display = kw
-                    break
+        commodity_display = commodity or ""
+        if commodity:
+            if language == "te":
+                for kw, canon in COMMODITY_MAP.items():
+                    if canon.lower() == commodity.lower() and any(ord(c) > 127 for c in kw):
+                        commodity_display = kw
+                        break
+            elif language in ["hi", "ta", "kn", "mr", "bn", "gu", "or", "pa", "as", "ur"]:
+                for kw, canon in COMMODITY_MAP.items():
+                    if canon.lower() == commodity.lower() and any(ord(c) > 127 for c in kw):
+                        commodity_display = kw
+                        break
 
         if not query_response.data_available or not query_response.results:
             req_loc = getattr(query_response, "explicit_location", None)
+            if not query_response.commodity:
+                no_crop_loc = req_loc or query_response.district
+                if no_crop_loc:
+                    if language == "te":
+                        tel_loc = _TELUGU_DISTRICT_MAP.get(no_crop_loc, no_crop_loc)
+                        if tel_loc == no_crop_loc:
+                            for tel, eng in TELUGU_TO_ENGLISH_PLACES.items():
+                                if eng.lower() == no_crop_loc.lower():
+                                    tel_loc = tel
+                                    break
+                        return f"📍 {tel_loc} మార్కెట్ ధరల సమాచారం ప్రస్తుతం అందుబాటులో లేదు. సమీప మార్కెట్లలో ధరలు చూడటానికి దయచేసి నిర్దిష్ట పంట పేరును (ఉదా: పత్తి, వరి, మిర్చి) తెలపండి."
+                    elif language == "hi":
+                        return f"📍 {no_crop_loc} के लिए वर्तमान में मंडी भाव उपलब्ध नहीं है। नजदीकी मंडियों के भाव देखने के लिए कृपया फसल का नाम (उदा: कपास, धान, मिर्च) बताएं।"
+                    else:
+                        return f"📍 Currently market-price data is not available for {no_crop_loc}. Please specify which crop you are looking for (e.g., Cotton, Paddy, Chilli) to check prices in nearby markets."
+                else:
+                    if language == "te":
+                        return "📊 మార్కెట్ ధరలు తెలుసుకోవడానికి దయచేసి పంట మరియు మార్కెట్ పేరు తెలపండి (ఉదా: 'వరంగల్‌లో పత్తి ధర' లేదా 'సూర్యాపేటలో వరి ధర')."
+                    elif language == "hi":
+                        return "📊 मंडी भाव जानने के लिए कृपया फसल और मंडी का नाम बताएं (जैसे: 'वारंगल में कपास का भाव')।"
+                    else:
+                        return "📊 Please specify the crop and market location to check prices (e.g., 'Cotton price in Warangal' or 'Paddy price in Suryapet')."
+
             comm_name = getattr(query_response, "raw_commodity", None) or commodity_display
+            if comm_name and isinstance(comm_name, str) and comm_name.isascii():
+                comm_name = comm_name.capitalize()
             if req_loc:
                 if language == "te":
                     return f"📍 {req_loc} కోసం ప్రస్తుతం {comm_name} market-price data అందుబాటులో లేదు."
@@ -964,6 +1122,58 @@ class MarketService:
                 else:
                     return f"📍 Currently market-price data for {comm_name} is not available for {req_loc}."
             return labels["no_data"].format(commodity=commodity_display)
+
+        if not query_response.commodity:
+            loc_name = getattr(query_response, "explicit_location", None) or query_response.district or "Market"
+            source_str = labels["source_live"] if query_response.is_live else labels["source_local"]
+
+            seen_comms = set()
+            deduplicated = []
+            for r in query_response.results:
+                ck = r.commodity.lower()
+                if ck not in seen_comms:
+                    seen_comms.add(ck)
+                    deduplicated.append(r)
+                if len(deduplicated) >= 6:
+                    break
+
+            if language == "te":
+                tel_loc = _TELUGU_DISTRICT_MAP.get(loc_name, loc_name)
+                if tel_loc == loc_name:
+                    for tel, eng in TELUGU_TO_ENGLISH_PLACES.items():
+                        if eng.lower() == loc_name.lower():
+                            tel_loc = tel
+                            break
+                market_title = deduplicated[0].market_name
+                lines = [
+                    f"📊 {tel_loc} మార్కెట్ ధరలు\n"
+                    f"మార్కెట్: {market_title}, {deduplicated[0].state}\n"
+                ]
+                for r in deduplicated:
+                    c_name = r.commodity_telugu or r.commodity
+                    lines.append(
+                        f"• {c_name}: ₹{r.modal_price:,.0f}/{labels['unit_suffix']} "
+                        f"(కనిష్టం ₹{r.min_price:,.0f} | గరిష్టం ₹{r.max_price:,.0f})"
+                    )
+                newest_date = max(r.price_date for r in deduplicated)
+                lines.append(f"\n{labels['date']}: {newest_date.strftime('%d %b %Y')}")
+                lines.append(f"📡 {source_str}")
+                return "\n".join(lines)
+            else:
+                market_title = deduplicated[0].market_name
+                lines = [
+                    f"📊 {loc_name} Mandi Prices\n"
+                    f"Market: {market_title}, {deduplicated[0].state}\n"
+                ]
+                for r in deduplicated:
+                    lines.append(
+                        f"• {r.commodity}: Modal ₹{r.modal_price:,.0f}/{labels['unit_suffix']} "
+                        f"(Min ₹{r.min_price:,.0f} | Max ₹{r.max_price:,.0f})"
+                    )
+                newest_date = max(r.price_date for r in deduplicated)
+                lines.append(f"\n{labels['date']}: {newest_date.strftime('%d %b %Y')}")
+                lines.append(f"📡 {source_str}")
+                return "\n".join(lines)
 
         # Use the most recent record per market
         seen_markets = set()
@@ -1294,8 +1504,10 @@ async def enrich_response_with_market_prices(
     )
 
     if not matched_commodity:
-        logger.info("[MARKET ENRICH] Price intent detected but no commodity matched.")
-        return ai_response
+        logger.info(
+            f"[MARKET ENRICH] Price intent detected without specific commodity. "
+            f"Querying location-level prices for location='{explicit_location or district}'"
+        )
 
     # Step 4: Fetch prices
     try:
@@ -1335,8 +1547,8 @@ async def enrich_response_with_market_prices(
 
         if query_response.data_available:
             logger.info(
-                f"[MARKET ENRICH] Appending {len(query_response.results)} price records "
-                f"for '{matched_commodity}' to AI response."
+                f"[MARKET ENRICH] Returning {len(query_response.results)} price records "
+                f"for '{matched_commodity or explicit_location or district}'"
             )
             
             if _is_pure_price_query(query_text):
@@ -1354,12 +1566,12 @@ async def enrich_response_with_market_prices(
             return final_enriched
         else:
             # Data unavailable
-            if is_explicit:
-                # Explicit location requested but no data available:
-                # Respond clearly with the explicit data unavailable message (do not substitute unrelated market)
+            if is_explicit or not matched_commodity:
+                # Explicit location requested or price query without crop:
+                # Return authoritative guidance/unavailable notice
                 logger.info(
-                    f"[MARKET ENRICH] Explicit location '{explicit_location}' has no data for '{matched_commodity}' — "
-                    "returning clear location unavailable response."
+                    f"[MARKET ENRICH] Location '{explicit_location or district}' has no data for '{matched_commodity}' — "
+                    "returning clear location unavailable / crop specification guidance."
                 )
                 if _is_pure_price_query(query_text):
                     return price_block
