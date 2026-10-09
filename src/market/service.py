@@ -1179,26 +1179,48 @@ async def enrich_response_with_market_prices(
         if hasattr(farmer, "gps_coordinates") and isinstance(farmer.gps_coordinates, dict):
             lat = farmer.gps_coordinates.get("latitude")
             lon = farmer.gps_coordinates.get("longitude")
-        elif hasattr(farmer, "memory") and farmer.memory and hasattr(farmer.memory, "gps_coordinates"):
-            gps = farmer.memory.gps_coordinates
-            if isinstance(gps, dict):
-                lat = gps.get("latitude")
-                lon = gps.get("longitude")
+        else:
+            farmer_memory = None
+            try:
+                from sqlalchemy.inspection import inspect as sa_inspect
+                insp = sa_inspect(farmer)
+                if insp is not None and hasattr(insp, "unloaded") and "memory" in insp.unloaded:
+                    farmer_memory = None
+                else:
+                    try:
+                        farmer_memory = getattr(farmer, "memory", None)
+                    except Exception:
+                        farmer_memory = None
+            except Exception:
+                try:
+                    farmer_memory = getattr(farmer, "memory", None) if not hasattr(farmer, "__table__") else None
+                except Exception:
+                    farmer_memory = None
+
+            if farmer_memory and hasattr(farmer_memory, "gps_coordinates"):
+                gps = getattr(farmer_memory, "gps_coordinates", None)
+                if isinstance(gps, dict):
+                    lat = gps.get("latitude")
+                    lon = gps.get("longitude")
 
         # If not present on farmer object in-memory, query FarmerMemory from DB
         if (lat is None or lon is None) and farmer and hasattr(farmer, "id"):
             try:
-                from sqlalchemy.ext.asyncio import AsyncSession
-                if isinstance(db, AsyncSession):
-                    from sqlalchemy import select
-                    from src.memory.models import FarmerMemory
-                    mem_res = await db.execute(
-                        select(FarmerMemory).where(FarmerMemory.farmer_id == farmer.id)
-                    )
-                    memory = mem_res.scalar_one_or_none()
-                    if memory and isinstance(memory.gps_coordinates, dict):
-                        lat = memory.gps_coordinates.get("latitude")
-                        lon = memory.gps_coordinates.get("longitude")
+                import inspect
+                from sqlalchemy import select
+                from src.memory.models import FarmerMemory
+                mem_res = await db.execute(
+                    select(FarmerMemory).where(FarmerMemory.farmer_id == farmer.id)
+                )
+                if inspect.iscoroutine(mem_res):
+                    mem_res = await mem_res
+                memory = mem_res.scalar_one_or_none() if hasattr(mem_res, "scalar_one_or_none") else None
+                if inspect.iscoroutine(memory):
+                    memory = await memory
+                gps_coords = getattr(memory, "gps_coordinates", None)
+                if isinstance(gps_coords, dict):
+                    lat = gps_coords.get("latitude")
+                    lon = gps_coords.get("longitude")
             except Exception as mem_err:
                 logger.debug(f"[MARKET ENRICH] FarmerMemory GPS check skipped: {mem_err}")
 
@@ -1217,9 +1239,27 @@ async def enrich_response_with_market_prices(
     # Priority 3: Saved farmer profile/memory (load profile for state/crop and district if no GPS)
     try:
         import inspect
+        from sqlalchemy.inspection import inspect as sa_inspect
         from sqlalchemy import select
         from src.core.models import FarmerProfile
-        if farmer and hasattr(farmer, "id"):
+
+        profile = None
+        try:
+            insp = sa_inspect(farmer)
+            if insp is not None and hasattr(insp, "unloaded") and "profile" in insp.unloaded:
+                profile = None
+            else:
+                try:
+                    profile = getattr(farmer, "profile", None)
+                except Exception:
+                    profile = None
+        except Exception:
+            try:
+                profile = getattr(farmer, "profile", None) if not hasattr(farmer, "__table__") else None
+            except Exception:
+                profile = None
+
+        if profile is None and farmer and hasattr(farmer, "id"):
             profile_result = await db.execute(
                 select(FarmerProfile).where(FarmerProfile.farmer_id == farmer.id)
             )
@@ -1228,16 +1268,16 @@ async def enrich_response_with_market_prices(
             profile = profile_result.scalar_one_or_none() if hasattr(profile_result, "scalar_one_or_none") else None
             if inspect.iscoroutine(profile):
                 profile = await profile
-            if profile:
-                if not district and isinstance(getattr(profile, "district", None), str) and profile.district:
-                    district = profile.district.strip()
-                    logger.info(f"[MARKET ENRICH] Priority 3: Saved farmer profile district -> '{district}'")
-                if isinstance(getattr(profile, "state", None), str) and profile.state:
-                    state = profile.state.strip()
-                if not matched_commodity and isinstance(getattr(profile, "current_crop", None), str) and profile.current_crop:
-                    matched_commodity = profile.current_crop.strip()
-                    if not raw_commodity_word:
-                        raw_commodity_word = matched_commodity
+        if profile:
+            if not district and isinstance(getattr(profile, "district", None), str) and profile.district:
+                district = profile.district.strip()
+                logger.info(f"[MARKET ENRICH] Priority 3: Saved farmer profile district -> '{district}'")
+            if isinstance(getattr(profile, "state", None), str) and profile.state:
+                state = profile.state.strip()
+            if not matched_commodity and isinstance(getattr(profile, "current_crop", None), str) and profile.current_crop:
+                matched_commodity = profile.current_crop.strip()
+                if not raw_commodity_word:
+                    raw_commodity_word = matched_commodity
     except Exception as exc:
         logger.warning(f"[MARKET ENRICH] Could not load farmer profile: {exc}")
 

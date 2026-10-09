@@ -385,3 +385,61 @@ async def test_explicit_nizamabad_paddy_lookup():
         assert call_args.kwargs.get("district") == "Nizamabad"
         assert "Nizamabad Market" in result
         assert "2,200" in result
+
+
+@pytest.mark.asyncio
+async def test_enrich_market_prices_prevents_greenlet_spawn_error_on_unloaded_relationships():
+    """
+    Regression Test:
+    Simulate a farmer where accessing farmer.memory or farmer.profile directly
+    would trigger a MissingGreenlet exception ('greenlet_spawn has not been called').
+    Proves that enrich_response_with_market_prices safely avoids triggering lazy loading IO
+    and queries the database asynchronously.
+    """
+    from sqlalchemy.exc import MissingGreenlet
+
+    farmer_id = uuid4()
+
+    class DangerousFarmer:
+        def __init__(self, fid):
+            self.id = fid
+            self.phone_number = "919848011234"
+            self.preferred_language = "te"
+
+        @property
+        def memory(self):
+            raise MissingGreenlet(
+                "greenlet_spawn has not been called; can't call await_only() here. Was IO attempted in an unexpected place?"
+            )
+
+        @property
+        def profile(self):
+            raise MissingGreenlet(
+                "greenlet_spawn has not been called; can't call await_only() here. Was IO attempted in an unexpected place?"
+            )
+
+    farmer = DangerousFarmer(farmer_id)
+
+    mock_db = AsyncMock()
+    cotton_price = _mock_price_model(
+        commodity="Cotton",
+        market_name="Warangal Market",
+        district="Warangal",
+        modal_price=7500.0,
+    )
+    mock_get_prices = AsyncMock(return_value=[cotton_price])
+
+    with patch("src.market.repository.MarketPriceRepository.seed_default_prices_if_empty", new=AsyncMock()), \
+         patch("src.market.agmarknet_client.AgmarknetClient.fetch_prices", new=AsyncMock(return_value=[])), \
+         patch("src.market.repository.MarketPriceRepository.get_prices_by_commodity", new=mock_get_prices):
+
+        # Must execute cleanly without raising MissingGreenlet
+        result = await enrich_response_with_market_prices(
+            db=mock_db,
+            query_text="Warangal lo cotton price entha?",
+            ai_response="పత్తి ధర వివరాలు:",
+            farmer=farmer,
+        )
+
+        assert "Warangal Market" in result
+        assert "7,500" in result

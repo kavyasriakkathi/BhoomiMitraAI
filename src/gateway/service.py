@@ -65,11 +65,11 @@ async def get_or_create_farmer(
     This is the implicit registration step — the first WhatsApp message
     from a farmer automatically creates their account.
     Handles concurrent inserts gracefully via IntegrityError rollback.
-    Eagerly loads FarmerProfile to prevent async lazy loading IO errors.
+    Eagerly loads FarmerProfile and FarmerMemory to prevent async lazy loading IO errors.
     """
     result = await db.execute(
         select(Farmer)
-        .options(selectinload(Farmer.profile))
+        .options(selectinload(Farmer.profile), selectinload(Farmer.memory))
         .where(Farmer.phone_number == phone_number)
     )
     farmer = result.scalar_one_or_none()
@@ -92,10 +92,10 @@ async def get_or_create_farmer(
         db.add(profile)
         await db.commit()
 
-        # Eagerly load FarmerProfile for the newly registered farmer
+        # Eagerly load FarmerProfile and FarmerMemory for the newly registered farmer
         res = await db.execute(
             select(Farmer)
-            .options(selectinload(Farmer.profile))
+            .options(selectinload(Farmer.profile), selectinload(Farmer.memory))
             .where(Farmer.id == farmer.id)
         )
         new_farmer = res.scalar_one()
@@ -104,10 +104,10 @@ async def get_or_create_farmer(
         return new_farmer
     except IntegrityError:
         await db.rollback()
-        # Concurrent insert occurred, re-query the newly created farmer with eager profile loading
+        # Concurrent insert occurred, re-query the newly created farmer with eager profile and memory loading
         res = await db.execute(
             select(Farmer)
-            .options(selectinload(Farmer.profile))
+            .options(selectinload(Farmer.profile), selectinload(Farmer.memory))
             .where(Farmer.phone_number == phone_number)
         )
         existing_farmer = res.scalar_one_or_none()
