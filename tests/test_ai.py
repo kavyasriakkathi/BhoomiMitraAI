@@ -501,7 +501,7 @@ async def test_hard_gate_blocks_ungrounded_telugu_dosage_query(monkeypatch):
     from unittest.mock import MagicMock, patch
     from src.ai.service import AIService
     from src.ai.schemas import AIGenerateRequest
-    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.ai.prompts import UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES
 
     mock_session = AsyncMock()
     mock_repo = MagicMock()
@@ -526,7 +526,7 @@ async def test_hard_gate_blocks_ungrounded_telugu_dosage_query(monkeypatch):
         # Gemini API must NOT be called
         mock_gemini.assert_not_called()
         assert response.provider_used == "hard_grounding_gate"
-        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
+        assert response.response_text == UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"]
         assert "30" not in response.response_text
         assert "35" not in response.response_text
         assert "kg" not in response.response_text
@@ -538,7 +538,7 @@ async def test_hard_gate_blocks_ungrounded_english_dosage_query(monkeypatch):
     from unittest.mock import MagicMock, patch
     from src.ai.service import AIService
     from src.ai.schemas import AIGenerateRequest
-    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.ai.prompts import UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES
 
     mock_session = AsyncMock()
     mock_repo = MagicMock()
@@ -562,8 +562,8 @@ async def test_hard_gate_blocks_ungrounded_english_dosage_query(monkeypatch):
 
         mock_gemini.assert_not_called()
         assert response.provider_used == "hard_grounding_gate"
-        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["en"]
-        assert "Agriculture Extension Officer" in response.response_text
+        assert response.response_text == UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["en"]
+        assert "AEO" in response.response_text or "KVK" in response.response_text
 
 
 @pytest.mark.asyncio
@@ -572,7 +572,7 @@ async def test_hard_gate_blocks_ungrounded_tanglish_dosage_query(monkeypatch):
     from unittest.mock import MagicMock, patch
     from src.ai.service import AIService
     from src.ai.schemas import AIGenerateRequest
-    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.ai.prompts import UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES
 
     mock_session = AsyncMock()
     mock_repo = MagicMock()
@@ -596,7 +596,7 @@ async def test_hard_gate_blocks_ungrounded_tanglish_dosage_query(monkeypatch):
 
         mock_gemini.assert_not_called()
         assert response.provider_used == "hard_grounding_gate"
-        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
+        assert response.response_text == UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"]
 
 
 @pytest.mark.asyncio
@@ -693,7 +693,7 @@ async def test_production_query_blocks_gemini_when_rag_returns_unrelated_paddy_b
     from unittest.mock import MagicMock, patch
     from src.ai.service import AIService
     from src.ai.schemas import AIGenerateRequest
-    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.ai.prompts import UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES
     from src.rag.schemas import RAGSearchResult
 
     mock_session = AsyncMock()
@@ -739,7 +739,7 @@ async def test_production_query_blocks_gemini_when_rag_returns_unrelated_paddy_b
         # Gemini must NOT be called
         mock_gemini.assert_not_called()
         assert response.provider_used == "hard_grounding_gate"
-        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
+        assert response.response_text == UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"]
         assert "30" not in response.response_text
         assert "35" not in response.response_text
         assert "కిలోల" not in response.response_text
@@ -751,7 +751,7 @@ async def test_production_query_blocks_gemini_when_rag_returns_unrelated_cotton_
     from unittest.mock import MagicMock, patch
     from src.ai.service import AIService
     from src.ai.schemas import AIGenerateRequest
-    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.ai.prompts import UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES
     from src.rag.schemas import RAGSearchResult
 
     mock_session = AsyncMock()
@@ -790,7 +790,7 @@ async def test_production_query_blocks_gemini_when_rag_returns_unrelated_cotton_
 
         mock_gemini.assert_not_called()
         assert response.provider_used == "hard_grounding_gate"
-        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
+        assert response.response_text == UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"]
 
 
 @pytest.mark.asyncio
@@ -898,7 +898,7 @@ async def test_tanglish_urea_query_blocked_with_unrelated_rag():
     from unittest.mock import MagicMock, patch
     from src.ai.service import AIService
     from src.ai.schemas import AIGenerateRequest
-    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.ai.prompts import UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES
     from src.rag.schemas import RAGSearchResult
 
     mock_session = AsyncMock()
@@ -937,7 +937,7 @@ async def test_tanglish_urea_query_blocked_with_unrelated_rag():
 
         mock_gemini.assert_not_called()
         assert response.provider_used == "hard_grounding_gate"
-        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
+        assert response.response_text == UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"]
 
 
 @pytest.mark.asyncio
@@ -946,7 +946,7 @@ async def test_english_urea_query_blocked_with_unrelated_rag():
     from unittest.mock import MagicMock, patch
     from src.ai.service import AIService
     from src.ai.schemas import AIGenerateRequest
-    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.ai.prompts import UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES
     from src.rag.schemas import RAGSearchResult
 
     mock_session = AsyncMock()
@@ -985,7 +985,7 @@ async def test_english_urea_query_blocked_with_unrelated_rag():
 
         mock_gemini.assert_not_called()
         assert response.provider_used == "hard_grounding_gate"
-        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["en"]
+        assert response.response_text == UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["en"]
 
 
 @pytest.mark.asyncio
@@ -997,7 +997,7 @@ async def test_defense_in_depth_sanitizer_intercepts_hallucinated_numbers():
     from unittest.mock import MagicMock, patch
     from src.ai.service import AIService
     from src.ai.schemas import AIGenerateRequest
-    from src.ai.prompts import UNVERIFIED_DOSAGE_FALLBACK_RESPONSES
+    from src.ai.prompts import UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES
     from src.rag.schemas import RAGSearchResult
 
     mock_session = AsyncMock()
@@ -1038,7 +1038,7 @@ async def test_defense_in_depth_sanitizer_intercepts_hallucinated_numbers():
         response = await service.generate_ai_response(request)
 
         # Output sanitizer intercepts hallucinated '35'
-        assert response.response_text == UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
+        assert response.response_text == UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"]
 
 
 @pytest.mark.asyncio

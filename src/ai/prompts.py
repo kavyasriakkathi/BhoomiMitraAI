@@ -81,6 +81,21 @@ BHOOMIMITRA_SYSTEM_PROMPT = """You are BhoomiMitra, an expert Indian agricultura
     Do NOT output lists or bullet points of shops.
     The system automatically queries the verified database and Google Places to append authentic shop records.
 11. If the farmer's question is vague, ask a clarifying follow-up question instead of guessing.
+12. Fertilizer History, Source Distinction & Field-Specific Calibration:
+    When a farmer asks for fertilizer advice at a specific crop stage (e.g., 2 acres paddy at 30 days after transplanting):
+    - Recognize the crop stage (30 days / tillering) and land area (2 acres).
+    - Distinguish published regional extension guidance (such as the general regional tillering guideline of 30–35 kg Urea/acre, or 60–70 kg for 2 acres from Vikaspedia Telugu) from a field-specific recommendation. Clearly treat published figures as an attributed general extension reference benchmark, not a confirmed field-specific mandate.
+    - Ask which rice variety is cultivated (variety duration group: short, medium, or long duration), as nutrient requirements and top-dressing timings vary by duration.
+    - Check prior fertilizer history: Inquire which fertilizers were already applied (basal DAP vs SSP, and whether any urea or potash was already applied since transplanting) before confirming exact field execution.
+    - Ask for soil test details (Soil Health Card) when available.
+    - If prior fertilizer history or variety details are missing or insufficient, explain why these details matter, ask for the missing details, and avoid confirming or prescribing an unverified additional dose that could duplicate an earlier application.
+    - Previous Urea Applications & Avoiding Rigid Waiting Calendars:
+      * If urea was already applied, do NOT prescribe a fixed waiting schedule (e.g. do NOT automatically tell the farmer to wait until panicle initiation at 40–45 days after transplanting) without verifying the applicable recommendation, amount previously applied, date, and variety duration.
+      * Inquire for any missing details (quantity, date, variety duration) and avoid confirming an additional dose when information is insufficient.
+      * Explain that excess nitrogen increases potential risks of crop lodging and susceptibility to pests (stem borer) and diseases (blast).
+    - Keep one split application strictly separate from seasonal nutrient requirements: A single tillering top-dressing benchmark (e.g., 30–35 kg/acre from Vikaspedia) must never be confused with seasonal totals. Do not present 88–106 kg urea/acre as a confirmed seasonal prescription; it is only a theoretical urea equivalent assuming all seasonal nitrogen (40.5–48.6 kg N/acre from 100–120 kg N/ha, with 1 ha ≈ 2.471 acres) is supplied through straight urea (46% N). When 50 kg DAP/acre is applied (supplying 9 kg N), the remaining theoretical urea equivalent across splits is approximately 68–86 kg/acre (137–172 kg for 2 acres). Describe these values only as theoretical calculations under stated assumptions, not confirmed prescriptions. Account for mineral nitrogen from complex fertilizers; for organic manures, do not simply subtract total nitrogen as though all were immediately available, but apply only source-supported estimates of available nutrients.
+    - Calculate the 2-acre total only after establishing the applicable per-acre dose.
+    - Respond naturally and respectfully in the farmer's language (e.g. Telugu).
 
 ## Context Awareness & Verified Ground Truth
 - You will be given the farmer's profile (crop, district, language) when available.
@@ -383,28 +398,58 @@ def get_crop_clarification_response(language: str = "te") -> str:
 # -----------------------------------------------------------------------------
 
 UNVERIFIED_DOSAGE_FALLBACK_RESPONSES = {
-    "te": "క్షమించండి, ఖచ్చితమైన ఎరువుల/పురుగుమందుల మోతాదు (dosage) కోసం ప్రస్తుతం ధృవీకరించబడిన డేటా లేదు. మీ పంట మరియు నేల రకానికి సరైన మోతాదు కొరకు దయచేసి మీ స్థానిక వ్యవసాయ విస్తరణ అధికారి (AEO) లేదా కృషి విజ్ఞాన కేంద్రం (KVK) ను సంప్రదించండి. 🙏",
-    "hi": "क्षमा करें, सटीक खाद/कीटनाशक की मात्रा (डोज़) के लिए वर्तमान में सत्यापित डेटा उपलब्ध नहीं है। अपनी फसल और मिट्टी के अनुसार सही मात्रा जानने के लिए कृपया अपने स्थानीय कृषि विस्तार अधिकारी (AEO) या कृषि विज्ञान केंद्र (KVK) से संपर्क करें। 🙏",
-    "en": "I'm sorry, verified data for the exact fertilizer/chemical dosage is currently unavailable. For the safe and correct dosage for your crop and soil, please consult your local Agriculture Extension Officer (AEO) or Krishi Vigyan Kendra (KVK). 🙏",
-    "ta": "மன்னிக்கவும், உரங்கள்/பூச்சிக்கொல்லிகளின் துல்லியமான அளவு (அளவுமுறை) குறித்த சரிபார்க்கப்பட்ட தரவு தற்போது கிடைக்கவில்லை. உங்கள் பயிர் மற்றும் மண்ணிற்கு ஏற்ற சரியான அளவை அறிய உங்கள் உள்ளூர் வேளாண்மை விரிவாக்க அலுவலர் (AEO) அல்லது வேளாண்மை அறிவியல் மையத்தை (KVK) அணுகவும். 🙏",
-    "kn": "ಕ್ಷಮಿಸಿ, ನಿಖರವಾದ ರಸಗೊಬ್ಬರ/ಕೀಟನಾಶಕ ಪ್ರಮಾಣದ (ಡೋಸೇಜ್) ಬಗ್ಗೆ ಪರಿಶೀಲಿಸಿದ ಮಾಹಿತಿ ಪ್ರಸ್ತುತ ಲಭ್ಯವಿಲ್ಲ. ನಿಮ್ಮ ಬೆಳೆ ಮತ್ತು ಮಣ್ಣಿಗೆ ಸೂಕ್ತವಾದ ಪ್ರಮಾಣಕ್ಕಾಗಿ ದಯವಿಟ್ಟು ನಿಮ್ಮ ಸ್ಥಳೀಯ ಕೃಷಿ ವಿಸ್ತರಣಾಧಿಕಾರಿ (AEO) ಅಥವಾ ಕೃಷಿ ವಿಜ್ಞಾನ ಕೇಂದ್ರವನ್ನು (KVK) ಸಂಪರ್ಕಿಸಿ. 🙏",
-    "ml": "ക്ഷമിക്കണം, കൃത്യമായ വളം/കീടനാശിനി അളവ് (ഡോസേജ്) സംബന്ധിച്ച് നിലവിൽ പരിശോധിച്ച വിവരങ്ങൾ ലഭ്യമല്ല. നിങ്ങളുടെ വിളയ്ക്കും മണ്ണിനും അനുയോജ്യമായ അളവറിയാൻ ദയവായി നിങ്ങളുടെ പ്രാദേശिक കൃഷി ഓഫീസർ (AEO) അല്ലെങ്കിൽ കൃഷി വിജ്ഞാൻ കേന്ദ്രവുമായി (KVK) ബന്ധപ്പെടുക. 🙏",
-    "mr": "क्षमस्व, खत/कीटकनाशकाच्या अचूक प्रमाण (डोस) बद्दल सध्या पडताळणी केलेली माहिती उपलब्ध नाही. आपल्या पिकासाठी योग्य प्रमाणाची माहिती मिळवण्यासाठी कृपया आपल्या स्थानिक कृषी विस्तार अधिकारी (AEO) किंवा कृषी विज्ञान केंद्राशी (KVK) संपर्क साधा. 🙏",
-    "bn": "দুঃখিত, সার/কীটনাশকের সঠিক পরিমাণের (ডোজ) জন্য বর্তমানে যাচাইকৃত তথ্য উপলব্ধ নেই। আপনার ফসলের জন্য সঠিক মাত্রা জানতে অনুগ্রহ করে আপনার স্থানীয় কৃষি সম্প্রসারণ কর্মকর্তা (AEO) বা কৃষি বিজ্ঞান কেন্দ্রের (KVK) সাথে যোগাযোগ করুন। 🙏",
-    "gu": "માફ કરશો, ખાતર/જંતુનાશકના ચોક્કસ પ્રમાણ (ડોઝ) અંગે હાલમાં ચકાસાયેલ માહિતી ઉપલબ્ધ નથી. તમારા પાક માટે યોગ્ય માત્રા જાણવા કૃપા કરીને તમારા સ્થાનિક કૃષિ વિસ્તરણ અધિકારી (AEO) અથવા કૃષિ વિજ્ઞાન કેન્દ્ર (KVK) નો સંપર્ક કરો. 🙏",
-    "or": "କ୍ଷମା କରିବେ, ସାର/କୀଟନାଶକର ସଠିକ୍ ପରିମାଣ (ଡୋଜ୍) ପାଇଁ ବର୍ତ୍ତମାନ ଯାଞ୍ଚ ହୋଇଥିବା ତଥ୍ୟ ଉପଲବ୍ଧ ନାହିଁ। ଆପଣଙ୍କ ଫସଲ ପାଇଁ ସଠିକ୍ ପରିମାଣ ଜାଣିବାକୁ ଦୟାକରି ଆପଣଙ୍କ ସ୍ଥାନୀୟ କୃଷି ସମ୍ପ୍ରସାରଣ ଅଧିକାରୀ (AEO) କିମ୍ବା କୃଷି ବିଜ୍ଞାନ କେନ୍ଦ୍ର (KVK) ସହିତ ଯୋଗାଯୋଗ କରନ୍ତୁ। 🙏",
-    "pa": "ਮਾਫ ਕਰਨਾ, ਖਾਦ/ਕੀਟਨਾਸ਼ਕ ਦੀ ਸਹੀ ਮਾਤਰਾ (ਡੋਜ਼) ਬਾਰੇ ਇਸ ਵੇਲੇ ਤਸਦੀਕਸ਼ੁਦਾ ਜਾਣਕਾਰੀ ਉਪਲਬਧ ਨਹੀਂ ਹੈ। ਆਪਣੀ ਫਸਲ ਲਈ ਸਹੀ ਮਾਤਰਾ ਜਾਣਨ ਲਈ ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੇ ਸਥਾਨਕ ਖੇਤੀਬਾੜੀ ਵਿਸਥਾਰ ਅਧਿਕਾਰੀ (AEO) ਜਾਂ ਕ੍ਰਿਸ਼ੀ ਵਿਗਿਆਨ ਕੇਂਦਰ (KVK) ਨਾਲ ਸੰਪਰਕ ਕਰੋ। 🙏",
-    "as": "ক্ষমা কৰিব, সাৰ/কীটনাশকৰ সঠিক পৰিমাণৰ (ড'জ) বিষয়ে বৰ্তমান সত্যাপন কৰা তথ্য উপলব্ধ নাই। আপোনাৰ শস্যৰ বাবে সঠিক পৰিমাণ জানিবলৈ অনুগ্ৰহ কৰি আপোনাৰ স্থানীয় কৃষি সম্প্ৰসাৰণ বিষয়া (AEO) বা কৃষি বিজ্ঞান কেন্দ্ৰৰ (KVK) সৈতে যোগাযোগ কৰক। 🙏",
-    "ur": "معذرت، کھاد یا کیڑے مار دوا کی درست مقدار (خوراک) کے بارے میں فی الحال تصدیق شدہ معلومات دستیاب نہیں ہیں۔ اپنی فصل کے لیے صحیح مقدار جاننے کے لیے براہ کرم اپنے مقامی محکمہ زراعت کے افسر (AEO) یا کرشی وگیان کیندر (KVK) سے رابطہ کریں۔ 🙏",
+    "te": "క్షమించండి, ఖచ్చితమైన పురుగుమందుల/రసాయనాల మోతాదు (dosage) కోసం ప్రస్తుతం ధృవీకరించబడిన డేటా లేదు. మీ పంట మరియు తెగులుకు సరైన రసాయన మోతాదు కొరకు దయచేసి మీ స్థానిక వ్యవసాయ విస్తరణ అధికారి (AEO) లేదా కృషి విజ్ఞాన కేంద్రం (KVK) ను సంప్రదించండి. 🙏",
+    "hi": "क्षमा करें, सटीक कीटनाशक/रासायनिक दवा की मात्रा (डोज़) के लिए वर्तमान में सत्यापित डेटा उपलब्ध नहीं है। अपनी फसल और कीट/रोग के अनुसार सुरक्षित दवा व सही मात्रा के लिए कृपया अपने स्थानीय कृषि विस्तार अधिकारी (AEO) या कृषि विज्ञान केंद्र (KVK) से संपर्क करें। 🙏",
+    "en": "I'm sorry, verified data for the exact chemical/pesticide dosage is currently unavailable. For safe chemical usage and correct dosage for your crop and pest, please consult your local Agriculture Extension Officer (AEO) or Krishi Vigyan Kendra (KVK). 🙏",
+    "ta": "மன்னிக்கவும், பூச்சிக்கொல்லிகள்/இரசாயனங்களின் துல்லியமான அளவு (அளவுமுறை) குறித்த சரிபார்க்கப்பட்ட தரவு தற்போது கிடைக்கவில்லை. உங்கள் பயிர் மற்றும் பூச்சிக்கு ஏற்ற பாதுகாப்பான அளவிற்கு உங்கள் உள்ளூர் வேளாண்மை விரிவாக்க அலுவலர் (AEO) அல்லது வேளாண்மை அறிவியல் மையத்தை (KVK) அணுகவும். 🙏",
+    "kn": "ಕ್ಷಮಿಸಿ, ನಿಖರವಾದ ಕೀಟನಾಶಕ/ರಾಸಾಯನಿಕ ಪ್ರಮಾಣದ (ಡೋಸೇಜ್) ಬಗ್ಗೆ ಪರಿಶೀಲಿಸಿದ ಮಾಹಿತಿ ಪ್ರಸ್ತುತ ಲಭ್ಯವಿಲ್ಲ. ನಿಮ್ಮ ಬೆಳೆ ಮತ್ತು ಕೀಟಕ್ಕೆ ಸೂಕ್ತವಾದ ಸುರಕ್ಷಿತ ಪ್ರಮಾಣಕ್ಕಾಗಿ ದಯವಿಟ್ಟು ನಿಮ್ಮ ಸ್ಥಳೀಯ ಕೃಷಿ ವಿಸ್ತರಣಾಧಿಕಾರಿ (AEO) ಅಥವಾ ಕೃಷಿ ವಿಜ್ಞಾನ ಕೇಂದ್ರವನ್ನು (KVK) ಸಂಪರ್ಕಿಸಿ. 🙏",
+    "ml": "ക്ഷമിക്കണം, കൃത്യമായ കീടനാശിനി/രാസവസ്തു അളവ് (ഡോസേജ്) സംബന്ധിച്ച് നിലവിൽ പരിശോധിച്ച വിവരങ്ങൾ ലഭ്യമല്ല. നിങ്ങളുടെ വിളയ്ക്കും കീടത്തിനും അനുയോജ്യമായ സുരക്ഷിതമായ അളവറിയാൻ ദയവായി നിങ്ങളുടെ പ്രാദേശിക കൃഷി ഓഫീസർ (AEO) അല്ലെങ്കിൽ കൃഷി വിജ്ഞാൻ കേന്ദ്രവുമായി (KVK) ബന്ധപ്പെടുക. 🙏",
+    "mr": "क्षमस्व, कीटकनाशक/रासायनिक औषधाच्या अचूक प्रमाण (डोस) बद्दल सध्या पडताळणी केलेली माहिती उपलब्ध नाही. आपल्या पिकासाठी योग्य व सुरक्षित प्रमाणाची माहिती मिळवण्यासाठी कृपया आपल्या स्थानिक कृषी विस्तार अधिकारी (AEO) किंवा कृषी विज्ञान केंद्राशी (KVK) संपर्क साधा. 🙏",
+    "bn": "দুঃখিত, কীটনাশক/রাসায়নিকের সঠিক পরিমাণের (ডোজ) জন্য বর্তমানে যাচাইকৃত তথ্য উপলব্ধ নেই। আপনার ফসলের জন্য নিরাপদ মাত্রা জানতে অনুগ্রহ করে আপনার স্থানীয় কৃষি সম্প্রসারণ কর্মকর্তা (AEO) বা কৃষি বিজ্ঞান কেন্দ্রের (KVK) সাথে যোগাযোগ করুন। 🙏",
+    "gu": "માફ કરશો, જંતુનાશક/રાસાયણિક દવાના ચોક્કસ પ્રમાણ (ડોઝ) અંગે હાલમાં ચકાસાયેલ માહિતી ઉપલબ્ધ નથી. તમારા પાક માટે સલામત અને યોગ્ય માત્રા જાણવા કૃપા કરીને તમારા સ્થાનિક કૃષિ વિસ્તરણ અધિકારી (AEO) અથવા કૃષિ વિજ્ઞાન કેન્દ્ર (KVK) નો સંપર્ક કરો. 🙏",
+    "or": "କ୍ଷମା କରିବେ, କୀଟନାଶକ/ରାସାୟନିକ ଔଷଧର ସଠିକ୍ ପରିମାଣ (ଡୋଜ୍) ପାଇଁ ବର୍ତ୍ତମାନ ଯାଞ୍ଚ ହୋଇଥିବା ତଥ୍ୟ ଉପଲବ୍ଧ ନାହିଁ। ଆପଣଙ୍କ ଫସଲ ପାଇଁ ସୁରକ୍ଷିତ ପରିମାଣ ଜାଣିବାକୁ ଦୟାକରି ଆପଣଙ୍କ ସ୍ଥାନୀୟ କୃଷି ସମ୍ପ୍ରସାରଣ ଅଧିକାରୀ (AEO) କିମ୍ବା କୃଷି ବିଜ୍ଞାନ କେନ୍ଦ୍ର (KVK) ସହିତ ଯୋଗାଯୋଗ କରନ୍ତୁ। 🙏",
+    "pa": "ਮਾਫ ਕਰਨਾ, ਕੀਟਨਾਸ਼ਕ/ਰਸਾਇਣਕ ਦਵਾਈ ਦੀ ਸਹੀ ਮਾਤਰਾ (ਡੋਜ਼) ਬਾਰੇ ਇਸ ਵੇਲੇ ਤਸਦੀਕਸ਼ੁਦਾ ਜਾਣਕਾਰੀ ਉਪਲਬਧ ਨਹੀਂ ਹੈ। ਆਪਣੀ ਫਸਲ ਲਈ ਸੁਰੱਖਿਅਤ ਮਾਤਰਾ ਜਾਣਨ ਲਈ ਕਿਰਪਾ ਕਰਕੇ ਆਪਣੇ ਸਥਾਨਕ ਖੇਤੀਬਾੜੀ ਵਿਸਥਾਰ ਅਧਿਕਾਰੀ (AEO) ਜਾਂ ਕ੍ਰਿਸ਼ੀ ਵਿਗਿਆਨ ਕੇਂਦਰ (KVK) ਨਾਲ ਸੰਪਰਕ ਕਰੋ। 🙏",
+    "as": "ক্ষমা কৰিব, কীটনাশক/ৰাসায়নিক দৰবৰ সঠিক পৰিমাণৰ (ড'জ) বিষয়ে বৰ্তমান সত্যাপন কৰা তথ্য উপলব্ধ নাই। আপোনাৰ শস্যৰ বাবে নিৰাপদ মাত্ৰা জানিবলৈ অনুগ্ৰহ কৰি আপোনাৰ স্থানীয় কৃষি সম্প্ৰসাৰণ বিষয়া (AEO) বা কৃষি বিজ্ঞান কেন্দ্ৰৰ (KVK) সৈতে যোগাযোগ কৰক। 🙏",
+    "ur": "معذرت، کیڑے مار دوا یا کیمیائی دوا کی درست مقدار (خوراک) کے بارے میں فی الحال تصدیق شدہ معلومات دستیاب نہیں ہیں۔ اپنی فصل اور کیڑوں کے مطابق محفوظ اور صحیح مقدار جاننے کے لیے براہ کرم اپنے مقامی محکمہ زراعت کے افسر (AEO) یا کرشی وگیان کیندر (KVK) سے رابطہ کریں۔ 🙏",
 }
 
 UNVERIFIED_DOSAGE_FALLBACK_RESPONSE_TE = UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"]
 UNVERIFIED_DOSAGE_FALLBACK_RESPONSE_EN = UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["en"]
 
+# -----------------------------------------------------------------------------
+# 10b. Unverified Fertilizer Guidance & Clarification Responses (13 Languages)
+# -----------------------------------------------------------------------------
 
-def get_unverified_dosage_fallback_response(language: str = "te") -> str:
+UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES = {
+    "te": "ఎరువుల ఖచ్చితమైన మోతాదు మీ పంట రకం, వంగడం, నేల స్వభావం మరియు ఇప్పటికే వేసిన ఎరువులపై ఆధారపడి ఉంటుంది. సరైన సిఫార్సు కొరకు: 1. మీ పంట రకం/వంగడం ఏది? 2. నాట్లు/విత్తే సమయంలో ఏవైనా ఎరువులు (DAP/SSP/కాంప్లెక్స్) వేశారా? 3. నేల పరీక్ష నివేదిక అందుబాటులో ఉందా? నిర్ధారించకుండా అదనపు ఎరువులు వేయకండి. ఖచ్చితమైన మోతాదు కోసం స్థానిక AEO లేదా KVK అధికారులను సంప్రదించవచ్చు. 🙏",
+    "hi": "खाद की सही मात्रा आपकी फसल की किस्म, मिट्टी के प्रकार और पहले डाली गई खाद पर निर्भर करती है। उचित सलाह के लिए: 1. आपकी फसल की कौन सी किस्म है? 2. बुवाई/रोपाई के समय कौन सी खाद (जैसे DAP/SSP) डाली गई थी? 3. क्या मृदा परीक्षण रिपोर्ट उपलब्ध है? बिना पुष्टि के अतिरिक्त खाद न डालें। सटीक मात्रा के लिए स्थानीय कृषि विस्तार अधिकारी (AEO) या कृषि विज्ञान केंद्र (KVK) से संपर्क करें। 🙏",
+    "en": "The exact fertilizer quantity depends on your crop variety, soil conditions, and previous fertilizer applications. To help determine the suitable recommendation: 1. Which crop and variety are you growing? 2. What basal fertilizers (such as DAP/SSP/complex) were applied at sowing/transplanting? 3. Do you have a soil test report? Please do not apply excess fertilizers without confirming recommendations. You may also consult your local AEO or KVK. 🙏",
+    "ta": "உரத்தின் சரியான அளவு உங்கள் பயிர் ரகம், மண் வகை மற்றும் ஏற்கனவே இடப்பட்ட உரங்களைப் பொறுத்தது. சரியான பரிந்துரைக்கு: 1. நீங்கள் பயிரிடும் பயிர் ரகம் எது? 2. நடவு/விதைப்பின் போது ஏதேனும் உரங்கள் (DAP/SSP) இடப்பட்டதா? 3. மண் பரிசோதனை அறிக்கை உள்ளதா? உறுதிப்படுத்தாமல் கூடுதல் உரங்களை இட வேண்டாம். துல்லியமான அளவிற்கு உள்ளூர் AEO அல்லது KVK அணுகவும். 🙏",
+    "kn": "ರಸಗೊಬ್ಬರದ ನಿಖರ ಪ್ರಮಾಣವು ನಿಮ್ಮ ಬೆಳೆ ತಳಿ, ಮಣ್ಣಿನ ಸ್ಥಿತಿ ಮತ್ತು ಈಗಾಗಲೇ ಹಾಕಲಾದ ಗೊಬ್ಬರವನ್ನು ಅವಲಂಬಿಸಿರುತ್ತದೆ. ಸೂಕ್ತ ಶಿಫಾರಸಿಗಾಗಿ: 1. ಬೆಳೆಯುತ್ತಿರುವ ತಳಿ ಯಾವುದು? 2. ಬಿತ್ತನೆ/ನಾಟಿ ಸಮಯದಲ್ಲಿ ಯಾವುದೇ ಗೊಬ್ಬರ (DAP/SSP) ಹಾಕಲಾಗಿದೆಯೇ? 3. ಮಣ್ಣು ಪರೀಕ್ಷಾ ವರದಿ ಲಭ್ಯವಿದೆಯೇ? ದೃಢೀಕರಣವಿಲ್ಲದೆ ಹೆಚ್ಚುವರಿ ಗೊಬ್ಬರ ಹಾಕಬೇಡಿ. ಸ್ಥಳೀಯ AEO ಅಥವಾ KVK ಸಂಪರ್ಕಿಸಿ. 🙏",
+    "ml": "വളത്തിന്റെ കൃത്യമായ അളവ് നിങ്ങളുടെ വിള ഇനം, മണ്ണിന്റെ അവസ്ഥ, ഇതിനകം നൽകിയ വളങ്ങൾ എന്നിവയെ ആശ്രയിച്ചിരിക്കുന്നു. ശരിയായ ശുപാർശയ്ക്കായി: 1. വിളയുടെ ഇനം ഏതാണ്? 2. നടീൽ സമയത്ത് എന്തെങ്കിലും അടിവളം (DAP/SSP) നൽകിയിട്ടുണ്ടോ? 3. മണ്ണ് പരിശോധനാ റിപ്പോർട്ട് ലഭ്യമാണോ? സ്ഥിരീകരിക്കാതെ അധിക വളം നൽകരുത്. പ്രാദേശിക AEO അല്ലെങ്കിൽ KVK ബന്ധപ്പെടുക. 🙏",
+    "mr": "खताचे योग्य प्रमाण आपल्या पिकाची जात, जमिनीचा प्रकार आणि आधी दिलेल्या खतांवर अवलंबून असते. योग्य शिफारसीसाठी: 1. पिकाची जात कोणती आहे? 2. पेरणी/लागवडीच्या वेळी कोणते खत (DAP/SSP) दिले होते का? 3. माती परीक्षण अहवाल उपलब्ध आहे का? खात्री केल्याशिवाय अतिरिक्त खत टाकू नका. स्थानिक AEO किंवा KVK शी संपर्क साधा. 🙏",
+    "bn": "সারের সঠিক মাত্রা আপনার ফসলের জাত, মাটির ধরন এবং পূর্বে প্রয়োগ করা সারের ওপর নির্ভর করে। সঠিক সুপারিশের জন্য: 1. ফসলের জাত কোনটি? 2. রোপণের সময় কোনো সার (যেমন DAP/SSP) প্রয়োগ করা হয়েছিল কি? 3. মাটি পরীক্ষার রিপোর্ট আছে কি? নিশ্চিত না হয়ে অতিরিক্ত সার প্রয়োগ করবেন না। স্থানীয় AEO বা KVK-এর সাথে যোগাযোগ করুন। 🙏",
+    "gu": "ખાતરનું ચોક્કસ પ્રમાણ તમારા પાકની જાત, જમીનનો પ્રકાર અને અગાઉ આપેલા ખાતર પર આધાર રાખે છે. યોગ્ય ભલામણ માટે: 1. પાકની જાત કઈ છે? 2. વાવણી/રોપણી વખતે કોઈ ખાતર (જેમ કે DAP/SSP) આપેલું હતું? 3. જમીન ચકાસણી રિપોર્ટ ઉપલબ્ધ છે? ખાતરી કર્યા વિના વધુ પડતું ખાતર ન નાખો. સ્થાનિક AEO અથવા KVK નો સંપર્ક કરો. 🙏",
+    "or": "ସାରର ସଠିକ୍ ପରିମାଣ ଆପଣଙ୍କ ଫସଲ କିସମ, ମାଟିର ପ୍ରକାର ଏବଂ ପୂର୍ବରୁ ପ୍ରୟୋଗ ହୋଇଥିବା ସାର ଉପରେ ନିର୍ଭର କରେ। ସଠିକ୍ ପରାମର୍ଶ ପାଇଁ: 1. ଫସଲର କିସମ କ’ଣ? 2. ରୁଆ/ବୁଣା ସମୟରେ କୌଣସି ସାର (DAP/SSP) ଦିଆଯାଇଥିଲା କି? 3. ମୃତ୍ତିକା ପରୀକ୍ଷା ରିପୋର୍ଟ ଅଛି କି? ନିଶ୍ଚିତ ନକରି ଅଧିକ ସାର ପ୍ରୟୋଗ କରନ୍ତୁ ନାହିଁ। ସ୍ଥାନୀୟ AEO ବା KVK ସହିତ ଯୋଗାଯୋଗ କରନ୍ତୁ। 🙏",
+    "pa": "ਖਾਦ ਦੀ ਸਹੀ ਮਾਤਰਾ ਤੁਹਾਡੀ ਫ਼ਸਲ ਦੀ ਕਿਸਮ, ਮਿੱਟੀ ਦੀ ਕਿਸਮ ਅਤੇ ਪਹਿਲਾਂ ਪਾਈ ਗਈ ਖਾਦ 'ਤੇ ਨਿਰਭਰ ਕਰਦੀ ਹੈ। ਸਹੀ ਸਿਫ਼ਾਰਸ਼ ਲਈ: 1. ਫ਼ਸਲ ਦੀ ਕਿਸਮ ਕਿਹੜੀ ਹੈ? 2. ਬਿਜਾਈ/ਪਨੀਰੀ ਲਗਾਉਣ ਸਮੇਂ ਕੋਈ ਖਾਦ (ਜਿਵੇਂ DAP/SSP) ਪਾਈ ਗਈ ਸੀ? 3. ਕੀ ਮਿੱਟੀ ਪਰਖ ਰਿਪੋਰਟ ਉਪਲਬਧ ਹੈ? ਪੁਸ਼ਟੀ ਕੀਤੇ ਬਿਨਾਂ ਵਾਧੂ ਖਾਦ ਨਾ ਪਾਓ। ਸਥਾਨਕ AEO ਜਾਂ KVK ਨਾਲ ਸੰਪਰਕ ਕਰੋ। 🙏",
+    "as": "সাৰৰ সঠিক পৰিমাণ আপোনাৰ শস্যৰ জাত, মাটিৰ অৱস্থা আৰু পূৰ্বে দিয়া সাৰৰ ওপৰত নিৰ্ভৰ কৰে। সঠিক পৰামৰ্শৰ বাবে: 1. শস্যৰ জাত কি? 2. ৰোপণৰ সময়ত কোনো সাৰ (যেনে DAP/SSP) দিয়া হৈছিল নেকি? 3. মাটি পৰীক্ষাৰ প্ৰতিবেদন আছে নেকি? নিশ্চিত নকৰাকৈ অতিৰিক্ত সাৰ নিদিব। স্থানীয় AEO বা KVK ৰ লগত যোগাযোগ কৰক। 🙏",
+    "ur": "کھاد کی صحیح مقدار آپ کی فصل کی قسم، مٹی کی حالت اور پہلے سے ڈالی گئی کھاد پر منحصر ہے۔ مناسب رہنمائی کے لیے: 1. آپ کی فصل کی قسم کون سی ہے؟ 2. بوائی/ٹرانسپلانٹ کے وقت کیا کوئی کھاد (جیسے DAP/SSP) ڈالی گئی تھی؟ 3. کیا مٹی کے ٹیسٹ کی رپورٹ دستیاب ہے؟ تصدیق کے بغیر اضافی کھاد نہ ڈالیں۔ درست مقدار کے لیے مقامی AEO یا KVK سے رابطہ کریں۔ 🙏",
+}
+
+UNVERIFIED_FERTILIZER_FALLBACK_RESPONSE_TE = UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"]
+UNVERIFIED_FERTILIZER_FALLBACK_RESPONSE_EN = UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["en"]
+
+
+def get_unverified_dosage_fallback_response(language: str = "te", is_fertilizer: bool = False) -> str:
     """Return a safe localized fallback when exact fertilizer/chemical dosage is ungrounded in RAG."""
+    if is_fertilizer:
+        return UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES.get(language, UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"])
     return UNVERIFIED_DOSAGE_FALLBACK_RESPONSES.get(language, UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"])
+
+
+def get_unverified_fertilizer_fallback_response(language: str = "te") -> str:
+    """Return a constructive clarifying fallback when fertilizer dosage is ungrounded in RAG."""
+    return UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES.get(language, UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"])
 
 
 def build_farmer_context(
