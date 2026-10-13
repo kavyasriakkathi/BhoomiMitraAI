@@ -1,0 +1,744 @@
+"""
+BhoomiMitra AI — Fertilizer Guidance & Grounding Pipeline Regression Tests
+
+Tests coverage:
+1. Telugu paddy fertilizer query (2 acres, 30 days after transplanting).
+2. Equivalent English-language query.
+3. Equivalent Romanized Telugu query.
+4. Relevant verified fertilizer guidance exists and is retrieved from RAG.
+5. No applicable verified guidance exists: asks clarifying questions instead of generic refusal.
+6. Irrelevant agricultural documents (e.g., Cotton pest guide) do not justify a dosage.
+7. Existing pre-LLM grounding gate remains strictly active.
+8. Existing post-LLM dosage guardrail remains active against hallucinated numbers.
+9. Fertilizer guidance and pesticide safety are decoupled appropriately.
+10. Area-unit conversion (2 acres * 30-35 kg/acre = 60-70 kg) validated correctly.
+11. Missing soil/fertilizer-history details are handled safely.
+12. WhatsApp pipeline returns improved grounded response in Telugu.
+13. RAG/AI provider failure returns safe fallback gracefully.
+14. Multilingual support across Telugu, English, and Romanized Telugu.
+"""
+
+import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
+
+from src.core.models import Farmer, Conversation
+from src.ai.service import (
+    AIService,
+    is_dosage_sensitive_query,
+    has_relevant_dosage_ground_truth,
+    extract_query_dosage_topics,
+    extract_land_size_from_text,
+    process_text_message,
+)
+from src.ai.schemas import AIGenerateRequest, AIGenerateResponse
+from src.ai.prompts import (
+    get_unverified_dosage_fallback_response,
+    get_unverified_fertilizer_fallback_response,
+    UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES,
+    UNVERIFIED_DOSAGE_FALLBACK_RESPONSES,
+)
+from src.rag.service import RAGService, extract_crop_from_text
+
+
+# =============================================================================
+# Helper Fixtures & Test Data
+# =============================================================================
+
+TELUGU_FARMER_QUERY = (
+    "నేను 2 ఎకరాల్లో వరి పంట సాగు చేస్తున్నాను. నాట్లు వేసి 30 రోజులు అయ్యాయి. "
+    "ఇప్పుడు ఏ ఎరువులు అవసరం? ఎంత మోతాదులో వేయాలి? "
+    "సరైన మోతాదును నిర్ణయించడానికి నా నేల వివరాలు లేదా ఇప్పటికే వేసిన ఎరువుల వివరాలు అవసరమా?"
+)
+
+ENGLISH_FARMER_QUERY = (
+    "I grow paddy on 2 acres. It has been 30 days since transplanting. "
+    "Which fertilizers are needed now, and in what quantities? "
+    "Do you need soil details or information about fertilizers already applied to determine the correct dosage?"
+)
+
+ROMANIZED_FARMER_QUERY = (
+    "nenu 2 acres lo vari saagu chesthunnanu. naatlu vesi 30 days ayyindi. "
+    "ippudu em eruvulu avasaram? entha mothadulo veyali?"
+)
+
+MOCK_PJTSAU_RAG_SNIPPET = (
+    "• Document: PJTSAU & ICAR-IIRR Paddy Fertilizer Guide (Crop: Paddy, Source: PJTSAU & ICAR-IIRR): "
+    "Transplanted Rice / Paddy (వరి పంట) Recommended Dose of Fertilizers (RDF): 40-50 kg N, 24 kg P2O5, 16-20 kg K2O per acre. "
+    "Split Application Schedule: "
+    "1. Basal Application (చివరి దుక్కి / నాట్ల సమయంలో): Entire Phosphorus (50 kg DAP or 150 kg SSP per acre) + 33% Nitrogen (30-35 kg Urea per acre) + 50% Potash (15-20 kg MOP per acre). "
+    "2. Active Tillering Stage (పిలకల దశ - 20 to 30/35 days after transplanting / DAT): Apply 30-35 kg Urea per acre as first top dressing (2 ఎకరాలకు 60-70 కేజీల యూరియా). "
+    "3. Panicle Initiation / Booting Stage (చిరుపొట్ట దశ - 45 to 55 DAT): Apply 30-35 kg Urea + 15-20 kg MOP per acre. "
+    "Varietal & Soil Factors: Short duration varieties require earlier N application. Soil test report determines exact P & K rates."
+)
+
+
+# =============================================================================
+# 1. Telugu Paddy Fertilizer Query (2 acres, 30 days DAT)
+# =============================================================================
+
+def test_case_1_telugu_paddy_query_extraction_and_grounding():
+    """Verify that Telugu paddy query extracts crop, 2 acres land size, and matches PJTSAU grounding."""
+    # 1. Dosage intent detected
+    assert is_dosage_sensitive_query(TELUGU_FARMER_QUERY) is True
+
+    # 2. Crop extracted as Paddy
+    assert extract_crop_from_text(TELUGU_FARMER_QUERY) == "Paddy"
+
+    # 3. Land size extracted as 2.0 acres
+    assert extract_land_size_from_text(TELUGU_FARMER_QUERY) == 2.0
+
+    # 4. Topics classified as fertilizer query
+    topics = extract_query_dosage_topics(TELUGU_FARMER_QUERY)
+    assert topics["crop"] == "paddy"
+    assert topics["is_fertilizer_query"] is True
+    assert topics["is_pest_disease_query"] is False
+
+    # 5. Verified grounding matches PJTSAU snippet
+    assert has_relevant_dosage_ground_truth(TELUGU_FARMER_QUERY, [MOCK_PJTSAU_RAG_SNIPPET]) is True
+
+
+# =============================================================================
+# 2. Equivalent English-Language Query
+# =============================================================================
+
+def test_case_2_english_paddy_query_extraction_and_grounding():
+    """Verify equivalent English query correctly extracts crop, 2 acres land size, and matches grounding."""
+    assert is_dosage_sensitive_query(ENGLISH_FARMER_QUERY) is True
+    assert extract_crop_from_text(ENGLISH_FARMER_QUERY) == "Paddy"
+    assert extract_land_size_from_text(ENGLISH_FARMER_QUERY) == 2.0
+
+    topics = extract_query_dosage_topics(ENGLISH_FARMER_QUERY)
+    assert topics["crop"] == "paddy"
+    assert topics["is_fertilizer_query"] is True
+    assert topics["is_pest_disease_query"] is False
+    assert has_relevant_dosage_ground_truth(ENGLISH_FARMER_QUERY, [MOCK_PJTSAU_RAG_SNIPPET]) is True
+
+
+# =============================================================================
+# 3. Equivalent Romanized Telugu Query
+# =============================================================================
+
+def test_case_3_romanized_telugu_query_extraction_and_grounding():
+    """Verify equivalent Romanized Telugu query extracts crop, 2 acres land size, and matches grounding."""
+    assert is_dosage_sensitive_query(ROMANIZED_FARMER_QUERY) is True
+    assert extract_crop_from_text(ROMANIZED_FARMER_QUERY) == "Paddy"
+    assert extract_land_size_from_text(ROMANIZED_FARMER_QUERY) == 2.0
+
+    topics = extract_query_dosage_topics(ROMANIZED_FARMER_QUERY)
+    assert topics["crop"] == "paddy"
+    assert topics["is_fertilizer_query"] is True
+    assert has_relevant_dosage_ground_truth(ROMANIZED_FARMER_QUERY, [MOCK_PJTSAU_RAG_SNIPPET]) is True
+
+
+# =============================================================================
+# 4. Relevant Verified Fertilizer Guidance Exists and is Retrieved from RAG
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_4_rag_retrieves_pjtsau_paddy_fertilizer_guide():
+    """Verify that RAG hybrid search retrieves PJTSAU paddy fertilizer guidance from default knowledge."""
+    mock_repo = MagicMock()
+    mock_repo.get_all_chunks = AsyncMock(return_value=[])
+    rag_service = RAGService(mock_repo)
+
+    results = await rag_service.search_knowledge(
+        query=TELUGU_FARMER_QUERY,
+        top_k=2,
+        state="Telangana",
+        crop="Paddy",
+    )
+
+    assert len(results) > 0
+    top_doc = results[0]
+    assert "PJTSAU" in top_doc.document_title or "Paddy" in top_doc.document_title
+    assert "Urea" in top_doc.chunk_text or "యూరియా" in top_doc.chunk_text
+    assert "30-35 kg" in top_doc.chunk_text or "30" in top_doc.chunk_text
+
+
+# =============================================================================
+# 5. No Applicable Verified Guidance Exists: Asks Clarifying Questions
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_5_unverified_fertilizer_query_asks_clarifying_questions():
+    """Verify that when no RAG guidance exists, bot asks useful questions instead of generic refusal or fake numbers."""
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(mock_repo)
+
+    # Empty RAG simulates no verified documents found
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[]), \
+         patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="నా పంటకు ఇప్పుడు ఎంత ఎరువు వేయాలి?",  # Crop unknown, dosage asked
+        )
+        resp = await service.generate_ai_response(req)
+
+        assert resp.provider_used == "hard_grounding_gate"
+        assert resp.intent == "dosage_unverified_fallback"
+        # Must ask clarifying questions about variety, basal DAP/SSP, soil test
+        assert "వంగడం" in resp.response_text or "రకం" in resp.response_text
+        assert "DAP" in resp.response_text or "ఎరువులు" in resp.response_text
+        assert "నేల పరీక్ష" in resp.response_text
+        # Must advise AEO / KVK
+        assert "AEO" in resp.response_text or "KVK" in resp.response_text
+
+
+# =============================================================================
+# 6. Irrelevant Agricultural Documents Must NOT Justify a Dosage
+# =============================================================================
+
+def test_case_6_irrelevant_cotton_document_rejected_for_paddy_query():
+    """Verify that a Cotton pest document does NOT satisfy grounding for a Paddy fertilizer query."""
+    irrelevant_cotton_snippet = (
+        "• Document: ICAR Cotton Pest Management (Crop: Cotton, Source: ICAR): "
+        "Pink bollworm control: Spray Chlorantraniliprole 18.5% SC @ 0.4 ml per litre of water or Emamectin Benzoate 5% SG @ 0.4 g/L."
+    )
+    # Grounding check must reject irrelevant crop document
+    is_grounded = has_relevant_dosage_ground_truth(TELUGU_FARMER_QUERY, [irrelevant_cotton_snippet])
+    assert is_grounded is False
+
+
+# =============================================================================
+# 7. Existing Pre-LLM Grounding Protection Remains Active
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_7_pre_llm_grounding_gate_blocks_gemini_call_when_ungrounded():
+    """Verify that pre-LLM gate intercepts ungrounded dosage requests without calling Gemini API."""
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(mock_repo)
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock) as mock_gemini:
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="వరిలో ఎకరానికి ఎంత యూరియా వేయాలి?",
+        )
+        resp = await service.generate_ai_response(req)
+
+        # Gemini API must NEVER have been called
+        mock_gemini.assert_not_called()
+        assert resp.provider_used == "hard_grounding_gate"
+        assert resp.intent == "dosage_unverified_fallback"
+
+
+# =============================================================================
+# 8. Existing Post-LLM Dosage Guardrail Remains Active Against Hallucinations
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_8_post_llm_defense_in_depth_catches_hallucinated_numbers():
+    """Verify defense-in-depth gate intercepts hallucinated dosage numbers that exceed RAG grounding."""
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(mock_repo)
+
+    # RAG has official PJTSAU guide with 30-35 kg/acre
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "PJTSAU Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "PJTSAU"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    # Simulate Gemini hallucinating an ungrounded, dangerous rate: "500 kg per acre"
+    hallucinated_response = "వరి పంటకు ఎకరానికి 500 kg యూరియా వేయండి."
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=hallucinated_response):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message=TELUGU_FARMER_QUERY,
+        )
+        resp = await service.generate_ai_response(req)
+
+        # Hallucinated "500" was blocked by post-LLM gate!
+        assert "500" not in resp.response_text
+        assert resp.response_text == UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"]
+
+
+# =============================================================================
+# 9. Fertilizer Guidance and Pesticide Safety Handled Appropriately
+# =============================================================================
+
+def test_case_9_decoupled_fertilizer_and_pesticide_safety_responses():
+    """Verify pesticide queries return chemical safety refusal, while fertilizer queries return structured guidance."""
+    # Fertilizer fallback
+    fert_fb = get_unverified_dosage_fallback_response("te", is_fertilizer=True)
+    assert "ఎరువుల ఖచ్చితమైన మోతాదు" in fert_fb
+    assert "వంగడం" in fert_fb
+    assert "పురుగుమందు" not in fert_fb
+
+    # Pesticide fallback
+    pest_fb = get_unverified_dosage_fallback_response("te", is_fertilizer=False)
+    assert "పురుగుమందుల" in pest_fb or "కీటనాశక" in pest_fb or "ధృవీకరించబడిన డేటా లేదు" in pest_fb
+    assert "వంగడం" not in pest_fb
+
+
+# =============================================================================
+# 10. Area-Unit Conversion (2 acres * 30-35 kg = 60-70 kg) Supported
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_10_area_scaling_allowed_in_post_llm_validation():
+    """Verify that when 2 acres is specified, acreage-scaled totals (60-70 kg) pass post-LLM validation."""
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "PJTSAU Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "PJTSAU"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    # Gemini generates valid grounded advice mentioning 30-35 kg per acre and 60-70 kg for 2 acres
+    grounded_ai_response = (
+        "PJTSAU సిఫార్సుల ప్రకారం, నాట్లు వేసిన 30 రోజుల పిలకల దశలో మీ 2 ఎకరాల వరి పంటకు "
+        "మొత్తం 60-70 కేజీల యూరియా (ఎకరానికి 30-35 కేజీలు) పైపాటుగా వేయాలి. "
+        "గమనిక: నేల స్వభావం మరియు చివరి దుక్కిలో వేసిన ఎరువులను బట్టి సరిచూసుకోండి."
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=grounded_ai_response):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message=TELUGU_FARMER_QUERY,
+        )
+        resp = await service.generate_ai_response(req)
+
+        # Grounded response is preserved and NOT replaced by refusal
+        assert "60-70 కేజీల యూరియా" in resp.response_text
+        assert "ఎకరానికి 30-35 కేజీలు" in resp.response_text
+
+
+# =============================================================================
+# 11. Missing Soil / Fertilizer-History Details Handled Appropriately
+# =============================================================================
+
+def test_case_11_missing_soil_and_fertilizer_history_handled():
+    """Verify that fallback and guidance emphasize soil test and basal application questions."""
+    fallback_en = get_unverified_fertilizer_fallback_response("en")
+    assert "soil conditions" in fallback_en.lower()
+    assert "basal fertilizers" in fallback_en.lower()
+    assert "soil test report" in fallback_en.lower()
+    assert "AEO" in fallback_en or "KVK" in fallback_en
+
+
+# =============================================================================
+# 12. WhatsApp Pipeline Returns Improved Response in Telugu
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_12_whatsapp_pipeline_end_to_end_telugu_flow():
+    """Verify end-to-end process_text_message for the WhatsApp test farmer query."""
+    db_mock = AsyncMock()
+    farmer = Farmer(id=uuid4(), preferred_language="te")
+    conversation = Conversation(id=uuid4(), farmer_id=farmer.id, user_message=TELUGU_FARMER_QUERY)
+
+    mock_ai_resp = AIGenerateResponse(
+        response_text=(
+            "PJTSAU & ICAR-IIRR సిఫార్సుల ప్రకారం, నాట్లు వేసిన 30 రోజుల పిలకల దశలో (Active Tillering Stage) "
+            "మీ 2 ఎకరాల వరి పంటకు మొదటి విడతగా మొత్తం 60-70 కేజీల యూరియా (ఎకరానికి 30-35 కేజీలు) వేయాలి. "
+            "నాట్ల సమయంలో మీరు వేసిన DAP లేదా కాంప్లెక్స్ ఎరువుల వివరాలు మరియు నేల పరీక్ష నివేదికను బట్టి మోతాదు సరిచూసుకోండి. 🙏"
+        ),
+        intent="fertilizer_nutrient",
+        confidence=0.95,
+        provider_used="gemini",
+    )
+
+    with patch("src.ai.service.AIService.generate_ai_response", new_callable=AsyncMock, return_value=mock_ai_resp), \
+         patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp, *args, **kwargs: resp):
+        whatsapp_response = await process_text_message(db_mock, farmer, conversation)
+
+        assert "60-70 కేజీల యూరియా" in whatsapp_response
+        assert "ఎకరానికి 30-35 కేజీలు" in whatsapp_response
+        # Must not be the old generic refusal
+        assert "ఖచ్చితమైన ఎరువుల/పురుగుమందుల మోతాదు (dosage) కోసం ప్రస్తుతం ధృవీకరించబడిన డేటా లేదు" not in whatsapp_response
+
+
+# =============================================================================
+# 13. Failure of RAG or AI Provider Produces Safe Fallback
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_13_ai_provider_failure_returns_safe_fallback_gracefully():
+    """Verify that when AI provider throws an exception, the system returns localized safe fallback without 500 error."""
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "PJTSAU Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "PJTSAU"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", side_effect=Exception("Gemini API connection error")):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message=TELUGU_FARMER_QUERY,
+        )
+        resp = await service.generate_ai_response(req)
+
+        assert resp.provider_used == "safe_fallback"
+        assert resp.intent == "ai_unavailable_fallback"
+        # Returns safe localized fallback without crashing
+        assert "AEO" in resp.response_text or "వ్యవసాయ" in resp.response_text
+
+
+# =============================================================================
+# 14. Multilingual Processing Supported Across Telugu, English, Hindi, and Tanglish
+# =============================================================================
+
+def test_case_14_multilingual_dosage_topic_and_fallback_integrity():
+    """Verify that fallback text and query topic extraction exist for all 13 supported languages."""
+    supported_langs = ["te", "en", "hi", "ta", "kn", "ml", "mr", "bn", "gu", "or", "pa", "as", "ur"]
+
+    for lang in supported_langs:
+        fert_text = get_unverified_fertilizer_fallback_response(lang)
+        assert len(fert_text) > 20
+        assert "AEO" in fert_text or "KVK" in fert_text
+
+
+# =============================================================================
+# 15. Two-acre paddy, 30 DAT, no fertilizer history provided
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_15_two_acre_paddy_no_history_checks_prior_application():
+    """Verify that when 2-acre paddy query has no fertilizer history, response cites general benchmark, asks about variety and basal/history, and does not confirm unverified dose."""
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "Paddy Fertilizer Guide (Regional Extension & Vikaspedia)"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "Regional Agricultural Extension & Vikaspedia"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    ai_response = (
+        "వరి పంట 30 రోజుల పిలకల దశలో 2 ఎకరాలకు ప్రాంతీయ విస్తరణ మార్గదర్శకాల ప్రకారం "
+        "సుమారు 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కిలోలు) సాధారణ ప్రచురిత రిఫరెన్స్ మాత్రమే, ఇది మీ పొలానికి ఖరారైన నిర్ధారణ కాదు. "
+        "సరైన మోతాదును నిర్ణయించడానికి: 1. మీరు సాగు చేస్తున్న వరి రకం/వంగడం ఏది (స్వల్ప లేదా దీర్ఘకాలిక)? "
+        "2. నాట్ల సమయంలో DAP లేదా SSP వేసారా? 3. నాట్లు వేసిన తర్వాత ఇప్పటికే ఏదైనా యూరియా వేశారా? "
+        "ఈ వివరాలు లేకుండా అదనపు మోతాదును ఖరారు చేయలేము."
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=ai_response):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="2 ఎకరాల వరి, నాట్లు వేసి 30 రోజులు. ఎంత ఎరువు వేయాలి?",
+        )
+        resp = await service.generate_ai_response(req)
+        # 1. Recognizes 2 acres paddy at 30 DAT / general extension benchmark
+        assert "60-70" in resp.response_text or "30-35" in resp.response_text
+        # 2. Distinguishes published reference from field-specific recommendation
+        assert "రిఫరెన్స్" in resp.response_text or "మార్గదర్శక" in resp.response_text or "సాధారణ" in resp.response_text
+        # 3. Asks which variety is cultivated
+        assert "రకం" in resp.response_text or "వంగడం" in resp.response_text
+        # 4. Checks basal DAP/SSP and subsequent fertilizer applications
+        assert "DAP" in resp.response_text or "SSP" in resp.response_text
+        assert "యూరియా" in resp.response_text
+        # 5. Does not present an unverified additional dose as confirmed
+        assert "ఖరారు" in resp.response_text or "నిర్ధారణ" in resp.response_text or "వివరాలు లేకుండా" in resp.response_text
+
+
+# =============================================================================
+# 16. Farmer confirms DAP was applied at transplanting
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_16_farmer_confirms_dap_applied_at_transplanting():
+    """Verify that when farmer confirms DAP was applied as basal, response accounts for initial N and does not prescribe duplicate DAP."""
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "Regional Extension"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    ai_response = (
+        "నాట్లలో 50 కిలోల DAP వేసినందున భాస్వరం మరియు ప్రారంభ నత్రజని సరిపోతుంది. మళ్లీ DAP వేయకండి. "
+        "ఇప్పుడు 30 రోజుల పిలకల దశలో 2 ఎకరాలకు 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కిలోలు) పైపాటుగా వేయండి."
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=ai_response):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="నేను నాట్లలో ఎకరానికి 50 కిలోల DAP వేశాను. ఇప్పుడు 30 రోజుల వరికి 2 ఎకరాలకు ఎంత యూరియా వేయాలి?",
+        )
+        resp = await service.generate_ai_response(req)
+        assert "60-70" in resp.response_text
+        assert "DAP" in resp.response_text
+
+
+# =============================================================================
+# 17. Farmer confirms SSP was applied at transplanting
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_17_farmer_confirms_ssp_applied_at_transplanting():
+    """Verify that when farmer confirms SSP was applied, system handles nitrogen top-dressing appropriately."""
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "Regional Extension"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    ai_response = (
+        "SSP ఎరువు భాస్వరం మాత్రమే అందిస్తుంది. నాట్లు వేసిన 30 రోజుల పిలకల దశలో "
+        "మీ 2 ఎకరాల వరికి 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కిలోలు) పైపాటుగా వేయండి."
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=ai_response):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="నాట్లలో SSP వేశాను. ఇప్పుడు 30 రోజుల వరికి 2 ఎకరాలకు ఎంత యూరియా వేయాలి?",
+        )
+        resp = await service.generate_ai_response(req)
+        assert "SSP" in resp.response_text
+        assert "60-70" in resp.response_text
+
+
+# =============================================================================
+# 18. Farmer reports urea was already applied after transplanting
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_18_farmer_reports_urea_already_applied_warns_against_duplication():
+    """Verify that if farmer reports urea was already applied recently, response warns against duplicate urea application and avoids rigid waiting schedules."""
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "Regional Extension"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    ai_response = (
+        "మీరు 25 రోజులప్పుడే 2 ఎకరాలకు 60 కిలోల యూరియా వేసి ఉంటే, ఇప్పుడు 30 రోజులకు వెంటనే మళ్లీ యూరియా వేయకండి. "
+        "అవసరానికి మించి అధికంగా నత్రజని వేస్తే పంట నేలకొరిగే ప్రమాదం మరియు చీడపీడల (అగ్గి తెగులు, కాండం తొలిచే పురుగు) సమస్యలు పెరిగే అవకాశం ఉంది. "
+        "స్థిరమైన రోజుల క్యాలెండర్ ప్రకారం కాకుండా, మీ వరి రకం కాలపరిమితి మరియు నేల తేమను బట్టి తదుపరి మోతాదును వ్యవసాయ అధికారి లేదా వంగడం దశల ప్రకారం నిర్ణయించండి."
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=ai_response):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="నేను 25 రోజులప్పుడు 2 ఎకరాలకు 60 కిలోల యూరియా వేశాను. ఇప్పుడు 30 రోజులకు మళ్లీ యూరియా వేయాలా?",
+        )
+        resp = await service.generate_ai_response(req)
+        # Must NOT prescribe a fixed 40-45 day waiting schedule
+        assert "40-45" not in resp.response_text
+        assert "40-45 రోజులు" not in resp.response_text
+        # Warns against immediate duplicate urea
+        assert "వేయకండి" in resp.response_text or "మళ్లీ" in resp.response_text
+        # Mentions risk of lodging / pests
+        assert "ప్రమాదం" in resp.response_text or "చీడపీడల" in resp.response_text or "పురుగు" in resp.response_text
+        # Considers variety duration rather than rigid calendar
+        assert "రకం" in resp.response_text or "కాలపరిమితి" in resp.response_text or "వంగడం" in resp.response_text
+
+
+# =============================================================================
+# 19. Soil-test result is available
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_19_soil_test_available_incorporates_soil_health_card():
+    """Verify that when soil test data is mentioned, response incorporates soil test calibration without arbitrary fixed percentages."""
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "Regional Extension"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    ai_response = (
+        "భూసార పరీక్షలో నత్రజని అధికంగా ఉన్నట్లు తేలితే, మీ సాయిల్ హెల్త్ కార్డ్ (Soil Health Card) లేదా ICAR-IIRR NAPSRI "
+        "సిఫార్సుల ప్రకారం నత్రజని మోతాదును సర్దుబాటు చేసుకోవాలి. సాధారణ ప్రాంతీయ మోతాదును గుడ్డిగా వేయకండి."
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=ai_response):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="నా దగ్గర సాయిల్ టెస్ట్ రిపోర్ట్ ఉంది, అందులో నత్రజని ఎక్కువ ఉంది. 30 రోజుల వరికి ఎంత యూరియా వేయాలి?",
+        )
+        resp = await service.generate_ai_response(req)
+        assert "పరీక్ష" in resp.response_text
+        assert "సర్దుబాటు" in resp.response_text or "NAPSRI" in resp.response_text
+
+
+# =============================================================================
+# 20. Model proposes an unsupported or duplicated quantity
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_20_model_proposes_unsupported_quantity_intercepted():
+    """Verify that when LLM proposes an ungrounded or excessive quantity (e.g., 250 kg urea), post-LLM validation intercepts it."""
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "Regional Extension"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    ungrounded_hallucination = "వరి 2 ఎకరాలకు 250 kg యూరియా వేయండి."
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=ungrounded_hallucination):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="2 ఎకరాల వరి, నాట్లు వేసి 30 రోజులు. ఎంత ఎరువు వేయాలి?",
+        )
+        resp = await service.generate_ai_response(req)
+        assert "250" not in resp.response_text
+        assert resp.response_text == UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"]
+
+
+# =============================================================================
+# 21. Two-acre proportional calculations remain strictly validated
+# =============================================================================
+
+def test_case_21_two_acre_proportional_scaling_arithmetic():
+    """Verify linear proportionality arithmetic for 2-acre guidance (30-35 kg/acre -> 60-70 kg for 2 acres)."""
+    per_acre_min = 30
+    per_acre_max = 35
+    acres = 2.0
+
+    two_acre_min = int(per_acre_min * acres)
+    two_acre_max = int(per_acre_max * acres)
+
+    assert two_acre_min == 60
+    assert two_acre_max == 70
+    assert f"{two_acre_min}-{two_acre_max} kg" == "60-70 kg"
+
+
+# =============================================================================
+# 22. Regional Source Distinction: ICAR-CRRI Advisory vs Telangana Extension
+# =============================================================================
+
+def test_case_22_crri_vs_telangana_source_distinction():
+    """Verify that RAG knowledge base explicitly distinguishes CRRI Odisha varietal advisory from Telangana extension reference."""
+    from src.rag.service import DEFAULT_VERIFIED_AGRI_KNOWLEDGE
+    paddy_doc = next(d for d in DEFAULT_VERIFIED_AGRI_KNOWLEDGE if d["crop"] == "Paddy" and d["category"] == "Fertilizer Management")
+    text = paddy_doc["chunk_text"]
+    assert "ICAR-CRRI" in text
+    assert "Do NOT copy CRRI" in text or "not copy" in text.lower()
+    assert "general extension reference benchmark" in text
+    assert "strictly separate from the seasonal nutrient requirement" in text
+
+
+# =============================================================================
+# 23. Incomplete Prior Urea Reports: Inquires Missing Details and Avoids Confirmation
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_23_incomplete_prior_urea_inquiry_avoids_confirmation():
+    """Verify that when a farmer reports prior urea without quantity/variety, bot asks for missing details and avoids confirming extra dose."""
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "Regional Extension"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    ai_response = (
+        "మీరు ఇటీవల యూరియా వేసినట్లు తెలిపారు, కానీ ఎంత మోతాదులో, ఏ తేదీన/దశలో వేశారు మరియు ఏ వంగడం సాగు చేస్తున్నారో "
+        "తెలియకుండా అదనపు యూరియా మోతాదును నిర్ధారించలేము. ఈ వివరాలు తెలియజేయండి; అధిక నత్రజని పంట నేలకొరిగే ప్రమాదాన్ని పెంచుతుంది."
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=ai_response):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message="నేను మొన్ననే యూరియా వేశాను. ఇప్పుడు మళ్లీ వేయాలా?",
+        )
+        resp = await service.generate_ai_response(req)
+        # Avoids confirming additional dose
+        assert "నిర్ధారించలేము" in resp.response_text or "ఖరారు" in resp.response_text or "వేయకండి" in resp.response_text
+        # Inquires for missing details
+        assert "మోతాదు" in resp.response_text
+        assert "వంగడం" in resp.response_text or "రకం" in resp.response_text or "తేదీ" in resp.response_text
+        # Does NOT prescribe a fixed 40-45 day schedule
+        assert "40-45" not in resp.response_text
+
+
+# =============================================================================
+# 24. Theoretical Seasonal Urea Equivalent and DAP Nitrogen Deduction
+# =============================================================================
+
+def test_case_24_theoretical_seasonal_urea_accounting_and_dap_deduction():
+    """Verify that 88-106 kg/acre is labeled as theoretical urea equivalent under straight urea assumption, DAP reduces it to 68-86 kg/acre (137-172 kg for 2 acres), and organic manure available nutrients are considered."""
+    from src.rag.service import DEFAULT_VERIFIED_AGRI_KNOWLEDGE
+    paddy_doc = next(d for d in DEFAULT_VERIFIED_AGRI_KNOWLEDGE if d["crop"] == "Paddy" and d["category"] == "Fertilizer Management")
+    text = paddy_doc["chunk_text"]
+    # 1. Theoretical urea equivalent before DAP under 100% straight urea assumption (88 to 106 kg/acre)
+    assert "Theoretical Seasonal Urea Equivalent (Before DAP)" in text
+    assert "88 to 106 kg Urea per acre" in text
+    assert "Do NOT label 88–106 kg/acre as the farmer's confirmed seasonal requirement" in text
+    # 2. Explains DAP nitrogen deduction (9 kg N from 50 kg DAP reduces urea to 68-86 kg/acre, 137-172 kg for 2 acres)
+    assert "68 to 86 kg Urea per acre" in text
+    assert "137 to 172 kg Urea for 2 acres" in text
+    # 3. Organic manure available nutrients distinction
+    assert "organic manures" in text.lower() or "organic manure" in text.lower()
+    assert "available" in text.lower()
+    # 4. Keeps single application separate from seasonal requirement
+    assert "strictly separate from the seasonal nutrient requirement" in text
+

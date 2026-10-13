@@ -108,8 +108,8 @@ def is_dosage_sensitive_query(text: str) -> bool:
         r'ml\s*(?:per|\/)\s*l(?:itre)?|ml\s*\/\s*l|ml\s*(?:per|\/)\s*acre|'
         r'litres?\s*(?:per|\/)\s*acre|per\s+acre|per\s+hectare|per\s+litre|'
         r'how\s+many\s+kg|how\s+much\s+(?:urea|dap|potash|npk|fertilizer|pesticide|chemical|spray|zinc|sulphate|chlorantraniliprole)|'
-        r'what\s+is\s+the\s+dose|what\s+is\s+the\s+dosage|spray\s+dosage|application\s+rate|dosage\s+rate|'
-        r'dose\s+of|dosage\s+of|quantity\s+of\s+fertilizer|'
+        r'what\s+is\s+the\s+dose|what\s+is\s+the\s+dosage|what\s+dosage|spray\s+dosage|application\s+rate|dosage\s+rate|correct\s+dosage|correct\s+dose|'
+        r'dose\s+of|dosage\s+of|quantity\s+of\s+fertilizer|what\s+quantities|in\s+what\s+quantities|what\s+quantity|'
         r'ఎంత\s*(?:మోతాదు|ఎరువు|యూరియా|మందు|స్ప్రే|డిఎపి|పొటాష్|జింక్|కేజీలు|గ్రాములు)|'
         r'(?:ఎకరాకి|ఎకరానికి|లీటరుకు|లీటరుకి|హెక్టారుకు)\s*ఎంత|మోతాదు\s*ఎంత|డోసేజ్|డోస్|'
         r'దశలో\s*(?:ఉన్న\s*)?(?:వరి|పత్తి|మిర్చి|మొక్కజొన్న|పంటకు)\s*ఎరువు\s*ఏది|'
@@ -133,7 +133,7 @@ def is_dosage_sensitive_query(text: str) -> bool:
         r'ਕਿੰਨੀ\s*(?:ਖਾਦ|ਦਵਾਈ|ਯੂਰੀਆ|ਡੋਜ਼)|'
         r'কিমান\s*(?:সাৰ|ঔষধ|ইউৰিয়া|ড\'জ)|'
         r'کتنی\s*(?:کھاد|دوا|یوریا|خوراک)|'
-        r'entha\s+(?:fertilizer|urea|eruvu|mandhu|dose|dosage|dap|potash|zinc)|'
+        r'entha\s+(?:fertilizer|urea|eruvu|mandhu|dose|dosage|dap|potash|zinc|mothadulo|mothadu)|'
         r'(?:ekaraniki|ekaraki|per\s+acre)\s+entha|'
         r'kitna\s+(?:fertilizer|urea|khad|dawa|dose|dosage)|'
         r'kitni\s+(?:khad|dawa|matra)|'
@@ -252,6 +252,24 @@ def extract_query_dosage_topics(query: str) -> dict:
         "is_pest_disease_query": is_pest_disease_query,
         "requested_chemicals": requested_chemicals,
     }
+
+
+def extract_land_size_from_text(text: Optional[str]) -> Optional[float]:
+    """
+    Extract land area in acres from user queries across English, Telugu, Hindi, etc.
+    e.g., '2 acres', '2.5 acre', '2 ఎకరాలు', '2 ఎకరాల్లో', '2 ఎకరాల', '1 ఎకరం', '2 एकड़'
+    """
+    if not text:
+        return None
+
+    pattern = r'(\d+(?:\.\d+)?)\s*(?:acres?|ac|ఎకరాల్లో|ఎకరాల|ఎకరాలు|ఎకరా|ఎకరం|एकड़|एकर)\b'
+    match = re.search(pattern, text, re.IGNORECASE)
+    if match:
+        try:
+            return float(match.group(1))
+        except (ValueError, TypeError):
+            return None
+    return None
 
 
 def has_relevant_dosage_ground_truth(query: str, rag_snippets: list) -> bool:
@@ -437,12 +455,17 @@ class AIService:
                 elif memory_obj and getattr(memory_obj, "district", None):
                     effective_district = memory_obj.district
 
+            # Land size detection from query or profile
+            query_land_size = extract_land_size_from_text(request.message)
+            profile_land_size = getattr(profile, "land_size_acres", None) if profile else None
+            effective_land_size = query_land_size if query_land_size is not None else profile_land_size
+
             # Build farmer context string
             farmer_context = build_farmer_context(
                 crop=effective_crop or (getattr(profile, "current_crop", None) if profile else None),
                 district=effective_district,
                 state=getattr(profile, "state", None) if profile else None,
-                land_size=getattr(profile, "land_size_acres", None) if profile else None,
+                land_size=effective_land_size,
                 gps_coordinates=memory_obj.gps_coordinates if (has_gps and memory_obj) else None,
             )
 
@@ -495,7 +518,9 @@ class AIService:
                     if rag_snippets:
                         rag_context_text = (
                             "=== RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE (GROUND TRUTH) ===\n"
-                            "CRITICAL INSTRUCTION: The following knowledge is verified agronomic ground truth. You MUST strictly use ONLY these verified treatments, products, and numeric dosages. Do NOT add, alter, extrapolate, or invent different dosages or unverified chemicals. Translate directly into the farmer's language:\n"
+                            "CRITICAL INSTRUCTION: The following knowledge is verified agronomic ground truth. You MUST strictly use ONLY these verified treatments, products, and numeric dosages. "
+                            "For fertilizer guidance: Present verified rates as general extension benchmarks, inquire whether basal fertilizers (DAP/SSP) or earlier urea splits were already applied, and advise soil test calibration. "
+                            "Do NOT add, alter, extrapolate, or invent different dosages or unverified chemicals. Translate directly into the farmer's language:\n"
                             + "\n".join(rag_snippets)
                         )
             except Exception as rag_err:
@@ -504,12 +529,15 @@ class AIService:
             # 3.8 HARD GROUNDING GATE: Block unverified numeric dosage generation
             has_grounding = has_relevant_dosage_ground_truth(request.message, rag_snippets)
 
+            query_topics = extract_query_dosage_topics(request.message)
+            is_fertilizer_only_query = query_topics["is_fertilizer_query"] and not query_topics["is_pest_disease_query"]
+
             if is_dosage_req and not has_grounding:
                 logger.warning(
                     f"[HARD GROUNDING GATE TRIGGERED] Dosage-sensitive query lacking relevant verified Ground Truth. "
-                    f"Farmer ID: {request.farmer_id}, Language: '{user_lang}', Query: '{request.message[:80]}...'"
+                    f"Farmer ID: {request.farmer_id}, Language: '{user_lang}', Is Fertilizer: {is_fertilizer_only_query}, Query: '{request.message[:80]}...'"
                 )
-                safe_fallback = get_unverified_dosage_fallback_response(user_lang)
+                safe_fallback = get_unverified_dosage_fallback_response(user_lang, is_fertilizer=is_fertilizer_only_query)
                 return AIGenerateResponse(
                     response_text=safe_fallback,
                     intent="dosage_unverified_fallback",
@@ -558,21 +586,40 @@ class AIService:
                         f"[DEFENSE-IN-DEPTH GATE TRIGGERED] Unverified dosage generated in ungrounded output for farmer {request.farmer_id}. "
                         f"Replacing with safe fallback."
                     )
-                    ai_text = get_unverified_dosage_fallback_response(user_lang)
+                    ai_text = get_unverified_dosage_fallback_response(user_lang, is_fertilizer=is_fertilizer_only_query)
                 else:
-                    # Verify generated numeric figures exist in the provided RAG ground truth
+                    # Verify generated numeric figures exist in the provided RAG ground truth or are valid area-scaled amounts
                     rag_text_lower = rag_context_text.lower()
                     generated_numbers = re.findall(r'\b\d+(?:[.,]\d+)?\b', " ".join(output_dosage_matches))
                     rag_numbers = set(re.findall(r'\b\d+(?:[.,]\d+)?\b', rag_text_lower))
-                    unverified_numbers = [n for n in generated_numbers if n not in rag_numbers]
+
+                    # Allowed numbers: RAG numbers + user query numbers (e.g. 2 acres, 30 days) + acreage-scaled totals
+                    valid_numbers = set(rag_numbers)
+                    query_numbers = set(re.findall(r'\b\d+(?:[.,]\d+)?\b', request.message))
+                    valid_numbers.update(query_numbers)
+
+                    if effective_land_size and effective_land_size > 0:
+                        for n_str in rag_numbers:
+                            try:
+                                val = float(n_str)
+                                scaled_val = val * effective_land_size
+                                if scaled_val.is_integer():
+                                    valid_numbers.add(str(int(scaled_val)))
+                                valid_numbers.add(f"{scaled_val:.1f}")
+                                valid_numbers.add(f"{scaled_val:.2f}")
+                                valid_numbers.add(str(scaled_val))
+                            except ValueError:
+                                pass
+
+                    unverified_numbers = [n for n in generated_numbers if n not in valid_numbers]
                     if unverified_numbers:
                         logger.warning(
                             f"[DEFENSE-IN-DEPTH GATE TRIGGERED] Hallucinated dosage numbers {unverified_numbers} not found in RAG ground truth for farmer {request.farmer_id}. "
                             f"Replacing with safe fallback."
                         )
-                        ai_text = get_unverified_dosage_fallback_response(user_lang)
+                        ai_text = get_unverified_dosage_fallback_response(user_lang, is_fertilizer=is_fertilizer_only_query)
             elif is_dosage_req and not has_grounding:
-                ai_text = get_unverified_dosage_fallback_response(user_lang)
+                ai_text = get_unverified_dosage_fallback_response(user_lang, is_fertilizer=is_fertilizer_only_query)
 
             total_ai_time = time.time() - service_start_time
             logger.info(

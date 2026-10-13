@@ -92,6 +92,46 @@ DEFAULT_VERIFIED_AGRI_KNOWLEDGE: List[Dict[str, Any]] = [
         ),
     },
     {
+        "title": "Paddy Fertilizer and Nutrient Management Guide (PJTSAU Regional Extension & Vikaspedia)",
+        "source": "Regional Agricultural Extension Guidelines (PJTSAU practices compiled on Vikaspedia Telugu)",
+        "category": "Fertilizer Management",
+        "language": "te",
+        "state": "Telangana",
+        "crop": "Paddy",
+        "page": 1,
+        "chunk_text": (
+            "Title: Paddy Fertilizer and Nutrient Management Guide (PJTSAU Regional Extension & Vikaspedia). "
+            "Crop: Paddy / Rice (వరి / vari). Category: Fertilizer Management (ఎరువుల యాజమాన్యం). "
+            "Source: Regional Agricultural Extension Guidelines (PJTSAU practices compiled on Vikaspedia Telugu: https://te.vikaspedia.in). "
+            "Provenance: Secondary Extension Guidance (Synthesized practical guide based on state extension practices; NOT a direct primary joint research publication from ICAR-IIRR or PJTSAU). "
+            "Regional Comparison & Attribution: Note that advisories from other institutes such as ICAR-CRRI (Cuttack, Odisha Agromet Advisory: https://icar-crri.in/wp-content/uploads/2025/08/AAS_Aug_II-_2025.pdf) provide distinct top-dressing split quantities for short-duration, medium/long-duration, and hybrid rice varieties tailored to Odisha/coastal agro-climatic conditions. Do NOT copy CRRI Odisha advisories into Telangana as universal prescriptions. In the absence of a separate verified joint research prescription, the Vikaspedia figure (30–35 kg urea/acre at tillering) is retained strictly as an attributed general extension reference benchmark, not a universal prescription. This single split application must be kept strictly separate from the seasonal nutrient requirement. "
+            "Target Regions: Telangana, Andhra Pradesh, and South Indian Rice Zones. "
+            "1. Recommended Fertilizer Doses for Transplanted High-Yielding Paddy Varieties: "
+            "Recommended NPK dose: 100-120:60:40 kg NPK per hectare (equivalent to approximately 40.5 to 48.6 kg Nitrogen per acre based on 1 ha ≈ 2.471 acres, 24 kg Phosphorus P2O5, 16 kg Potash K2O per acre; up to 60 kg K2O/ha or 24 kg Potash/acre in potash-deficient soils) under irrigated medium-fertility soils. "
+            "Straight Fertilizer Requirements (Per Acre - Seasonal Nutrient Accounting): Total Seasonal Nitrogen Target: 40.5 to 48.6 kg Nitrogen per acre over the entire crop cycle across all splits under medium fertility. Theoretical Seasonal Urea Equivalent (Before DAP): Assuming 46% nitrogen in urea, the theoretical seasonal urea equivalent is approximately 88 to 106 kg Urea per acre (approx. 2 to 2.3 bags of 45 kg) ONLY under the theoretical assumption that 100% of seasonal nitrogen is supplied exclusively through straight urea (such as when non-nitrogenous Single Super Phosphate / SSP 0% N is used). CRITICAL NITROGEN DEDUCTION FOR DAP & OTHER INPUTS: Do NOT label 88–106 kg/acre as the farmer's confirmed seasonal requirement or recommend applying the entire quantity. When basal phosphorus is supplied using 50 kg DAP per acre, the DAP already supplies 18% N (9 kg Nitrogen per acre, equivalent to ~19.6 kg Urea). Therefore, after accounting for DAP nitrogen, the remaining theoretical seasonal urea equivalent across subsequent splits is reduced to approximately 68 to 86 kg Urea per acre (approx. 1.5 to 1.9 bags of 45 kg), not 88–106 kg. Describe these values only as theoretical calculations under the stated assumptions, not confirmed prescriptions. Mineral nitrogen supplied by basal complex fertilizers (e.g., 20:20:0:13, 28:28:0) must likewise be accounted for. For organic manures (FYM/compost), do NOT simply subtract the full total nitrogen content as though all of it were immediately available to the crop in the current season; apply only source-supported agronomic estimates of available nitrogen (as organic nitrogen mineralizes gradually over time). Total Phosphorus: 50 kg DAP (supplying 23 kg P2O5 and 9 kg N) OR 150 kg SSP (supplying 24 kg P2O5 and 0 kg N) per acre applied entirely as basal. Total Potash: 25 to 30 kg MOP (Muriate of Potash, 60% K2O for standard 40 kg K2O/ha dose, supplying 15 to 18 kg K2O per acre across splits; up to 40 kg MOP if 60 kg K2O/ha is used). "
+            "Scaled Theoretical Requirements for 2 Acres: Total Seasonal Nitrogen Target for 2 acres is 81 to 97 kg Nitrogen (theoretical equivalent of approximately 176 to 212 kg Urea if SSP is used). After accounting for 100 kg basal DAP (supplying 18 kg N), the remaining theoretical seasonal urea equivalent across splits is approximately 137 to 172 kg Urea for 2 acres, along with 100 kg DAP, and 50 to 60 kg MOP (up to 80 kg MOP if 60 kg K2O/ha is used). "
+            "2. Stage-Wise Fertilizer Split Application Schedule (Transplanted Paddy): "
+            "- Basal Application (నాట్లు వేసే సమయంలో / At Transplanting - 0 DAT): Apply full dose of Phosphorus (50 kg DAP or 150 kg SSP per acre) along with 1/3rd of Potash (10 to 15 kg MOP per acre / 20 to 30 kg MOP for 2 acres) and 1/3rd of Nitrogen: if 50 kg DAP was applied at basal, it supplied 9 kg N, leaving 4.5 to 7.2 kg N which mathematically corresponds to an estimated 10 to 16 kg Urea per acre (20 to 32 kg for 2 acres); if Single Super Phosphate (SSP) was used (0% N), basal nitrogen is 30 to 35 kg Urea per acre (60 to 70 kg for 2 acres). Apply 20 kg Zinc Sulphate (21%) per acre once every 2-3 seasons for zinc-deficient soils (never mix directly with DAP). "
+            "- Active Tillering Stage (పిలకల దశ - 20 to 30-35 Days After Transplanting - DAT / నాట్లు వేసిన 20 నుండి 30-35 రోజుల తర్వాత): "
+            "Secondary Extension Guidance (Vikaspedia Telugu Package of Practices): 'వరి పంట పిలకలు తొడిగే దశలో ఉన్నప్పుడు, ఎకరాకు 30-35 కిలోల యూరియాను బురద పదునులో చల్లుకోవాలి.' "
+            "Moisture conditions: Apply in shallow moisture / mud (బురద పదునులో). Drain standing water prior to top-dressing; re-irrigate 24 to 48 hours later. "
+            "Single-Application Top Dressing: Apply 1/3rd of Nitrogen: 30 to 35 kg Urea per acre for this specific split (for 2 acres: 60 to 70 kg Urea in total). Note: This 30 to 35 kg/acre applies strictly to THIS SINGLE TOP-DRESSING APPLICATION, not the seasonal total. "
+            "In light or sandy soils, apply second split of Potash (10 to 12 kg MOP per acre / 20 to 24 kg MOP for 2 acres) along with Urea. "
+            "- Panicle Initiation / Booting Stage (చిరుపొట్ట / అంకురం దశ - 40 to 45-50 Days After Transplanting - DAT): "
+            "Secondary Extension Guidance (Vikaspedia Telugu Package of Practices): 'అంకురం దశలో 30-35 కిలోల యూరియా మరియు 15 కిలోల మ్యూరేట్ ఆఫ్ పొటాష్ ఎరువును వేసుకోవాలి. ఈ దశలో కాంప్లెక్స్ ఎరువులను వాడరాదని సూచించడమైనది.' "
+            "Second Top Dressing: Apply remaining 1/3rd Nitrogen: 25 to 35 kg Urea per acre (for 2 acres: 50 to 70 kg Urea in total) along with remaining Potash (10 to 15 kg MOP per acre / 20 to 30 kg MOP for 2 acres). "
+            "Never apply excess nitrogen after panicle emergence to prevent crop lodging, prolonged maturity, and pest attacks. "
+            "3. Field Condition, Soil History, Variety Considerations & ICAR-IIRR Precision Advisory: "
+            "Prior Fertilizer History & Previous Urea Applications: If DAP or complex fertilizer was applied at basal, it provided initial nitrogen and phosphorus. Do not duplicate DAP; apply only recommended nitrogen top dressing as needed. "
+            "If urea was already applied, do NOT prescribe a fixed waiting schedule (such as automatically telling the farmer to wait until panicle initiation at 40-45 DAT) without verifying the applicable recommendation, quantity previously applied, date, and variety duration. Inquire for missing details and avoid confirming an additional dose when information is insufficient. "
+            "Soil Type Adjustments: In light, sandy, or chalka soils, apply nitrogen in 3 to 4 smaller splits to minimize leaching losses. In heavy black clay soils, nutrients are retained longer. "
+            "Variety Duration: Short-duration varieties (120-125 days) need nitrogen earlier (up to 25-30 DAT); long-duration varieties (140-150 days) require nitrogen up to 45-50 DAT. "
+            "ICAR-IIRR Scientific Advice on Site-Specific Nutrient Management: ICAR-IIRR does not recommend rigid blanket doses. Calibrate doses dynamically using ICAR-IIRR's NAPSRI tool based on Soil Health Card values, or monitor leaf color using the Leaf Colour Chart (LCC). "
+            "Safety & Agronomic Precaution: Excessive urea promotes succulent vegetative growth, increasing potential risks of crop lodging and vulnerability to blast (అగ్గి తెగులు) and stem borer (కాండం తొలిచే పురుగు). "
+            "Consult the local Mandal Agricultural Extension Officer (AEO) or Krishi Vigyan Kendra (KVK) for field-specific soil test calibration."
+        ),
+    },
+    {
         "title": "ICAR / Dr. YSRHU Chilli Thrips and Leaf Curl Management",
         "source": "ICAR-IIHR / Dr. YSRHU",
         "category": "Pest & Disease Control",
@@ -832,6 +872,10 @@ CROP_ALIASES: List[Tuple[str, str]] = [
     # Single-word English and Telugu aliases
     ("paddy", "Paddy"),
     ("rice", "Paddy"),
+    ("vari", "Paddy"),
+    ("dhan", "Paddy"),
+    ("వరి పంట", "Paddy"),
+    ("వరిపంట", "Paddy"),
     ("రి పంటకు", "Paddy"),
     ("రి పంట", "Paddy"),
     ("వరి", "Paddy"),

@@ -77,7 +77,7 @@ engine_kwargs = {
 
 from sqlalchemy.pool import NullPool
 
-if "sqlite" in db_url:
+if "sqlite" in db_url and settings.app_env != "test":
     pass
 else:
     engine_kwargs.update({
