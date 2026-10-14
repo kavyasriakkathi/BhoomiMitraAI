@@ -955,6 +955,8 @@ def test_case_27_telugu_query_explicit_dap_and_urea_negation_personalized_fallba
     assert "నేల పరీక్ష నివేదిక" in resp
 
     # Attributed benchmark qualified without prescribing confirmed unverified dose
+    assert "60-70" not in resp and "60–70" not in resp
+    assert "30-35" not in resp and "30–35" not in resp
     assert "సాధారణ ప్రచురిత రిఫరెన్స్ మాత్రమే" in resp
     assert "ఖరారైన నిర్ధారణ కాదు" in resp
     assert "అదనపు మోతాదును నిర్ధారించలేము" in resp
@@ -1020,6 +1022,8 @@ def test_case_28_english_query_explicit_dap_and_urea_negation_personalized_fallb
     assert "soil test report or Soil Health Card" in resp
 
     # Attributed benchmark qualified
+    assert "60-70" not in resp and "60–70" not in resp
+    assert "30-35" not in resp and "30–35" not in resp
     assert "attributed general extension reference benchmark" in resp
     assert "not a confirmed field-specific recommendation" in resp
 
@@ -1085,6 +1089,8 @@ async def test_case_29_guardrails_intercept_premature_dose_and_return_personaliz
         assert "యూరియా లేదా పొటాష్ వేశారా" not in resp.response_text
         assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు" in resp.response_text
         assert "రకం/వంగడం" in resp.response_text
+        assert "60-70" not in resp.response_text and "60–70" not in resp.response_text
+        assert "30-35" not in resp.response_text and "30–35" not in resp.response_text
         assert "నేల పరీక్ష నివేదిక" in resp.response_text
 
 
@@ -1171,3 +1177,86 @@ def test_case_31_non_paddy_crops_not_misclassified_as_paddy():
     assert is_paddy_tillering_fertilizer_query(generic_transplant_query, crop="Paddy") is True
     paddy_explicit = "వరి నాట్లలో DAP వేయలేదు, 30 రోజులకు యూరియా ఎంత వేయాలి?"
     assert is_paddy_tillering_fertilizer_query(paddy_explicit, crop="Cotton") is True
+
+
+
+# =============================================================================
+# 32. Example WhatsApp Query Returns Safe Clarification Without Dose Benchmarks
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_32_example_query_returns_safe_clarification_without_numerical_dose_benchmarks():
+    """
+    Verifies that when a farmer states DAP and urea were not applied at 30 DAT:
+    "నాట్లలో DAP వేయలేదు.
+     ఇంతవరకు యూరియా కూడా వేయలేదు.
+     నాట్లు వేసి 30 రోజులు అయ్యాయి.
+     ఇప్పుడు ఏ ఎరువులు వేయాలి?"
+
+    The AI response:
+    1. Returns a safe clarification inquiry without numerical dose benchmarks (no 30-35 or 60-70 figures).
+    2. Asks ONLY for genuinely missing details (SSP/complex, variety, soil test).
+    3. Does NOT repeat questions for information already supplied (no asking about DAP or urea).
+    4. Explains excess nitrogen risks (lodging, blast, stem borer) without confirming an ungrounded dose.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from uuid import uuid4
+    from src.core.models import Farmer
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "PJTSAU Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "PJTSAU"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    # Flawed response attempting to output general benchmark figures
+    flawed_ai_response = (
+        "వరి పంట 30 రోజుల పిలకల దశలో ప్రాంతీయ వ్యవసాయ విస్తరణ మార్గదర్శకాల ప్రకారం 2 ఎకరాలకు సుమారు 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కిలోలు) "
+        "సాధారణ ప్రచురిత రిఫరెన్స్ మాత్రమే. సరైన మోతాదు కొరకు నాట్లలో SSP వేశారా? వరి రకం ఏది? నేల పరీక్ష నివేదిక ఉందా?"
+    )
+
+    query = (
+        "నాట్లలో DAP వేయలేదు.\n"
+        "ఇంతవరకు యూరియా కూడా వేయలేదు.\n"
+        "నాట్లు వేసి 30 రోజులు అయ్యాయి.\n"
+        "ఇప్పుడు ఏ ఎరువులు వేయాలి?"
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=flawed_ai_response):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message=query,
+        )
+        resp = await service.generate_ai_response(req)
+
+        # 1. No numerical fertilizer dose benchmarks that could be mistaken for an application instruction
+        assert "60-70" not in resp.response_text
+        assert "60–70" not in resp.response_text
+        assert "30-35" not in resp.response_text
+        assert "30–35" not in resp.response_text
+        assert "వేయండి" not in resp.response_text
+        assert "సిఫార్సు చేయబడుతుంది" not in resp.response_text
+
+        # 2. Asks ONLY for missing details (SSP/complex, variety, soil test)
+        assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు" in resp.response_text
+        assert "రకం/వంగడం" in resp.response_text
+        assert "నేల పరీక్ష నివేదిక" in resp.response_text
+
+        # 3. Does NOT repeat questions about DAP or urea
+        assert "DAP, SSP లేదా" not in resp.response_text
+        assert "DAP వేశారా" not in resp.response_text
+        assert "యూరియా లేదా పొటాష్ వేశారా" not in resp.response_text
+
+        # 4. Explains excess nitrogen risks (lodging / blast / stem borer)
+        assert "నేలకొరిగే" in resp.response_text
+        assert "అగ్గి తెగులు" in resp.response_text
+        assert "పురుగు" in resp.response_text
