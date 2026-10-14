@@ -81,7 +81,7 @@ class TestLanguageRegistryVoiceMappings:
     @pytest.mark.parametrize(
         "lang_code,expected_stt,expected_tts,expected_voice",
         [
-            ("te", "te-IN", "te-IN", "te-IN-Standard-A"),
+            ("te", "te-IN", "te-IN", "te-IN-Chirp3-HD-Charon"),
             ("hi", "hi-IN", "hi-IN", "hi-IN-Standard-A"),
             ("en", "en-IN", "en-IN", "en-IN-Standard-A"),
             ("ta", "ta-IN", "ta-IN", "ta-IN-Standard-A"),
@@ -232,7 +232,7 @@ class TestTTSServiceSynthesis:
             call_kwargs = mock_tts_client.synthesize_speech.call_args.kwargs
             req = call_kwargs.get("request")
             assert req.voice.language_code == "te-IN"
-            assert req.voice.name == "te-IN-Standard-A"
+            assert req.voice.name == "te-IN-Chirp3-HD-Charon"
 
     async def test_unsupported_languages_return_empty_list_without_calling_google(self):
         service = LanguageService()
@@ -286,7 +286,7 @@ class TestTTSServiceSynthesis:
     @pytest.mark.parametrize(
         "lang_code,voice_name,tts_code",
         [
-            ("te", "te-IN-Standard-A", "te-IN"),
+            ("te", "te-IN-Chirp3-HD-Charon", "te-IN"),
             ("hi", "hi-IN-Standard-A", "hi-IN"),
             ("en", "en-IN-Standard-A", "en-IN"),
             ("ta", "ta-IN-Standard-A", "ta-IN"),
@@ -349,7 +349,7 @@ class TestTTSServiceSynthesis:
         mock_tts_client = MagicMock()
         # First call fails on voice name, second call succeeds with generic locale
         mock_tts_client.synthesize_speech = AsyncMock(
-            side_effect=[RuntimeError("Voice te-IN-Standard-A not found"), fallback_resp]
+            side_effect=[RuntimeError("Voice te-IN-Chirp3-HD-Charon not found"), fallback_resp]
         )
 
         with patch.object(service, "_google_tts_client", mock_tts_client):

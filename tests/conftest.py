@@ -103,6 +103,10 @@ def webhook_test_settings(monkeypatch):
         "WHATSAPP_APP_SECRET",
         TEST_WHATSAPP_APP_SECRET,
     )
+    monkeypatch.setenv(
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "path/to/service-account.json",
+    )
 
     from src.config import get_settings
 
@@ -158,3 +162,42 @@ class SignedWebhookTestClient(TestClient):
                     headers["X-Hub-Signature-256"] = f"sha256={signature}"
 
         return super().post(url, *args, **kwargs)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_database():
+    """
+    Ensure all database tables are created for tests on the test database
+    and dispose the engine cleanly on teardown.
+    """
+    import asyncio
+    from src.config import get_settings
+    from src.core.database import Base, engine
+
+    settings = get_settings()
+    if settings.app_env == "test":
+        if engine.url.get_backend_name() != "sqlite":
+            pytest.exit(
+                "SAFETY CHECK FAILED: APP_ENV is 'test' but configured database backend is not SQLite. "
+                "Halting test run safely before any database connection or modification.",
+                returncode=1,
+            )
+
+        async def _init_models():
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            await engine.dispose()
+
+        asyncio.run(_init_models())
+
+        yield
+
+        async def _cleanup():
+            await engine.dispose()
+
+        try:
+            asyncio.run(_cleanup())
+        except Exception:
+            pass
+    else:
+        yield
