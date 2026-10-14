@@ -380,6 +380,217 @@ def has_relevant_dosage_ground_truth(query: str, rag_snippets: list) -> bool:
     return False
 
 
+def check_fertilizer_history_details(
+    message: str,
+    history_records: Optional[list] = None,
+) -> dict:
+    """
+    Identifies whether essential fertilizer history and variety information
+    are available in the farmer's current query or recent conversation history.
+
+    Distinguishes positive application history from explicit statements that
+    fertilizer was NOT applied (e.g., "నాట్లలో DAP వేయలేదు", "యూరియా ఇంకా వేయలేదు",
+    "ఇంతవరకు ఏ ఎరువూ వేయలేదు").
+
+    Returns dict with keys:
+    - has_basal_history (bool): Positive application of DAP, SSP, or complex fertilizers.
+    - has_prior_urea_or_potash (bool): Positive application of post-transplanting urea or potash.
+    - has_variety_info (bool): Rice variety or duration group (short, medium, long duration).
+    - has_soil_test_info (bool): Soil test results or Soil Health Card.
+    - has_essential_history (bool): True if basal, prior urea, or soil test is provided.
+    - asks_if_details_needed (bool): True if farmer is asking whether history/details are needed.
+    """
+    text_corpus = message or ""
+    if history_records:
+        for r in history_records:
+            if hasattr(r, "user_message") and r.user_message:
+                text_corpus += " " + r.user_message
+            elif isinstance(r, dict) and r.get("role") == "user":
+                parts = r.get("parts")
+                if isinstance(parts, str):
+                    text_corpus += " " + parts
+                elif isinstance(parts, list):
+                    text_corpus += " " + " ".join(str(p) for p in parts)
+
+    t = text_corpus.lower()
+    msg_l = (message or "").lower()
+
+    # Detect if farmer is asking whether details are needed rather than providing them
+    asks_if_details_needed = bool(re.search(
+        r"(?:వివరాలు|సమాచారం|details|information)\s*(?:అవసరమా|కావాలా|చెప్పాలా|needed|required|should\s+i\s+provide|necessary)",
+        msg_l,
+        re.IGNORECASE
+    ))
+
+    # General negation: e.g. "ఇంతవరకు ఏ ఎరువూ వేయలేదు", "no fertilizer applied"
+    general_fert_negated = bool(re.search(
+        r"(?:ఇంతవరకు|ఇప్పటివరకు|ఇప్పటిదాకా|గతంలో)\s*(?:ఎటువంటి|ఎలాంటి|ఏ)?\s*(?:ఎరువు|ఎరువులు|ఖాతరు)?\s*(?:కూడా|ఏమీ|ఏమి)?\s*(?:వేయలేదు|వేయ్యలేదు|చల్లలేదు|వాడలేదు|వేసుకోలేదు)"
+        r"|(?:ఎటువంటి|ఎలాంటి|ఏ)\s*(?:ఎరువు|ఎరువులు|ఖాతరు)\s*(?:కూడా|ఏమీ|ఏమి)?\s*(?:వేయలేదు|వేయ్యలేదు|చల్లలేదు|వాడలేదు|వేసుకోలేదు)"
+        r"|(?:haven'?t\s+applied|have\s+not\s+applied|didn'?t\s+apply|did\s+not\s+apply|never\s+applied|no)\s+(?:\w+\s*){0,2}(?:fertilizer|inputs?)",
+        t,
+        re.IGNORECASE
+    ))
+
+    # 1. Basal Fertilizer History (DAP, SSP, Complex, e.g. 50 kg DAP, SSP, 20:20:0)
+    basal_negated = general_fert_negated or bool(re.search(
+        r"(?:dap|డిఎపి|డి\.ఎ\.పి|డీఏపీ|ssp|ఎస్ఎస్పి|కాంప్లెక్స్|complex|20:20:0|28:28:0)\s*(?:ఏమీ|ఏమి|ఏదీ)?\s*(?:ఇంకా\s*)?(?:వేయలేదు|వేయ్యలేదు|చల్లలేదు|వాడలేదు|వేసుకోలేదు)"
+        r"|(?:నాట్లలో|నాట్ల\s*సమయంలో|చివరి\s*దుక్కిలో|basal)\s*(?:\w+\s*){0,3}(?:dap|ssp|కాంప్లెక్స్|complex|ఎరువు|fertilizer)?\s*(?:ఏమీ|ఏమి|కూడా)?\s*(?:వేయలేదు|వేయ్యలేదు|చల్లలేదు|వాడలేదు|వేసుకోలేదు)"
+        r"|(?:not\s+applied|didn'?t\s+apply|haven'?t\s+applied|never\s+applied|no)\s+(?:\w+\s*){0,3}(?:dap|ssp|complex|basal|fertilizer)"
+        r"|(?:dap|ssp|complex|basal)\s+(?:\w+\s*){0,2}(?:not\s+applied|not\s+used|not\s+given)",
+        t,
+        re.IGNORECASE
+    ))
+
+    has_basal_history = False
+    if not basal_negated:
+        basal_applied_patterns = [
+            r"(?:నాట్లలో|నాట్ల\s*సమయంలో|చివరి\s*దుక్కిలో|basal|at\s*transplanting)\s*(?:ఎకరానికి\s*)?\d*\s*(?:కేజీల|కిలోల|kg|బస్తాల|బ్యాగుల)?\s*(?:dap|డిఎపి|డి\.ఎ\.పి|డీఏపీ|ssp|ఎస్ఎస్పి|కాంప్లెక్స్|complex|20:20:0|28:28:0)\s*(?:వేశాను|వేసాను|వేశాం|వేసాం|చల్లాను|చల్లాం|వాడాను|వాడాం|applied|put|used|added)",
+            r"(?:dap|డిఎపి|డి\.ఎ\.పి|డీఏపీ|ssp|ఎస్ఎస్పి|కాంప్లెక్స్|complex|20:20:0|28:28:0)\s*(?:\d+\s*(?:కేజీల|కిలోల|kg|బస్తాల|బ్యాగుల)?\s*)?(?:వేశాను|వేసాను|వేశాం|వేసాం|చల్లాను|చల్లాం|వాడాను|వాడాం|applied|added|put|used)",
+            r"(?:applied|put|used|added)\s*(?:\d+\s*(?:kg|bags?)?\s*(?:of\s*)?)?(?:dap|ssp|complex)",
+            r"ఎకరానికి\s*\d+\s*(?:కిలోల|కేజీల|kg)?\s*(?:dap|ssp|కాంప్లెక్స్)\s*(?:వేశాను|వేసాను|వేశాం|వేసాం|చల్లాను|చల్లాం|వాడాను|వాడాం|applied|used)",
+        ]
+        if any(re.search(p, t, re.IGNORECASE) for p in basal_applied_patterns):
+            has_basal_history = True
+
+    # 2. Prior Post-Transplanting Urea or Potash Application
+    urea_negated = general_fert_negated or bool(re.search(
+        r"(?:యూరియా|urea|పొటాష్|potash|mop)\s*(?:ఏమీ|ఏమి|ఏదీ)?\s*(?:ఇంకా\s*)?(?:వేయలేదు|వేయ్యలేదు|చల్లలేదు|వాడలేదు|వేసుకోలేదు)"
+        r"|(?:ఇంకా|ఇంతవరకు|ఇప్పటివరకు)\s*(?:యూరియా|urea|పొటాష్|potash)\s*(?:వేయలేదు|వేయ్యలేదు|చల్లలేదు|వాడలేదు)"
+        r"|(?:not\s+applied|didn'?t\s+apply|haven'?t\s+applied|never\s+applied|no)\s+(?:\w+\s*){0,3}(?:urea|potash|mop|top-dressing|top\s*dressing)"
+        r"|(?:urea|potash|mop)\s+(?:\w+\s*){0,2}(?:not\s+applied|not\s+used|not\s+given|not\s+yet\s+applied)",
+        t,
+        re.IGNORECASE
+    ))
+
+    has_prior_urea_or_potash = False
+    if not urea_negated:
+        prior_urea_patterns = [
+            r"(?:యూరియా|urea|పొటాష్|potash|mop)\s*(?:\d+\s*(?:కేజీల|కిలోల|kg|బస్తాల|బ్యాగుల)?\s*)?(?:వేశాను|వేసాను|వేశాం|వేసాం|చల్లాను|చల్లాం|వాడాను|వాడాం|applied|put|used|added)",
+            r"(?:applied|put|used|added)\s*(?:\d+\s*(?:kg|bags?)?\s*(?:of\s*)?)?(?:urea|potash|mop)",
+            r"(?:25|20|15|10)\s*రోజులప్పుడు\s*(?:\d+\s*(?:కేజీల|కిలోల|kg)?\s*)?(?:యూరియా|urea|పొటాష్|potash)\s*(?:వేశాను|వేసాను|వేశాం|వేసాం|చల్లాను|చల్లాం|applied|used)",
+            r"మొన్ననే\s*(?:\d+\s*(?:కేజీల|కిలోల|kg)?\s*)?(?:యూరియా|urea)\s*(?:వేశాను|వేసాను|వేశాం|చల్లాను|applied|used)",
+            r"(?:యూరియా|urea)\s*వేసి\s*\d+\s*రోజులు",
+        ]
+        if any(re.search(p, t, re.IGNORECASE) for p in prior_urea_patterns):
+            has_prior_urea_or_potash = True
+
+    # 3. Variety / Duration Group Info
+    has_variety_info = False
+    variety_patterns = [
+        r"\b(?:short|medium|long)\s*duration\b",
+        r"(?:స్వల్ప|మధ్య|దీర్ఘ)\s*కాలిక",
+        r"(?:రకం|వంగడం|variety)\s*[:=]?\s*(?:bpt|mtu|rnr|telangana\s*sona|sambha|సాంబ|1010|5204|15048)",
+        r"\b(?:bpt\s*5204|mtu\s*1010|rnr\s*15048|telangana\s*sona)\b",
+    ]
+    if any(re.search(p, t, re.IGNORECASE) for p in variety_patterns):
+        has_variety_info = True
+
+    # 4. Soil-test Info (Soil Health Card)
+    has_soil_test_info = False
+    soil_test_patterns = [
+        r"(?:సాయిల్\s*టెస్ట్|భూసార\s*పరీక్ష|నేల\s*పరీక్ష|soil\s*test|soil\s*health\s*card).*(?:రిపోర్ట్\s*ఉంది|రిపోర్టు\s*ఉంది|ఉంది|చేయించాను|shows|report\s*available|available)",
+        r"(?:నత్రజని|నైట్రోజన్|భాస్వరం|nitrogen|phosphorus)\s*(?:ఎక్కువ|తక్కువ|హై|లో|high|low|medium|మధ్యస్థం)",
+    ]
+    if any(re.search(p, t, re.IGNORECASE) for p in soil_test_patterns):
+        has_soil_test_info = True
+
+    has_essential_history = has_basal_history or has_prior_urea_or_potash or has_soil_test_info
+
+    return {
+        "has_basal_history": has_basal_history,
+        "has_prior_urea_or_potash": has_prior_urea_or_potash,
+        "has_variety_info": has_variety_info,
+        "has_soil_test_info": has_soil_test_info,
+        "has_essential_history": has_essential_history,
+        "asks_if_details_needed": asks_if_details_needed,
+    }
+
+
+def is_paddy_tillering_fertilizer_query(message: str) -> bool:
+    """
+    Detects if query is asking for paddy fertilizer advice at tillering stage / around 30 days DAT.
+    """
+    if not message:
+        return False
+    t = message.lower()
+    is_paddy = any(k in t for k in ["వరి", "వరికి", "వరిలో", "వరిపంట", "paddy", "rice", "vari", "dhan", "धान", "நெல்"])
+    is_fert = any(k in t for k in [
+        "ఎరువు", "ఎరువులు", "యూరియా", "మోతాదు", "fertilizer", "fertilizers", "urea", "dose", "dosage", "eruvu", "eruvulu", "ఖాతరు", "खाद"
+    ])
+    is_stage = any(k in t for k in [
+        "30", "35", "25", "20", "రోజులు", "రోజుల", "days", "dat", "పిలక", "పిలకల", "tillering", "నాట్లు వేసి", "transplanting"
+    ])
+    return is_paddy and is_fert and is_stage
+
+
+def build_unconfirmed_paddy_fertilizer_guidance(user_lang: str = "te", acres: float = 2.0) -> str:
+    """
+    Constructs an attributed, unconfirmed extension reference guidance response
+    for paddy at 30 DAT tillering stage when essential fertilizer history is missing.
+    """
+    if user_lang == "te":
+        if acres == 2.0:
+            qty_text = "2 ఎకరాలకు సుమారు 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కిలోలు)"
+        elif acres and acres > 0:
+            min_q = int(30 * acres)
+            max_q = int(35 * acres)
+            qty_text = f"{acres:g} ఎకరాలకు సుమారు {min_q}-{max_q} కిలోల యూరియా (ఎకరానికి 30-35 కిలోలు)"
+        else:
+            qty_text = "ఎకరానికి సుమారు 30-35 కిలోల యూరియా"
+
+        return (
+            f"వరి పంట 30 రోజుల పిలకల దశలో ప్రాంతీయ వ్యవసాయ విస్తరణ మార్గదర్శకాల ప్రకారం {qty_text} "
+            f"సాధారణ ప్రచురిత రిఫరెన్స్ మాత్రమే, ఇది మీ పొలానికి ఖరారైన నిర్ధారణ కాదు. నాట్ల మరియు మునుపటి ఎరువుల వివరాలు లేకుండా "
+            f"అదనపు మోతాదును నిర్ధారించలేము; అధిక నత్రజని పంట నేలకొరిగే ప్రమాదాన్ని, అగ్గి తెగులు మరియు కాండం తొలిచే పురుగుల ఉధృతిని పెంచుతుంది.\n\n"
+            f"సరైన మోతాదును నిర్ణయించడానికి దయచేసి ఈ వివరాలు తెలపండి:\n"
+            f"1. నాట్ల సమయంలో DAP, SSP లేదా కాంప్లెక్స్ ఎరువులు ఏవైనా వేశారా, ఎంత మోతాదులో వేశారు?\n"
+            f"2. నాట్లు వేసిన తర్వాత ఇప్పటికే ఏదైనా యూరియా లేదా పొటాష్ వేశారా (ఎంత మోతాదు, ఏ తేదీ/దశలో)?\n"
+            f"3. మీరు సాగు చేస్తున్న వరి రకం/వంగడం ఏది (స్వల్పకాలిక లేదా దీర్ఘకాలిక)?\n"
+            f"4. నేల పరీక్ష నివేదిక (Soil Health Card) అందుబాటులో ఉందా? 🙏"
+        )
+    elif user_lang == "hi":
+        if acres == 2.0:
+            qty_text = "2 एकड़ के लिए लगभग 60-70 किलो यूरिया (30-35 किलो प्रति एकड़)"
+        elif acres and acres > 0:
+            min_q = int(30 * acres)
+            max_q = int(35 * acres)
+            qty_text = f"{acres:g} एकड़ के लिए लगभग {min_q}-{max_q} किलो यूरिया (30-35 किलो प्रति एकड़)"
+        else:
+            qty_text = "लगभग 30-35 किलो यूरिया प्रति एकड़"
+
+        return (
+            f"धान की फसल में 30 दिन की कल्ले फूटने की अवस्था पर क्षेत्रीय कृषि विस्तार दिशा-निर्देशों के अनुसार {qty_text} "
+            f"केवल एक सामान्य प्रकाशित संदर्भ (रेफरेंस) है, यह आपके खेत के लिए अंतिम सिफारिश नहीं है। पिछली खाद की जानकारी के बिना "
+            f"अतिरिक्त मात्रा तय नहीं की जा सकती; अधिक नाइट्रोजन से फसल गिरने का खतरा तथा झुलसा (ब्लास्ट) व तना छेदक कीट का प्रकोप बढ़ जाता है।\n\n"
+            f"सटीक मात्रा तय करने के लिए कृपया बताएं:\n"
+            f"1. रोपाई के समय DAP, SSP या कोई कॉम्प्लेक्स खाद डाली थी, और कितनी मात्रा में?\n"
+            f"2. रोपाई के बाद क्या पहले कोई यूरिया या पोटाश डाला गया है (कितनी मात्रा और किस तारीख को)?\n"
+            f"3. आप धान की कौन सी किस्म उगा रहे हैं (कम अवधि या लंबी अवधि)?\n"
+            f"4. क्या मृदा परीक्षण रिपोर्ट (Soil Health Card) उपलब्ध है? 🙏"
+        )
+    else:
+        if acres == 2.0:
+            qty_text = "approximately 60-70 kg Urea for 2 acres (30-35 kg per acre)"
+        elif acres and acres > 0:
+            min_q = int(30 * acres)
+            max_q = int(35 * acres)
+            qty_text = f"approximately {min_q}-{max_q} kg Urea for {acres:g} acres (30-35 kg per acre)"
+        else:
+            qty_text = "approximately 30-35 kg Urea per acre"
+
+        return (
+            f"For paddy at the 30-day tillering stage, regional agricultural extension guidelines cite {qty_text} "
+            f"strictly as an attributed general extension reference benchmark, not a confirmed field-specific recommendation. "
+            f"An additional fertilizer dose cannot be confirmed without knowing prior fertilizer applications and variety duration, "
+            f"as excess nitrogen increases risks of crop lodging, blast disease, and stem borer attack.\n\n"
+            f"To determine the correct field recommendation, please share:\n"
+            f"1. Which basal fertilizers (DAP, SSP, or complex) were applied at transplanting, and in what quantities?\n"
+            f"2. Has any urea or potash already been applied after transplanting (amounts and dates/crop stages)?\n"
+            f"3. Which rice variety or duration group (short, medium, or long duration) are you cultivating?\n"
+            f"4. Do you have a soil test report or Soil Health Card? 🙏"
+        )
+
+
 class AIService:
     def __init__(self, repository: AIRepository):
         self.repository = repository
@@ -519,7 +730,9 @@ class AIService:
                         rag_context_text = (
                             "=== RETRIEVED TRUSTED AGRICULTURAL KNOWLEDGE (GROUND TRUTH) ===\n"
                             "CRITICAL INSTRUCTION: The following knowledge is verified agronomic ground truth. You MUST strictly use ONLY these verified treatments, products, and numeric dosages. "
-                            "For fertilizer guidance: Present verified rates as general extension benchmarks, inquire whether basal fertilizers (DAP/SSP) or earlier urea splits were already applied, and advise soil test calibration. "
+                            "For fertilizer guidance: Identify whether fertilizer history (basal DAP/SSP/complex, prior urea/potash) and variety duration are already known. "
+                            "If essential fertilizer history is missing, do NOT instruct the farmer to apply fertilizer or present any quantity as a confirmed field recommendation. "
+                            "Explain published figures strictly as attributed general extension reference benchmarks, explain risks of excess nitrogen (lodging, blast, stem borer), and ask for the missing basal, prior urea, variety, and soil-test details. "
                             "Do NOT add, alter, extrapolate, or invent different dosages or unverified chemicals. Translate directly into the farmer's language:\n"
                             + "\n".join(rag_snippets)
                         )
@@ -553,6 +766,28 @@ class AIService:
             full_system_prompt = f"{BHOOMIMITRA_SYSTEM_PROMPT}\n\n{lang_directive}\n\n{farmer_context}\n\n{memory_context}"
             if rag_context_text:
                 full_system_prompt += f"\n\n{rag_context_text}"
+
+            is_paddy_tillering_fert = is_paddy_tillering_fertilizer_query(request.message)
+            fert_hist_info = check_fertilizer_history_details(request.message, history_records)
+            if is_paddy_tillering_fert and not fert_hist_info["has_essential_history"]:
+                full_system_prompt += (
+                    "\n\n=== MANDATORY PADDY TILLERING FERTILIZER RULE ===\n"
+                    "The farmer is asking what additional fertilizer to apply for paddy at around 30 days after transplanting (tillering stage), "
+                    "but essential fertilizer history (basal DAP/SSP/complex quantities, prior urea/potash applied, variety duration, soil test) is missing.\n"
+                    "MANDATORY REQUIREMENTS:\n"
+                    "1. Do NOT present 60–70 kg for two acres (or 30–35 kg/acre) as a confirmed additional dose, and do NOT tell the farmer to apply it now "
+                    "(NEVER instruct 'వేయండి', 'వేయాలి', 'సిఫార్సు చేయబడుతుంది', or 'apply now' for an unconfirmed dose).\n"
+                    "2. You may explain the published 30–35 kg/acre tillering figure (60–70 kg for 2 acres) strictly as an attributed general extension reference benchmark "
+                    "(e.g., 'ప్రాంతీయ విస్తరణ మార్గదర్శకాల ప్రకారం ప్రచురిత సాధారణ రిఫరెన్స్ మాత్రమే'), and clearly distinguish it from a confirmed field-specific recommendation.\n"
+                    "3. Clearly explain that without knowing prior fertilizer applications and variety, an additional dose cannot be confirmed or recommended yet, "
+                    "because duplicate or excess nitrogen increases risks of crop lodging (నేలకొరిగే ప్రమాదం) and susceptibility to blast disease (అగ్గి తెగులు) and stem borer (కాండం తొలిచే పురుగు).\n"
+                    "4. Ask the farmer about:\n"
+                    "   - Basal DAP, SSP, and complex fertilizers, including quantities applied.\n"
+                    "   - Urea or potash applied after transplanting, including amounts and dates or crop stages.\n"
+                    "   - Rice variety / duration group (short, medium, or long duration).\n"
+                    "   - Soil-test information (Soil Health Card) when available.\n"
+                    "5. Do NOT automatically tell every farmer to apply more urea or to skip the next application."
+                )
 
 
             # 6. Call Gemini API
@@ -589,7 +824,7 @@ class AIService:
                     ai_text = get_unverified_dosage_fallback_response(user_lang, is_fertilizer=is_fertilizer_only_query)
                 else:
                     # Verify generated numeric figures exist in the provided RAG ground truth or are valid area-scaled amounts
-                    rag_text_lower = rag_context_text.lower()
+                    rag_text_lower = "\n".join(rag_snippets).lower() if rag_snippets else rag_context_text.lower()
                     generated_numbers = re.findall(r'\b\d+(?:[.,]\d+)?\b', " ".join(output_dosage_matches))
                     rag_numbers = set(re.findall(r'\b\d+(?:[.,]\d+)?\b', rag_text_lower))
 
@@ -620,6 +855,25 @@ class AIService:
                         ai_text = get_unverified_dosage_fallback_response(user_lang, is_fertilizer=is_fertilizer_only_query)
             elif is_dosage_req and not has_grounding:
                 ai_text = get_unverified_dosage_fallback_response(user_lang, is_fertilizer=is_fertilizer_only_query)
+
+            # 6.6 Safety Guardrail: Prevent unconfirmed additional fertilizer dosage or premature application instruction
+            if is_paddy_tillering_fert and not fert_hist_info["has_essential_history"]:
+                instructs_immediate_apply = bool(re.search(
+                    r'(?:60\s*(?:-|to|నుండి)\s*70|30\s*(?:-|to|నుండి)\s*35)\s*(?:kg|kgs|కేజీల|కిలోల|కిలోలు)?\s*(?:యూరియా|urea)?.*'
+                    r'(?:సిఫార్సు\s*చేయబడుతుంది|సిఫారసు\s*చేయబడుతుంది|వేయండి|వేయాలి|వేసుకోవాలి|చల్లుకోండి|చల్లాలి|apply\s+now|is\s+recommended\s+to\s+apply)',
+                    ai_text,
+                    re.IGNORECASE
+                ))
+                confirms_without_qualification = (
+                    ("సిఫార్సు చేయబడుతుంది" in ai_text or "వేయాలి" in ai_text or "వేయండి" in ai_text or "వేసుకోవాలి" in ai_text)
+                    and not any(w in ai_text for w in ["రిఫరెన్స్", "నిర్ధారణ కాదు", "ఖరారైన నిర్ధారణ కాదు", "నిర్ధారించలేము", "ఖరారు చేయలేము", "reference only", "not confirmed", "cannot confirm"])
+                )
+                if instructs_immediate_apply or confirms_without_qualification:
+                    logger.warning(
+                        f"[FERTILIZER GUIDANCE GUARD TRIGGERED] Unconfirmed paddy dosage recommended or instructed to apply before history known for farmer {request.farmer_id}. "
+                        f"Replacing with compliant extension reference benchmark and history inquiry."
+                    )
+                    ai_text = build_unconfirmed_paddy_fertilizer_guidance(user_lang, acres=effective_land_size or 2.0)
 
             total_ai_time = time.time() - service_start_time
             logger.info(
