@@ -470,22 +470,27 @@ def get_unverified_fertilizer_fallback_response(
     urea_neg = fert_hist_info.get("urea_negated", False)
     has_basal = fert_hist_info.get("has_basal_history", False)
     has_variety = fert_hist_info.get("has_variety_info", False)
+    variety_unk = fert_hist_info.get("variety_unknown", False)
     has_soil = fert_hist_info.get("has_soil_test_info", False)
+    soil_neg = fert_hist_info.get("soil_test_negated", False)
     general_fert_neg = fert_hist_info.get("general_fert_negated", False)
+    ssp_neg = fert_hist_info.get("ssp_or_complex_negated", False)
+    ssp_applied = fert_hist_info.get("ssp_or_complex_applied", False)
 
     # If no specific details or negations were provided, return default standard response verbatim
-    if not (dap_neg or urea_neg or has_basal or has_variety or has_soil or general_fert_neg):
+    if not (dap_neg or urea_neg or has_basal or has_variety or variety_unk or has_soil or soil_neg or general_fert_neg or ssp_neg or ssp_applied):
         return default_resp
 
     if language == "te":
         questions = []
-        if not has_variety:
+        if not has_variety and not variety_unk:
             questions.append("మీ పంట రకం/వంగడం ఏది?")
         if dap_neg:
-            questions.append("నాట్లు/విత్తే సమయంలో SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు ఏవైనా వేశారా?")
-        elif not has_basal and not general_fert_neg:
+            if not ssp_neg and not ssp_applied and not general_fert_neg:
+                questions.append("నాట్లు/విత్తే సమయంలో SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు ఏవైనా వేశారా?")
+        elif not has_basal and not general_fert_neg and not ssp_neg:
             questions.append("నాట్లు/విత్తే సమయంలో ఏవైనా ఎరువులు (DAP/SSP/కాంప్లెక్స్) వేశారా?")
-        if not has_soil:
+        if not has_soil and not soil_neg:
             questions.append("నేల పరీక్ష నివేదిక అందుబాటులో ఉందా?")
 
         if questions:
@@ -495,15 +500,23 @@ def get_unverified_fertilizer_fallback_response(
                 f"సరైన సిఫార్సు కొరకు: {q_text} "
                 f"నిర్ధారించకుండా అదనపు ఎరువులు వేయకండి. ఖచ్చితమైన మోతాదు కోసం స్థానిక AEO లేదా KVK అధికారులను సంప్రదించవచ్చు. 🙏"
             )
+        else:
+            return (
+                "మీరు ప్రాథమిక ఎరువులు (DAP/SSP/కాంప్లెక్స్) మరియు యూరియా వేయలేదని, పంట రకం తెలియదని, "
+                "నేల పరీక్ష నివేదిక అందుబాటులో లేదని అర్థమైంది. రకం కాలపరిమితి మరియు నేల స్వభావం తెలియకుండా నిర్దిష్ట రసాయన ఎరువుల మోతాదును "
+                "ఖరారు చేయడం సురక్షితం కాదు; అధిక నత్రజని పంట నేలకొరిగే ప్రమాదాన్ని, అగ్గి తెగులు మరియు కాండం తొలిచే పురుగుల ఉధృతిని పెంచుతుంది. "
+                "దయచేసి నిర్ధారించని మోతాదులో యూరియా వేయకండి. మీ క్షేత్ర స్థాయి నేల స్వభావం పరిశీలించి సరైన సలహా పొందడానికి స్థానిక వ్యవసాయ విస్తరణ అధికారి (AEO) లేదా KVK నిపుణులను సంప్రదించండి. 🙏"
+            )
     elif language == "en":
         questions = []
-        if not has_variety:
+        if not has_variety and not variety_unk:
             questions.append("Which crop and variety are you growing?")
         if dap_neg:
-            questions.append("Was SSP or another complex fertilizer applied at sowing/transplanting?")
-        elif not has_basal and not general_fert_neg:
+            if not ssp_neg and not ssp_applied and not general_fert_neg:
+                questions.append("Was SSP or another complex fertilizer applied at sowing/transplanting?")
+        elif not has_basal and not general_fert_neg and not ssp_neg:
             questions.append("What basal fertilizers (such as DAP/SSP/complex) were applied at sowing/transplanting?")
-        if not has_soil:
+        if not has_soil and not soil_neg:
             questions.append("Do you have a soil test report?")
 
         if questions:
@@ -512,6 +525,40 @@ def get_unverified_fertilizer_fallback_response(
                 f"The exact fertilizer quantity depends on your crop variety, soil conditions, and previous fertilizer applications. "
                 f"To help determine the suitable recommendation: {q_text} "
                 f"Please do not apply excess fertilizers without confirming recommendations. You may also consult your local AEO or KVK. 🙏"
+            )
+        else:
+            return (
+                "Understood that no basal fertilizers (DAP/SSP/complex) or urea have been applied, the crop variety is unknown, "
+                "and no soil test report is available. A confirmed chemical fertilizer recommendation cannot be safely determined "
+                "without knowing variety duration and soil fertility status, as excess nitrogen increases risks of crop lodging, blast disease, "
+                "and stem borer attack. Please avoid applying unverified urea doses. Consult your local Agricultural Extension Officer (AEO) "
+                "or Krishi Vigyan Kendra (KVK) for an on-field soil assessment and tailored guidance. 🙏"
+            )
+    elif language == "hi":
+        questions = []
+        if not has_variety and not variety_unk:
+            questions.append("आप कौन सी किस्म उगा रहे हैं?")
+        if dap_neg:
+            if not ssp_neg and not ssp_applied and not general_fert_neg:
+                questions.append("रोपाई/बुवाई के समय क्या SSP या अन्य कॉम्प्लेक्स खाद डाली थी?")
+        elif not has_basal and not general_fert_neg and not ssp_neg:
+            questions.append("रोपाई/बुवाई के समय क्या कोई बेसल खाद (DAP/SSP/कॉम्प्लेक्स) डाली थी?")
+        if not has_soil and not soil_neg:
+            questions.append("क्या मृदा परीक्षण रिपोर्ट उपलब्ध है?")
+
+        if questions:
+            q_text = " ".join(f"{i+1}. {q}" for i, q in enumerate(questions))
+            return (
+                f"खाद की सही मात्रा फसल की किस्म, मिट्टी की स्थिति और पहले दी गई खाद पर निर्भर करती है। "
+                f"उचित सलाह के लिए: {q_text} "
+                f"बिना पुष्टि अतिरिक्त खाद न डालें। सटीक मात्रा के लिए स्थानीय कृषि अधिकारी (AEO) या KVK से संपर्क कर सकते हैं। 🙏"
+            )
+        else:
+            return (
+                "यह समझ आ गया कि बेसल खाद (DAP/SSP/कॉम्प्लेक्स) या यूरिया नहीं डाला गया है, फसल की किस्म ज्ञात नहीं है, "
+                "और मृदा परीक्षण रिपोर्ट भी उपलब्ध नहीं है। किस्म की अवधि और मिट्टी की स्थिति जाने बिना रासायनिक खाद की मात्रा "
+                "तय करना सुरक्षित नहीं है; अत्यधिक नाइट्रोजन से फसल गिरने का खतरा, झुलसा और कीट का प्रकोप बढ़ जाता है। "
+                "कृपया बिना पुष्टि अधिक यूरिया न डालें। सही सलाह के लिए स्थानीय कृषि विस्तार अधिकारी (AEO) या KVK से संपर्क करें। 🙏"
             )
 
     return default_resp
