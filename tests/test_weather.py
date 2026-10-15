@@ -846,6 +846,8 @@ async def test_open_meteo_http_429_handled_safely_no_retry_storm():
     assert data_a is None
 
     # Case B: Retry-After = 1s -> retries at most once
+    from src.weather.openweather_client import clear_open_meteo_cooldown
+    clear_open_meteo_cooldown()
     om_retry_count = 0
 
     class FakeClientSmallRetry:
@@ -1145,3 +1147,168 @@ async def test_gps_coordinates_passed_correctly_through_pipeline():
         await enrich_response_with_weather(empty_db, "వాతావరణం 17.409296, 78.649556 వద్ద ఎలా ఉంది?", "", farmer)
         assert round(captured_coords["lat"], 6) == 17.409296
         assert round(captured_coords["lon"], 6) == 78.649556
+
+
+# ------------------------------------------------------------------
+# Regressions: Secret Redaction & Rate Limit Cooldown Protection
+# ------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_secret_redaction_httpx_logger_never_exposes_api_key(caplog):
+    """
+    REGRESSION: Ensure httpx request logging never exposes OPENWEATHER_API_KEY / appid
+    in logs, while preserving provider hostname, path, and HTTP status code.
+    """
+    from src.weather.openweather_client import OpenWeatherClient, clear_weather_memory_cache
+    from src.core.logging import SecretRedactingFilter, apply_secret_redacting_filter
+    import logging
+    import httpx
+
+    clear_weather_memory_cache()
+    fake_secret = "TEST_SECRET_KEY_EXPOSURE_CHECK_XYZ123456"
+    test_client = OpenWeatherClient(api_key=fake_secret, api_url="https://api.openweathermap.org/data/2.5/forecast")
+
+    httpx_logger = logging.getLogger("httpx")
+    httpx_logger.setLevel(logging.INFO)
+    apply_secret_redacting_filter(httpx_logger)
+
+    def mock_handler(request: httpx.Request):
+        assert fake_secret in str(request.url)  # Secret is sent over HTTP wire
+        return httpx.Response(401, json={"cod": 401, "message": "Invalid API key."})
+
+    transport = httpx.MockTransport(mock_handler)
+    with patch("httpx.AsyncClient", return_value=httpx.AsyncClient(transport=transport)):
+        with caplog.at_level(logging.INFO):
+            res = await test_client._call_api(latitude=17.409296, longitude=78.649556, district=None, state=None)
+            assert res is None
+
+    # Verify that fake_secret NEVER appears anywhere in any log record or captured log text
+    assert fake_secret not in caplog.text
+    for record in caplog.records:
+        assert fake_secret not in record.getMessage()
+
+    # Verify safe diagnostics are present
+    assert "api.openweathermap.org" in caplog.text
+    assert "/data/2.5/forecast" in caplog.text
+    assert "401" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_secret_redaction_exception_message_never_exposes_api_key(caplog):
+    """
+    REGRESSION: Ensure exceptions containing sensitive query parameters mask raw secrets as '***'.
+    """
+    from src.weather.openweather_client import OpenWeatherClient, clear_weather_memory_cache
+    import logging
+    import httpx
+
+    clear_weather_memory_cache()
+    fake_secret = "EXCEPTION_SECRET_KEY_CHECK_98765"
+    test_client = OpenWeatherClient(api_key=fake_secret, api_url="https://api.openweathermap.org/data/2.5/forecast")
+
+    async def mock_get(*args, **kwargs):
+        raise httpx.RequestError(f"Connection failed to https://api.openweathermap.org/data/2.5/forecast?lat=17.4&appid={fake_secret}")
+
+    with patch("httpx.AsyncClient.get", side_effect=mock_get):
+        with caplog.at_level(logging.INFO):
+            res = await test_client._call_api(latitude=17.409296, longitude=78.649556, district=None, state=None)
+            assert res is None
+
+    assert fake_secret not in caplog.text
+    assert "appid=***" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_openweather_401_logs_provider_response_without_retrying(caplog):
+    """
+    REGRESSION: HTTP 401 Unauthorized logs safe provider details without retrying or guessing.
+    """
+    from src.weather.openweather_client import OpenWeatherClient, clear_weather_memory_cache
+    import logging
+    import httpx
+
+    clear_weather_memory_cache()
+    fake_secret = "KEY_PENDING_ACTIVATION_CHECK_111"
+    test_client = OpenWeatherClient(api_key=fake_secret, api_url="https://api.openweathermap.org/data/2.5/forecast")
+
+    call_count = 0
+    def mock_handler(request: httpx.Request):
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(401, json={"cod": 401, "message": "Your API key is not activated yet."})
+
+    transport = httpx.MockTransport(mock_handler)
+    with patch("httpx.AsyncClient", return_value=httpx.AsyncClient(transport=transport)):
+        with caplog.at_level(logging.INFO):
+            res = await test_client._call_api(latitude=17.409296, longitude=78.649556, district=None, state=None)
+            assert res is None
+
+    assert call_count == 1  # No repeated retries
+    assert "Your API key is not activated yet" in caplog.text
+    assert fake_secret not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_open_meteo_429_persisted_activates_cooldown_preventing_storms(caplog):
+    """
+    REGRESSION: When Open-Meteo 429 persists after 1 bounded retry, activates cooldown to prevent retry storms.
+    """
+    from src.weather.openweather_client import OpenWeatherClient, clear_weather_memory_cache
+    import logging
+    import httpx
+
+    clear_weather_memory_cache()
+    test_client = OpenWeatherClient(api_key="", api_url="")
+
+    call_count = 0
+    def mock_handler(request: httpx.Request):
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(429, headers={"Retry-After": "0.1"})
+
+    transport = httpx.MockTransport(mock_handler)
+    with patch("httpx.AsyncClient", return_value=httpx.AsyncClient(transport=transport)):
+        with caplog.at_level(logging.INFO):
+            # First call: makes 1 initial request + 1 bounded retry (call_count == 2), both return 429
+            res1 = await test_client._fetch_open_meteo(latitude=17.409, longitude=78.649, loc_name="Farm")
+            assert res1 is None
+            assert call_count == 2
+            assert "Open-Meteo HTTP 429 persisted after bounded retry" in caplog.text
+
+            # Immediate subsequent call: should be blocked by cooldown without making any new HTTP requests
+            res2 = await test_client._fetch_open_meteo(latitude=17.409, longitude=78.649, loc_name="Farm")
+            assert res2 is None
+            assert call_count == 2  # Still 2, no new HTTP request was attempted
+            assert "Open-Meteo is currently in rate-limit cooldown" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_open_meteo_retry_after_large_activates_cooldown_immediately(caplog):
+    """
+    REGRESSION: If Open-Meteo returns Retry-After > 2.0s, aborts retry immediately and sets cooldown.
+    """
+    from src.weather.openweather_client import OpenWeatherClient, clear_weather_memory_cache
+    import logging
+    import httpx
+
+    clear_weather_memory_cache()
+    test_client = OpenWeatherClient(api_key="", api_url="")
+
+    call_count = 0
+    def mock_handler(request: httpx.Request):
+        nonlocal call_count
+        call_count += 1
+        return httpx.Response(429, headers={"Retry-After": "60"})
+
+    transport = httpx.MockTransport(mock_handler)
+    with patch("httpx.AsyncClient", return_value=httpx.AsyncClient(transport=transport)):
+        with caplog.at_level(logging.INFO):
+            res = await test_client._fetch_open_meteo(latitude=17.409, longitude=78.649, loc_name="Farm")
+            assert res is None
+            assert call_count == 1  # Did NOT retry because 60s > 2.0s
+            assert "Retry-After (60.0s) exceeds threshold" in caplog.text
+
+            # Next call during cooldown is blocked
+            res2 = await test_client._fetch_open_meteo(latitude=17.409, longitude=78.649, loc_name="Farm")
+            assert res2 is None
+            assert call_count == 1
