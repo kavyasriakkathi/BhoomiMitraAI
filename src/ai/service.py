@@ -584,6 +584,8 @@ def build_unconfirmed_paddy_fertilizer_guidance(
     for paddy at 30 DAT tillering stage when essential fertilizer history is missing.
     Personalizes clarifying inquiries based on what information has already been supplied
     (avoids re-asking about DAP, urea, or variety if already provided or negated).
+    When essential fertilizer history details/negations have been supplied, omits numerical dose benchmarks
+    (30-35 kg/acre or 60-70 kg/2 acres) so farmers do not mistake them for an immediate application instruction.
     """
     info = fert_hist_info or {}
     dap_neg = info.get("dap_negated", False)
@@ -593,6 +595,7 @@ def build_unconfirmed_paddy_fertilizer_guidance(
     has_variety = info.get("has_variety_info", False)
     has_soil = info.get("has_soil_test_info", False)
     general_fert_neg = info.get("general_fert_negated", False)
+    omit_dose_benchmark = info.get("omit_dose_benchmark", False) or dap_neg or urea_neg or general_fert_neg
 
     if user_lang == "te":
         if acres == 2.0:
@@ -620,6 +623,15 @@ def build_unconfirmed_paddy_fertilizer_guidance(
             questions.append("నేల పరీక్ష నివేదిక (Soil Health Card) అందుబాటులో ఉందా? 🙏")
 
         q_block = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions)) if questions else "దయచేసి మీ క్షేత్ర స్థాయి నేల స్వభావం మరియు వరి రకం వివరాలు సరిచూసుకోండి. 🙏"
+
+        if omit_dose_benchmark:
+            return (
+                "వరి పంట 30 రోజుల పిలకల దశలో ప్రాంతీయ వ్యవసాయ విస్తరణ మార్గదర్శకాల ప్రకారం "
+                "సాధారణ ప్రచురిత రిఫరెన్స్ మాత్రమే, ఇది మీ పొలానికి ఖరారైన నిర్ధారణ కాదు. నాట్ల మరియు మునుపటి ఎరువుల వివరాలు లేకుండా "
+                "అదనపు మోతాదును నిర్ధారించలేము; అధిక నత్రజని పంట నేలకొరిగే ప్రమాదాన్ని, అగ్గి తెగులు మరియు కాండం తొలిచే పురుగుల ఉధృతిని పెంచుతుంది.\n\n"
+                "సరైన మోతాదును నిర్ణయించడానికి దయచేసి ఈ వివరాలు తెలపండి:\n"
+                f"{q_block}"
+            )
 
         return (
             f"వరి పంట 30 రోజుల పిలకల దశలో ప్రాంతీయ వ్యవసాయ విస్తరణ మార్గదర్శకాల ప్రకారం {qty_text} "
@@ -655,6 +667,15 @@ def build_unconfirmed_paddy_fertilizer_guidance(
 
         q_block = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions)) if questions else "कृपया अपने खेत की मिट्टी और धान की किस्म की पुष्टि करें। 🙏"
 
+        if omit_dose_benchmark:
+            return (
+                "धान की फसल में 30 दिन की कल्ले फूटने की अवस्था पर क्षेत्रीय कृषि विस्तार दिशा-निर्देशों के अनुसार "
+                "केवल एक सामान्य प्रकाशित संदर्भ (रेफरेंस) है, यह आपके खेत के लिए अंतिम सिफारिश नहीं है। पिछली खाद की जानकारी के बिना "
+                "अतिरिक्त मात्रा तय नहीं की जा सकती; अधिक नाइट्रोजन से फसल गिरने का खतरा तथा झुलसा (ब्लास्ट) व तना छेदक कीट का प्रकोप बढ़ जाता है।\n\n"
+                "सटीक मात्रा तय करने के लिए कृपया बताएं:\n"
+                f"{q_block}"
+            )
+
         return (
             f"धान की फसल में 30 दिन की कल्ले फूटने की अवस्था पर क्षेत्रीय कृषि विस्तार दिशा-निर्देशों के अनुसार {qty_text} "
             f"केवल एक सामान्य प्रकाशित संदर्भ (रेफरेंस) है, यह आपके खेत के लिए अंतिम सिफारिश नहीं है। पिछली खाद की जानकारी के बिना "
@@ -688,6 +709,16 @@ def build_unconfirmed_paddy_fertilizer_guidance(
             questions.append("Do you have a soil test report or Soil Health Card? 🙏")
 
         q_block = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions)) if questions else "Please verify your field soil conditions and variety details. 🙏"
+
+        if omit_dose_benchmark:
+            return (
+                "For paddy at the 30-day tillering stage, regional agricultural extension guidelines provide "
+                "strictly as an attributed general extension reference benchmark, not a confirmed field-specific recommendation. "
+                "An additional fertilizer dose cannot be confirmed without knowing prior fertilizer applications and variety duration, "
+                "as excess nitrogen increases risks of crop lodging, blast disease, and stem borer attack.\n\n"
+                "To determine the correct field recommendation, please share:\n"
+                f"{q_block}"
+            )
 
         return (
             f"For paddy at the 30-day tillering stage, regional agricultural extension guidelines cite {qty_text} "
@@ -896,15 +927,24 @@ class AIService:
                     missing_inquiry_points.append("- Soil-test information (Soil Health Card) when available.")
                 notes_block = ("\nKNOWN CONTEXT (DO NOT RE-ASK):\n" + "\n".join(history_known_notes)) if history_known_notes else ""
                 inquiry_block = ("\nMISSING DETAILS TO ASK ABOUT:\n" + "\n".join(missing_inquiry_points)) if missing_inquiry_points else ""
+                if fert_hist_info.get("dap_negated") or fert_hist_info.get("urea_negated") or fert_hist_info.get("general_fert_negated"):
+                    benchmark_instruction = (
+                        "1. Do NOT recommend, calculate, prescribe, or include ANY numerical fertilizer dose benchmarks (such as 30–35 kg/acre or 60–70 kg for 2 acres) now, "
+                        "because the farmer has already provided negative application history and can easily mistake benchmark numbers for an immediate instruction to apply.\n"
+                    )
+                else:
+                    benchmark_instruction = (
+                        "1. Do NOT present 60–70 kg for two acres (or 30–35 kg/acre) as a confirmed additional dose, and do NOT tell the farmer to apply it now "
+                        "(NEVER instruct 'వేయండి', 'వేయాలి', 'సిఫార్సు చేయబడుతుంది', or 'apply now' for an unconfirmed dose).\n"
+                        "2. You may explain the published 30–35 kg/acre tillering figure (60–70 kg for 2 acres) strictly as an attributed general extension reference benchmark "
+                        "(e.g., 'ప్రాంతీయ విస్తరణ మార్గదర్శకాల ప్రకారం ప్రచురిత సాధారణ రిఫరెన్స్ మాత్రమే'), and clearly distinguish it from a confirmed field-specific recommendation.\n"
+                    )
                 full_system_prompt += (
                     "\n\n=== MANDATORY PADDY TILLERING FERTILIZER RULE ===\n"
                     "The farmer is asking what additional fertilizer to apply for paddy at around 30 days after transplanting (tillering stage), "
                     "but essential fertilizer history (basal DAP/SSP/complex quantities, prior urea/potash applied, variety duration, soil test) is missing.\n"
                     "MANDATORY REQUIREMENTS:\n"
-                    "1. Do NOT present 60–70 kg for two acres (or 30–35 kg/acre) as a confirmed additional dose, and do NOT tell the farmer to apply it now "
-                    "(NEVER instruct 'వేయండి', 'వేయాలి', 'సిఫార్సు చేయబడుతుంది', or 'apply now' for an unconfirmed dose).\n"
-                    "2. You may explain the published 30–35 kg/acre tillering figure (60–70 kg for 2 acres) strictly as an attributed general extension reference benchmark "
-                    "(e.g., 'ప్రాంతీయ విస్తరణ మార్గదర్శకాల ప్రకారం ప్రచురిత సాధారణ రిఫరెన్స్ మాత్రమే'), and clearly distinguish it from a confirmed field-specific recommendation.\n"
+                    f"{benchmark_instruction}"
                     "3. Clearly explain that without knowing prior fertilizer applications and variety, an additional dose cannot be confirmed or recommended yet, "
                     "because duplicate or excess nitrogen increases risks of crop lodging (నేలకొరిగే ప్రమాదం) and susceptibility to blast disease (అగ్గి తెగులు) and stem borer (కాండం తొలిచే పురుగు).\n"
                     f"4. Ask the farmer ONLY about genuinely missing details. Do NOT repeat questions for information already provided.{notes_block}{inquiry_block}\n"
@@ -912,7 +952,7 @@ class AIService:
                 )
             # 6. Call Gemini API
             logger.info(f"Processing AI request for farmer {request.farmer_id}: '{request.message[:80]}...'")
-            
+
             ai_text = await generate_response(
                 system_prompt=full_system_prompt,
                 conversation_history=history,
@@ -981,8 +1021,16 @@ class AIService:
 
             # 6.6 Safety Guardrail: Prevent unconfirmed additional fertilizer dosage or premature application instruction
             if is_paddy_tillering_fert and not fert_hist_info["has_essential_history"]:
+                has_premature_dose_benchmark = (
+                    (fert_hist_info.get("dap_negated") or fert_hist_info.get("urea_negated") or fert_hist_info.get("general_fert_negated"))
+                    and bool(re.search(
+                        r'\b(?:60\s*(?:-|to|నుండి|–)\s*70|30\s*(?:-|to|నుండి|–)\s*35)\s*(?:kg|kgs|కేజీల|కిలోల|కిలోలు)?\b',
+                        ai_text,
+                        re.IGNORECASE
+                    ))
+                )
                 instructs_immediate_apply = bool(re.search(
-                    r'(?:60\s*(?:-|to|నుండి)\s*70|30\s*(?:-|to|నుండి)\s*35)\s*(?:kg|kgs|కేజీల|కిలోల|కిలోలు)?\s*(?:యూరియా|urea)?.*'
+                    r'(?:60\s*(?:-|to|నుండి|–)\s*70|30\s*(?:-|to|నుండి|–)\s*35)?\s*(?:kg|kgs|కేజీల|కిలోల|కిలోలు)?\s*(?:యూరియా|urea)?.*'
                     r'(?:సిఫార్సు\s*చేయబడుతుంది|సిఫారసు\s*చేయబడుతుంది|వేయండి|వేయాలి|వేసుకోవాలి|చల్లుకోండి|చల్లాలి|apply\s+now|is\s+recommended\s+to\s+apply)',
                     ai_text,
                     re.IGNORECASE
@@ -991,9 +1039,9 @@ class AIService:
                     ("సిఫార్సు చేయబడుతుంది" in ai_text or "వేయాలి" in ai_text or "వేయండి" in ai_text or "వేసుకోవాలి" in ai_text)
                     and not any(w in ai_text for w in ["రిఫరెన్స్", "నిర్ధారణ కాదు", "ఖరారైన నిర్ధారణ కాదు", "నిర్ధారించలేము", "ఖరారు చేయలేము", "reference only", "not confirmed", "cannot confirm"])
                 )
-                if instructs_immediate_apply or confirms_without_qualification:
+                if has_premature_dose_benchmark or instructs_immediate_apply or confirms_without_qualification:
                     logger.warning(
-                        f"[FERTILIZER GUIDANCE GUARD TRIGGERED] Unconfirmed paddy dosage recommended or instructed to apply before history known for farmer {request.farmer_id}. "
+                        f"[FERTILIZER GUIDANCE GUARD TRIGGERED] Unconfirmed paddy dosage recommended, benchmarked, or instructed to apply before history known for farmer {request.farmer_id}. "
                         f"Replacing with compliant extension reference benchmark and history inquiry."
                     )
                     ai_text = build_unconfirmed_paddy_fertilizer_guidance(user_lang, acres=effective_land_size or 2.0, fert_hist_info=fert_hist_info)
@@ -1170,7 +1218,7 @@ async def process_image_message(
     and returns agronomic advice.
     """
     repo = AIRepository(db)
-    
+
     # 1. Fetch farmer profile
     profile = await repo.get_farmer_profile(farmer.id)
     user_caption = (conversation.user_message or "").strip()
@@ -1302,7 +1350,7 @@ async def process_image_message(
     from src.ai.gemini_client import generate_multimodal_response
     from src.ai.prompts import get_non_crop_image_response
     import json
-    
+
     try:
         ai_response_text = await generate_multimodal_response(
             system_prompt=full_system_prompt,
@@ -1313,7 +1361,7 @@ async def process_image_message(
         )
         if not ai_response_text:
             raise Exception("Empty response from AI")
-            
+
         # Parse the structured JSON output
         parsed_json = json.loads(ai_response_text)
         diagnosis_data = MultimodalDiagnosisResponse(**parsed_json)
@@ -1440,10 +1488,10 @@ async def process_image_message(
     except Exception as e:
         logger.warning(f"AI Vision unavailable or failed to parse for farmer {farmer.id}: {e}")
         reply_text = get_fallback_response(farmer.preferred_language)
-        
+
     conversation.ai_response = reply_text
     db.add(conversation)
     await db.commit()
-    
+
     return reply_text
 
