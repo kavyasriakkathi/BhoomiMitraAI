@@ -889,3 +889,285 @@ def test_case_26_fertilizer_history_detection_negation_and_positive_application(
     assert r6["has_soil_test_info"] is False
     assert r6["has_essential_history"] is False
     assert r6["asks_if_details_needed"] is True
+
+
+# =============================================================================
+# 27. Telugu Query: Explicit DAP and Urea Negation & Personalized Fallback
+# =============================================================================
+
+def test_case_27_telugu_query_explicit_dap_and_urea_negation_personalized_fallback():
+    """
+    Verifies that for the real production query:
+    'నాట్లలో DAP వేయలేదు.
+     ఇంతవరకు యూరియా కూడా వేయలేదు.
+     నాట్లు వేసి 30 రోజులు అయ్యాయి.
+     ఇప్పుడు ఏ ఎరువులు వేయాలి?'
+
+    1. The query is recognized as a paddy tillering fertilizer query and dosage-sensitive.
+    2. DAP negation and urea negation are explicitly recognized.
+    3. Essential history remains unconfirmed (no exact dosage confirmed yet).
+    4. Fallback does NOT repeat questions asking if DAP or urea was applied.
+    5. Fallback asks ONLY genuinely missing essential details:
+       - Whether SSP or another complex fertilizer was applied.
+       - Rice variety / duration group.
+       - Whether soil test report (Soil Health Card) is available.
+    """
+    from src.ai.service import (
+        is_paddy_tillering_fertilizer_query,
+        is_dosage_sensitive_query,
+        check_fertilizer_history_details,
+        build_unconfirmed_paddy_fertilizer_guidance,
+    )
+    from src.ai.prompts import get_unverified_dosage_fallback_response
+
+    query = (
+        "నాట్లలో DAP వేయలేదు.\n"
+        "ఇంతవరకు యూరియా కూడా వేయలేదు.\n"
+        "నాట్లు వేసి 30 రోజులు అయ్యాయి.\n"
+        "ఇప్పుడు ఏ ఎరువులు వేయాలి?"
+    )
+
+    # 1. Query detection
+    assert is_paddy_tillering_fertilizer_query(query) is True
+    assert is_dosage_sensitive_query(query) is True
+
+    # 2. History extraction
+    details = check_fertilizer_history_details(query)
+    assert details["dap_negated"] is True
+    assert details["urea_negated"] is True
+    assert details["has_basal_history"] is False
+    assert details["has_prior_urea_or_potash"] is False
+    assert details["has_variety_info"] is False
+    assert details["has_soil_test_info"] is False
+    assert details["has_essential_history"] is False
+
+    # 3. Personalized extension reference response
+    resp = build_unconfirmed_paddy_fertilizer_guidance("te", acres=2.0, fert_hist_info=details)
+
+    # Must NOT re-ask whether DAP or urea was applied
+    assert "DAP, SSP లేదా" not in resp
+    assert "DAP వేశారా" not in resp
+    assert "యూరియా లేదా పొటాష్ వేశారా" not in resp
+
+    # Must ask ONLY genuinely missing essential details
+    assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు" in resp
+    assert "వరి రకం/వంగడం" in resp
+    assert "నేల పరీక్ష నివేదిక" in resp
+
+    # Attributed benchmark qualified without prescribing confirmed unverified dose
+    assert "సాధారణ ప్రచురిత రిఫరెన్స్ మాత్రమే" in resp
+    assert "ఖరారైన నిర్ధారణ కాదు" in resp
+    assert "అదనపు మోతాదును నిర్ధారించలేము" in resp
+    assert "నేలకొరిగే ప్రమాదాన్ని" in resp
+
+    # 4. Personalized defense fallback
+    fallback = get_unverified_dosage_fallback_response("te", is_fertilizer=True, fert_hist_info=details)
+    assert "DAP/SSP" not in fallback
+    assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు" in fallback
+
+
+# =============================================================================
+# 28. English Equivalent: Explicit DAP and Urea Negation & Personalized Fallback
+# =============================================================================
+
+def test_case_28_english_query_explicit_dap_and_urea_negation_personalized_fallback():
+    """
+    Verifies that the English equivalent of the negative application query:
+    'DAP was not applied at transplanting.
+     Urea has not been applied so far.
+     It has been 30 days since transplanting.
+     Which fertilizers should be applied now?'
+
+    1. Detects paddy tillering query and dosage sensitivity.
+    2. Extracts DAP and urea negation correctly.
+    3. Fallback does not re-ask if DAP or urea was applied.
+    4. Fallback asks whether SSP or another complex fertilizer was applied, variety, and soil test.
+    """
+    from src.ai.service import (
+        is_paddy_tillering_fertilizer_query,
+        is_dosage_sensitive_query,
+        check_fertilizer_history_details,
+        build_unconfirmed_paddy_fertilizer_guidance,
+    )
+    from src.ai.prompts import get_unverified_dosage_fallback_response
+
+    query = (
+        "DAP was not applied at transplanting. "
+        "Urea has not been applied so far. "
+        "It has been 30 days since transplanting. "
+        "Which fertilizers should be applied now?"
+    )
+
+    assert is_paddy_tillering_fertilizer_query(query) is True
+    assert is_dosage_sensitive_query(query) is True
+
+    details = check_fertilizer_history_details(query)
+    assert details["dap_negated"] is True
+    assert details["urea_negated"] is True
+    assert details["has_basal_history"] is False
+    assert details["has_prior_urea_or_potash"] is False
+    assert details["has_essential_history"] is False
+
+    resp = build_unconfirmed_paddy_fertilizer_guidance("en", acres=2.0, fert_hist_info=details)
+
+    # Must NOT re-ask whether DAP or urea was applied
+    assert "Which basal fertilizers (DAP, SSP, or complex)" not in resp
+    assert "Has any urea or potash already been applied" not in resp
+
+    # Must ask ONLY genuinely missing details
+    assert "SSP or another complex fertilizer" in resp
+    assert "rice variety or duration group" in resp
+    assert "soil test report or Soil Health Card" in resp
+
+    # Attributed benchmark qualified
+    assert "attributed general extension reference benchmark" in resp
+    assert "not a confirmed field-specific recommendation" in resp
+
+    # English defense fallback verification
+    fallback = get_unverified_dosage_fallback_response("en", is_fertilizer=True, fert_hist_info=details)
+    assert "DAP/SSP" not in fallback
+    assert "SSP or another complex fertilizer" in fallback
+
+
+# =============================================================================
+# 29. Guardrails Intercept Premature Unconfirmed Dose & Return Personalized Guidance
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_29_guardrails_intercept_premature_dose_and_return_personalized_guidance():
+    """
+    Verifies that when Gemini generates an unverified dosage instruction for a farmer
+    who explicitly reported that DAP and urea were NOT applied, the guardrails intercept it
+    and replace it with the personalized reference guidance that does not re-ask about DAP or urea.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from uuid import uuid4
+    from src.core.models import Farmer
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "PJTSAU Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "PJTSAU"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    # Gemini attempts to instruct applying 65 kg urea now
+    unsafe_model_output = "వరి పంటకు 2 ఎకరాలకు 65 కిలోల యూరియా వేయండి."
+
+    query = (
+        "నాట్లలో DAP వేయలేదు.\n"
+        "ఇంతవరకు యూరియా కూడా వేయలేదు.\n"
+        "నాట్లు వేసి 30 రోజులు అయ్యాయి.\n"
+        "ఇప్పుడు ఏ ఎరువులు వేయాలి?"
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=unsafe_model_output):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message=query,
+        )
+        resp = await service.generate_ai_response(req)
+
+        # Unsafe instruction intercepted
+        assert "వేయండి" not in resp.response_text
+
+        # Replaced with personalized guidance
+        assert "DAP, SSP లేదా" not in resp.response_text
+        assert "DAP వేశారా" not in resp.response_text
+        assert "యూరియా లేదా పొటాష్ వేశారా" not in resp.response_text
+        assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు" in resp.response_text
+        assert "రకం/వంగడం" in resp.response_text
+        assert "నేల పరీక్ష నివేదిక" in resp.response_text
+
+
+# =============================================================================
+# 30. Conversation History Preserved in Personalized Fallback
+# =============================================================================
+
+def test_case_30_conversation_history_reaches_fallback_correctly():
+    """
+    Verifies that when prior conversation history contains crop variety information,
+    the personalized fallback recognizes that variety is already known and avoids
+    re-asking about variety.
+    """
+    from unittest.mock import MagicMock
+    from src.ai.service import check_fertilizer_history_details, build_unconfirmed_paddy_fertilizer_guidance
+
+    # Prior turn in conversation where farmer provided variety
+    prior_turn = MagicMock()
+    prior_turn.user_message = "మాది స్వల్పకాలిక వరి రకం RNR 15048 (తెలంగాణ సోనా)"
+    prior_turn.ai_response = "మంచిది, RNR 15048 రకం వివరాలు నమోదు చేయబడ్డాయి."
+
+    current_query = (
+        "నాట్లలో DAP వేయలేదు.\n"
+        "ఇంతవరకు యూరియా కూడా వేయలేదు.\n"
+        "నాట్లు వేసి 30 రోజులు అయ్యాయి.\n"
+        "ఇప్పుడు ఏ ఎరువులు వేయాలి?"
+    )
+
+    details = check_fertilizer_history_details(current_query, history_records=[prior_turn])
+
+    assert details["dap_negated"] is True
+    assert details["urea_negated"] is True
+    assert details["has_variety_info"] is True  # Variety known from history!
+    assert details["has_soil_test_info"] is False
+
+    resp = build_unconfirmed_paddy_fertilizer_guidance("te", acres=2.0, fert_hist_info=details)
+
+    # Must NOT ask if DAP or urea was applied
+    assert "DAP వేశారా" not in resp
+    assert "యూరియా లేదా పొటాష్ వేశారా" not in resp
+
+    # Must NOT ask for variety since it was already provided in prior history!
+    assert "మీరు సాగు చేస్తున్న వరి రకం/వంగడం ఏది" not in resp
+
+    # Must ask ONLY genuinely missing details (SSP/complex and soil test)
+    assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు" in resp
+    assert "నేల పరీక్ష నివేదిక" in resp
+
+
+
+# =============================================================================
+# 31. Non-Paddy Crops Not Misclassified as Paddy Tillering Fertilizer Queries
+# =============================================================================
+
+def test_case_31_non_paddy_crops_not_misclassified_as_paddy():
+    """
+    Verifies that paddy-specific guardrails do not incorrectly classify
+    clearly identified non-paddy crops (such as chilli, tomato, cotton) as paddy,
+    even when transplanting or 30-day stage keywords are present.
+    """
+    from src.ai.service import is_paddy_tillering_fertilizer_query
+
+    # English non-paddy transplanting queries
+    chilli_query = "Chilli transplanting was done 30 days ago. What fertilizer should be applied?"
+    assert is_paddy_tillering_fertilizer_query(chilli_query) is False
+    assert is_paddy_tillering_fertilizer_query(chilli_query, crop="Chilli") is False
+
+    # Telugu non-paddy transplanting queries
+    tomato_query = "టమాటా నాట్లు వేసి 30 రోజులు అయ్యాయి. ఏ ఎరువులు వేయాలి?"
+    assert is_paddy_tillering_fertilizer_query(tomato_query) is False
+    assert is_paddy_tillering_fertilizer_query(tomato_query, crop="Tomato") is False
+
+    mirchi_query = "మిర్చి నాట్లలో DAP వేయలేదు, ఇప్పుడు ఏ ఎరువు వేయాలి?"
+    assert is_paddy_tillering_fertilizer_query(mirchi_query) is False
+    assert is_paddy_tillering_fertilizer_query(mirchi_query, crop="Chilli") is False
+
+    # Non-paddy crop in context/profile without explicit paddy mention in message
+    generic_transplant_query = "నాట్లు వేసి 30 రోజులు అయ్యాయి. ఏ ఎరువులు వేయాలి?"
+    assert is_paddy_tillering_fertilizer_query(generic_transplant_query, crop="Chilli") is False
+    assert is_paddy_tillering_fertilizer_query(generic_transplant_query, crop="Cotton") is False
+
+    # Still correctly identifies paddy when crop is paddy or query has explicit paddy keywords
+    assert is_paddy_tillering_fertilizer_query(generic_transplant_query) is True
+    assert is_paddy_tillering_fertilizer_query(generic_transplant_query, crop="Paddy") is True
+    paddy_explicit = "వరి నాట్లలో DAP వేయలేదు, 30 రోజులకు యూరియా ఎంత వేయాలి?"
+    assert is_paddy_tillering_fertilizer_query(paddy_explicit, crop="Cotton") is True

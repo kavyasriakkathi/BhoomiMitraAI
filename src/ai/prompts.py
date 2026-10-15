@@ -446,16 +446,75 @@ UNVERIFIED_FERTILIZER_FALLBACK_RESPONSE_TE = UNVERIFIED_FERTILIZER_FALLBACK_RESP
 UNVERIFIED_FERTILIZER_FALLBACK_RESPONSE_EN = UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["en"]
 
 
-def get_unverified_dosage_fallback_response(language: str = "te", is_fertilizer: bool = False) -> str:
+def get_unverified_dosage_fallback_response(
+    language: str = "te",
+    is_fertilizer: bool = False,
+    fert_hist_info: dict = None,
+) -> str:
     """Return a safe localized fallback when exact fertilizer/chemical dosage is ungrounded in RAG."""
     if is_fertilizer:
-        return UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES.get(language, UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"])
+        return get_unverified_fertilizer_fallback_response(language, fert_hist_info=fert_hist_info)
     return UNVERIFIED_DOSAGE_FALLBACK_RESPONSES.get(language, UNVERIFIED_DOSAGE_FALLBACK_RESPONSES["te"])
 
 
-def get_unverified_fertilizer_fallback_response(language: str = "te") -> str:
-    """Return a constructive clarifying fallback when fertilizer dosage is ungrounded in RAG."""
-    return UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES.get(language, UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"])
+def get_unverified_fertilizer_fallback_response(
+    language: str = "te",
+    fert_hist_info: dict = None,
+) -> str:
+    """Return a constructive clarifying fallback when fertilizer dosage is ungrounded in RAG, personalized to known history."""
+    default_resp = UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES.get(language, UNVERIFIED_FERTILIZER_FALLBACK_RESPONSES["te"])
+    if not fert_hist_info:
+        return default_resp
+
+    dap_neg = fert_hist_info.get("dap_negated", False)
+    urea_neg = fert_hist_info.get("urea_negated", False)
+    has_basal = fert_hist_info.get("has_basal_history", False)
+    has_variety = fert_hist_info.get("has_variety_info", False)
+    has_soil = fert_hist_info.get("has_soil_test_info", False)
+    general_fert_neg = fert_hist_info.get("general_fert_negated", False)
+
+    # If no specific details or negations were provided, return default standard response verbatim
+    if not (dap_neg or urea_neg or has_basal or has_variety or has_soil or general_fert_neg):
+        return default_resp
+
+    if language == "te":
+        questions = []
+        if not has_variety:
+            questions.append("మీ పంట రకం/వంగడం ఏది?")
+        if dap_neg:
+            questions.append("నాట్లు/విత్తే సమయంలో SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు ఏవైనా వేశారా?")
+        elif not has_basal and not general_fert_neg:
+            questions.append("నాట్లు/విత్తే సమయంలో ఏవైనా ఎరువులు (DAP/SSP/కాంప్లెక్స్) వేశారా?")
+        if not has_soil:
+            questions.append("నేల పరీక్ష నివేదిక అందుబాటులో ఉందా?")
+
+        if questions:
+            q_text = " ".join(f"{i+1}. {q}" for i, q in enumerate(questions))
+            return (
+                f"ఎరువుల ఖచ్చితమైన మోతాదు మీ పంట రకం, వంగడం, నేల స్వభావం మరియు ఇప్పటికే వేసిన ఎరువులపై ఆధారపడి ఉంటుంది. "
+                f"సరైన సిఫార్సు కొరకు: {q_text} "
+                f"నిర్ధారించకుండా అదనపు ఎరువులు వేయకండి. ఖచ్చితమైన మోతాదు కోసం స్థానిక AEO లేదా KVK అధికారులను సంప్రదించవచ్చు. 🙏"
+            )
+    elif language == "en":
+        questions = []
+        if not has_variety:
+            questions.append("Which crop and variety are you growing?")
+        if dap_neg:
+            questions.append("Was SSP or another complex fertilizer applied at sowing/transplanting?")
+        elif not has_basal and not general_fert_neg:
+            questions.append("What basal fertilizers (such as DAP/SSP/complex) were applied at sowing/transplanting?")
+        if not has_soil:
+            questions.append("Do you have a soil test report?")
+
+        if questions:
+            q_text = " ".join(f"{i+1}. {q}" for i, q in enumerate(questions))
+            return (
+                f"The exact fertilizer quantity depends on your crop variety, soil conditions, and previous fertilizer applications. "
+                f"To help determine the suitable recommendation: {q_text} "
+                f"Please do not apply excess fertilizers without confirming recommendations. You may also consult your local AEO or KVK. 🙏"
+            )
+
+    return default_resp
 
 
 def build_farmer_context(

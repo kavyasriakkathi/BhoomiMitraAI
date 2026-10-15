@@ -430,6 +430,7 @@ async def generate_response(
                     max_output_tokens=2048,
                     thinking_config=types.ThinkingConfig(thinking_budget=0),
                     top_p=0.9,
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                 )
 
                 response = await asyncio.wait_for(
@@ -654,6 +655,7 @@ async def generate_multimodal_response(
                     thinking_config=types.ThinkingConfig(thinking_budget=0),
                     top_p=0.9,
                     response_mime_type="application/json",
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                 )
 
                 response = await asyncio.wait_for(
