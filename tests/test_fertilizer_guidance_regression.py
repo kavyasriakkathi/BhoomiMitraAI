@@ -309,16 +309,16 @@ async def test_case_10_area_scaling_allowed_in_post_llm_validation():
 
     # Gemini generates valid grounded advice mentioning 30-35 kg per acre and 60-70 kg for 2 acres
     grounded_ai_response = (
-        "ప్రాంతీయ విస్తరణ మార్గదర్శకాల ప్రకారం, నాట్లు వేసిన 30 రోజుల పిలకల దశలో మీ 2 ఎకరాల వరి పంటకు "
-        "మొత్తం 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కేజీలు) సాధారణ రిఫరెన్స్ మార్గదర్శకం మాత్రమే, ఇది మీ పొలానికి ఖరారైన నిర్ధారణ కాదు. "
-        "సరైన మోతాదును నిర్ణయించడానికి నాట్ల సమయంలో DAP లేదా SSP వేశారా మరియు ఏ వంగడం సాగు చేస్తున్నారో తెలపండి."
+        "నాట్లలో 50 కిలోల DAP వేసినందున ప్రారంభ భాస్వరం మరియు నత్రజని సరిపోతాయి. "
+        "నాట్లు వేసిన 30 రోజుల పిలకల దశలో మీ 2 ఎకరాల వరి పంటకు మొత్తం 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కేజీలు) "
+        "పైపాటుగా అందించండి."
     )
 
     with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
          patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=grounded_ai_response):
         req = AIGenerateRequest(
             farmer_id=uuid4(),
-            message=TELUGU_FARMER_QUERY,
+            message="నాట్లలో 50 కిలోల DAP వేశాను. నాట్లు వేసి 30 రోజులైన నా 2 ఎకరాల వరికి ఎంత యూరియా వేయాలి?",
         )
         resp = await service.generate_ai_response(req)
 
@@ -353,8 +353,8 @@ async def test_case_12_whatsapp_pipeline_end_to_end_telugu_flow():
 
     mock_ai_resp = AIGenerateResponse(
         response_text=(
-            "ప్రాంతీయ వ్యవసాయ విస్తరణ మార్గదర్శకాల ప్రకారం 2 ఎకరాలకు సుమారు 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కిలోలు) "
-            "సాధారణ ప్రచురిత రిఫరెన్స్ మాత్రమే, ఇది మీ పొలానికి ఖరారైన నిర్ధారణ కాదు. నాట్ల మరియు మునుపటి ఎరువుల వివరాలు లేకుండా "
+            "వరి పంట 30 రోజుల పిలకల దశలో ఖచ్చితమైన ఎరువుల మోతాదు మీ పొలంలో ఇప్పటికే వేసిన ఎరువులు, వరి రకం మరియు నేల స్వభావంపై ఆధారపడి ఉంటుంది. "
+            "నాట్ల మరియు మునుపటి ఎరువుల వివరాలు లేకుండా నిర్దిష్ట రసాయన ఎరువుల మోతాదును ఖరారు చేయడం సురక్షితం కాదు; అధిక నత్రజని పంట నేలకొరిగే ప్రమాదాన్ని, అగ్గి తెగులు మరియు కాండం తొలిచే పురుగుల ఉధృతిని పెంచుతుంది.\n\n"
             "అదనపు మోతాదును నిర్ధారించలేము; అధిక నత్రజని పంట నేలకొరిగే ప్రమాదాన్ని, అగ్గి తెగులు మరియు కాండం తొలిచే పురుగుల ఉధృతిని పెంచుతుంది.\n\n"
             "సరైన మోతాదును నిర్ణయించడానికి దయచేసి ఈ వివరాలు తెలపండి:\n"
             "1. నాట్ల సమయంలో DAP, SSP లేదా కాంప్లెక్స్ ఎరువులు ఏవైనా వేశారా, ఎంత మోతాదులో వేశారు?\n"
@@ -372,9 +372,9 @@ async def test_case_12_whatsapp_pipeline_end_to_end_telugu_flow():
         whatsapp_response = await process_text_message(db_mock, farmer, conversation)
 
         # 1. Explains 60-70 kg / 30-35 kg/acre as attributed reference benchmark
-        assert "60-70" in whatsapp_response
-        assert "30-35" in whatsapp_response
-        assert "రిఫరెన్స్" in whatsapp_response
+        assert "60-70" not in whatsapp_response and "60–70" not in whatsapp_response
+        assert "30-35" not in whatsapp_response and "30–35" not in whatsapp_response
+        assert "ఖరారు చేయడం సురక్షితం కాదు" in whatsapp_response or "నిర్ధారించలేము" in whatsapp_response or "ఖరారైన నిర్ధారణ కాదు" in whatsapp_response
 
         # 2. Distinguishes from confirmed field recommendation and does NOT instruct to apply immediately
         assert "ఖరారైన నిర్ధారణ కాదు" in whatsapp_response or "నిర్ధారించలేము" in whatsapp_response
@@ -475,9 +475,10 @@ async def test_case_15_two_acre_paddy_no_history_checks_prior_application():
         )
         resp = await service.generate_ai_response(req)
         # 1. Recognizes 2 acres paddy at 30 DAT / general extension benchmark
-        assert "60-70" in resp.response_text or "30-35" in resp.response_text
+        assert "60-70" not in resp.response_text and "60–70" not in resp.response_text
+        assert "30-35" not in resp.response_text and "30–35" not in resp.response_text
         # 2. Distinguishes published reference from field-specific recommendation
-        assert "రిఫరెన్స్" in resp.response_text or "మార్గదర్శక" in resp.response_text or "సాధారణ" in resp.response_text
+        assert "ఖరారు" in resp.response_text or "నిర్ధారణ" in resp.response_text or "వివరాలు లేకుండా" in resp.response_text
         # 3. Asks which variety is cultivated
         assert "రకం" in resp.response_text or "వంగడం" in resp.response_text
         # 4. Checks basal DAP/SSP and subsequent fertilizer applications
@@ -816,9 +817,9 @@ async def test_case_25_live_whatsapp_regression_query_intercepts_premature_appli
         assert "సిఫార్సు చేయబడుతుంది" not in resp.response_text
 
         # 2. Explains 60-70 kg / 30-35 kg/acre as an attributed reference benchmark, NOT confirmed recommendation
-        assert "60-70" in resp.response_text
-        assert "30-35" in resp.response_text
-        assert "రిఫరెన్స్" in resp.response_text
+        assert "60-70" not in resp.response_text and "60–70" not in resp.response_text
+        assert "30-35" not in resp.response_text and "30–35" not in resp.response_text
+        assert "ఖరారు చేయడం సురక్షితం కాదు" in resp.response_text or "ఖరారైన నిర్ధారణ కాదు" in resp.response_text or "నిర్ధారించలేము" in resp.response_text
         assert "ఖరారైన నిర్ధారణ కాదు" in resp.response_text or "నిర్ధారించలేము" in resp.response_text
 
         # 3. Asks for missing essential history: basal DAP/SSP/complex, post-transplanting urea/potash, variety, soil test
@@ -1667,3 +1668,140 @@ async def test_case_38_multi_turn_pipeline_never_repeats_answered_questions_or_p
     assert "నేల పరీక్ష నివేదిక (Soil Health Card) అందుబాటులో ఉందా" not in r3.response_text
     assert "60-70" not in r3.response_text and "60–70" not in r3.response_text
     assert "30-35" not in r3.response_text and "30–35" not in r3.response_text
+
+
+# =============================================================================
+# 39. Live Scenario: Initial Message Without History, Follow-up Details, and Guess Dose Request
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_39_live_scenario_initial_message_followup_and_guess_dose_request():
+    """
+    REGRESSION TEST for the exact live scenario and requirements:
+    - Paddy crop, two acres.
+    - 30 days after transplanting.
+    - Initial fertilizer history not yet supplied.
+
+    Verifies:
+    Turn 1 (Initial Message):
+      1. Does NOT present unsupported numerical dosage benchmarks (no 30-35 kg/acre, no 60-70 kg/2 acres).
+      2. Asks concise clarification questions (DAP/SSP/complex, post-transplanting urea/potash, variety, soil test).
+      3. Preserves useful non-numeric safety guidance (excess nitrogen risks: lodging, blast disease, stem borer).
+      4. Does NOT instruct immediate application ("వేయండి", "చల్లండి", "తప్పకుండా వేసుకోవాలి").
+
+    Turn 2 (Farmer's Follow-up Details):
+      1. Farmer supplies: DAP 50 kg applied as basal, no urea yet, variety RNR 15048.
+      2. System remembers answered items via multi-turn memory.
+      3. Accounts for DAP, does not prescribe duplicate DAP, does not repeat answered questions.
+      4. Does not hardcode refusal: provides safe, calibrated guidance.
+
+    Turn 3 (Subsequent Request to Guess a Dose):
+      1. Farmer with missing variety/soil context requests to guess a dose ("2 ఎకరాల వరి, నాట్లు వేసి 30 రోజులు. నాకు రకం తెలీదు, నేల పరీక్ష లేదు, ఊరికే ఎంత ఎరువు వేయాలో ఒక అంచనా చెప్పండి").
+      2. Guardrail intercepts ungrounded arbitrary guess and refuses to propose arbitrary numbers.
+      3. Zero numerical dose benchmarks (no 60-70 or 30-35 kg).
+      4. Explains that without field context chemical doses cannot be confirmed, explains excess nitrogen risks (lodging, blast, stem borer).
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from uuid import uuid4
+    from src.core.models import Farmer, Conversation, FarmerMemory
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    farmer_id = uuid4()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=farmer_id, preferred_language="te"))
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "PJTSAU Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "PJTSAU"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.memory.service.FarmerMemoryService.get_memory", new_callable=AsyncMock, return_value=FarmerMemory(id=uuid4(), farmer_id=farmer_id)), \
+         patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", new_callable=AsyncMock, return_value=""):
+
+        # -------------------------------------------------------------------------
+        # TURN 1: Initial Message (Live Scenario)
+        # -------------------------------------------------------------------------
+        t1_msg = "2 ఎకరాల వరి, నాట్లు వేసి 30 రోజులు. ఎంత ఎరువు వేయాలి?"
+        mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+        # Flawed response attempting to output 60-70 kg or 30-35 kg benchmark
+        flawed_initial_response = (
+            "వరి పంట 30 రోజుల పిలకల దశలో ప్రాంతీయ వ్యవసాయ విస్తరణ మార్గదర్శకాల ప్రకారం 2 ఎకరాలకు మొత్తం 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కిలోలు) "
+            "వేసుకోవడం సాధారణంగా సిఫార్సు చేస్తారు. మీరు నాట్లలో వేసిన ఎరువుల వివరాలు DAP లేదా SSP వేశారా మరియు రకం ఏమిటి?"
+        )
+
+        with patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=flawed_initial_response):
+            r1 = await service.generate_ai_response(AIGenerateRequest(farmer_id=farmer_id, message=t1_msg))
+
+        # Turn 1 Assertions:
+        # 1. Zero numerical dose benchmarks
+        assert "60-70" not in r1.response_text and "60–70" not in r1.response_text
+        assert "30-35" not in r1.response_text and "30–35" not in r1.response_text
+        # 2. Concise clarification questions
+        assert "DAP" in r1.response_text or "SSP" in r1.response_text
+        assert "యూరియా" in r1.response_text
+        assert "రకం" in r1.response_text or "వంగడం" in r1.response_text
+        assert "పరీక్ష" in r1.response_text or "Soil Health Card" in r1.response_text
+        # 3. Non-numeric safety guidance (lodging, blast, stem borer)
+        assert "నేలకొరిగే" in r1.response_text
+        assert "అగ్గి తెగులు" in r1.response_text
+        assert "కాండం" in r1.response_text
+        # 4. Does not instruct immediate application
+        assert "వేయండి" not in r1.response_text
+        assert "చల్లండి" not in r1.response_text
+        assert "తప్పకుండా వేసుకోవాలి" not in r1.response_text
+
+        # -------------------------------------------------------------------------
+        # TURN 2: Farmer's Follow-up Details
+        # -------------------------------------------------------------------------
+        t2_msg = "నాట్లలో ఎకరానికి 50 కిలోల DAP వేశాను. యూరియా ఇంకా వేయలేదు. మాది స్వల్పకాలిక రకం RNR 15048."
+        c1 = Conversation(farmer_id=farmer_id, user_message=t1_msg, ai_response=r1.response_text)
+        mock_repo.get_conversation_history = AsyncMock(return_value=[c1])
+
+        calibrated_guidance = (
+            "నాట్లలో ఎకరానికి 50 కిలోల DAP వేసినందున ప్రారంభ భాస్వరం సరిపోతుంది. మళ్లీ DAP వేయకండి. "
+            "ఇప్పుడు 30 రోజుల పిలకల దశలో మీ 2 ఎకరాల వరి పంటకు (RNR 15048) మొత్తం 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కిలోలు) "
+            "సమతుల్యంగా వేసుకోవచ్చు."
+        )
+
+        with patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=calibrated_guidance):
+            r2 = await service.generate_ai_response(AIGenerateRequest(farmer_id=farmer_id, message=t2_msg))
+
+        # Turn 2 Assertions:
+        # 1. Accounts for DAP and does NOT prescribe duplicate DAP
+        assert "DAP" in r2.response_text
+        assert "మళ్లీ DAP వేయకండి" in r2.response_text or "సరిపోతుంది" in r2.response_text
+        # 2. Does not re-ask DAP, urea, or variety questions that were answered
+        assert "నాట్ల సమయంలో DAP" not in r2.response_text
+        assert "సాగు చేస్తున్న వరి రకం/వంగడం ఏది" not in r2.response_text
+        # 3. Does not hardcode refusal: safe, calibrated guidance is provided
+        assert "60-70" in r2.response_text
+
+        # -------------------------------------------------------------------------
+        # TURN 3: Subsequent Request to Guess a Dose
+        # -------------------------------------------------------------------------
+        # Farmer asks the bot to guess a dose without variety or soil details
+        t3_msg = "2 ఎకరాల వరి, నాట్లు వేసి 30 రోజులు. నాకు రకం తెలీదు, నేల పరీక్ష లేదు, ఊరికే ఎంత ఎరువు వేయాలో ఒక అంచనా చెప్పండి."
+        mock_repo.get_conversation_history = AsyncMock(return_value=[c1])
+
+        flawed_guess_response = "అంచనాగా 2 ఎకరాలకు 50 కిలోల యూరియా వెంటనే వేయండి."
+
+        with patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=flawed_guess_response):
+            r3 = await service.generate_ai_response(AIGenerateRequest(farmer_id=farmer_id, message=t3_msg))
+
+        # Turn 3 Assertions:
+        # 1. Guardrail intercepts arbitrary guessed dose
+        assert "50 కిలోల యూరియా" not in r3.response_text
+        assert "60-70" not in r3.response_text and "60–70" not in r3.response_text
+        assert "30-35" not in r3.response_text and "30–35" not in r3.response_text
+        # 2. Refuses to confirm an unverified dose without variety/soil details
+        assert "ఖరారైన నిర్ధారణ కాదు" in r3.response_text or "నిర్ధారించలేము" in r3.response_text or "ఖరారు చేయడం సురక్షితం కాదు" in r3.response_text
+        # 3. Explains excess nitrogen risks (lodging, blast, stem borer)
+        assert "నేలకొరిగే" in r3.response_text
+        assert "అగ్గి తెగులు" in r3.response_text
+        assert "కాండం" in r3.response_text
