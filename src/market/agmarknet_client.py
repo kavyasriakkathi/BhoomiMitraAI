@@ -71,11 +71,21 @@ class AgmarknetClient:
         api_url: str,
         cache_ttl_seconds: int = 21600,
         timeout_seconds: float = 5.0,
+        connect_timeout_seconds: Optional[float] = None,
+        max_retries: int = 1,
+        retry_delay_seconds: float = 0.5,
     ):
         self.api_key = api_key.strip() if api_key else ""
         self.api_url = api_url
         self.cache_ttl = cache_ttl_seconds
         self.timeout_seconds = timeout_seconds
+        self.connect_timeout_seconds = (
+            connect_timeout_seconds
+            if connect_timeout_seconds is not None
+            else min(5.0, self.timeout_seconds)
+        )
+        self.max_retries = max(0, max_retries)
+        self.retry_delay_seconds = max(0.0, retry_delay_seconds)
 
     # ------------------------------------------------------------------
     # Public interface
@@ -216,8 +226,7 @@ class AgmarknetClient:
             "User-Agent": "BhoomiMitraAI/1.0 (Agricultural Mandi Advisory)",
         }
 
-        start_time = time.time()
-        connect_timeout = min(2.0, self.timeout_seconds)
+        connect_timeout = self.connect_timeout_seconds
         timeout_config = httpx.Timeout(
             self.timeout_seconds,
             connect=connect_timeout,
@@ -226,61 +235,93 @@ class AgmarknetClient:
             pool=self.timeout_seconds,
         )
 
-        try:
-            async with httpx.AsyncClient(timeout=timeout_config) as client:
+        overall_start = time.time()
+        total_attempts = 1 + self.max_retries
+        for attempt in range(1, total_attempts + 1):
+            req_start = time.time()
+            try:
+                async with httpx.AsyncClient(timeout=timeout_config) as client:
+                    logger.info(
+                        f"[AGMARKNET] Calling live API (attempt {attempt}/{total_attempts}): "
+                        f"commodity='{commodity}' state='{resolved_state}' district='{district}' "
+                        f"(timeout={self.timeout_seconds}s, connect_timeout={connect_timeout}s)"
+                    )
+                    response = await asyncio.wait_for(
+                        client.get(self.api_url, params=params, headers=headers),
+                        timeout=self.timeout_seconds,
+                    )
+
+                elapsed = time.time() - req_start
+
+                # Non-transient HTTP status errors: do NOT retry
+                if response.status_code != 200:
+                    logger.warning(
+                        f"[AGMARKNET] API returned HTTP {response.status_code} in {elapsed:.2f}s "
+                        f"for commodity='{commodity}'. Using local DB fallback."
+                    )
+                    return None
+
+                # Non-transient response parsing errors: do NOT retry
+                try:
+                    data = response.json()
+                except Exception as parse_exc:
+                    logger.warning(
+                        f"[AGMARKNET] Failed to parse JSON response for commodity='{commodity}': {parse_exc}. "
+                        "Using local DB fallback."
+                    )
+                    return None
+
+                records = data.get("records", [])
                 logger.info(
-                    f"[AGMARKNET] Calling live API: commodity='{commodity}' "
-                    f"state='{resolved_state}' district='{district}' (timeout={self.timeout_seconds}s)"
+                    f"[AGMARKNET] Live API returned {len(records)} records "
+                    f"for commodity='{commodity}' in {elapsed:.2f}s"
                 )
-                start_time = time.time()
-                response = await asyncio.wait_for(
-                    client.get(self.api_url, params=params, headers=headers),
-                    timeout=self.timeout_seconds,
-                )
+                return self._normalise_records(records)
 
-            elapsed = time.time() - start_time
-
-            if response.status_code != 200:
+            except (httpx.ConnectTimeout, httpx.ConnectError, httpx.NetworkError) as exc:
+                elapsed = time.time() - req_start
+                time_spent = time.time() - overall_start
+                if attempt < total_attempts and (time_spent < self.timeout_seconds * 1.5):
+                    logger.warning(
+                        f"[AGMARKNET] Transient network error on attempt {attempt}/{total_attempts} "
+                        f"after {elapsed:.2f}s for commodity='{commodity}': {exc}. Retrying..."
+                    )
+                    delay = min(self.retry_delay_seconds, max(0.01, self.timeout_seconds / 2))
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                    continue
                 logger.warning(
-                    f"[AGMARKNET] API returned HTTP {response.status_code} in {elapsed:.2f}s "
+                    f"[AGMARKNET] Network error after {attempt} attempt(s) for commodity='{commodity}': {exc}. "
+                    "Using local DB fallback."
+                )
+                return None
+
+            except (httpx.TimeoutException, asyncio.TimeoutError) as exc:
+                # Overall request or read timeout limit reached - do NOT retry to keep total request bounded
+                elapsed = time.time() - req_start
+                logger.warning(
+                    f"[AGMARKNET] API timeout after {elapsed:.2f}s (limit={self.timeout_seconds}s) "
                     f"for commodity='{commodity}'. Using local DB fallback."
                 )
                 return None
 
-            data = response.json()
-            records = data.get("records", [])
-            logger.info(
-                f"[AGMARKNET] Live API returned {len(records)} records "
-                f"for commodity='{commodity}' in {elapsed:.2f}s"
-            )
-            return self._normalise_records(records)
+            except httpx.RequestError as exc:
+                # Non-transient request errors (e.g. invalid URL scheme, protocol violation): do not retry
+                elapsed = time.time() - req_start
+                logger.warning(
+                    f"[AGMARKNET] Non-transient request error after {elapsed:.2f}s for commodity='{commodity}': {exc}. "
+                    "Using local DB fallback."
+                )
+                return None
 
-        except (httpx.TimeoutException, asyncio.TimeoutError):
-            elapsed = time.time() - start_time
-            logger.warning(
-                f"[AGMARKNET] API timeout after {elapsed:.2f}s (limit={self.timeout_seconds}s) "
-                f"for commodity='{commodity}'. Using local DB fallback."
-            )
-            return None
-        except httpx.RequestError as exc:
-            elapsed = time.time() - start_time
-            logger.warning(
-                f"[AGMARKNET] Network error after {elapsed:.2f}s for commodity='{commodity}': {exc}. "
-                "Using local DB fallback."
-            )
-            return None
-        except (ValueError, KeyError) as exc:
-            logger.warning(
-                f"[AGMARKNET] Failed to parse API response for commodity='{commodity}': {exc}. "
-                "Using local DB fallback."
-            )
-            return None
-        except Exception as exc:
-            logger.warning(
-                f"[AGMARKNET] Unexpected error for commodity='{commodity}': {exc}. "
-                "Using local DB fallback."
-            )
-            return None
+            except Exception as exc:
+                logger.warning(
+                    f"[AGMARKNET] Unexpected error for commodity='{commodity}': {exc}. "
+                    "Using local DB fallback."
+                )
+                return None
+
+        return None
 
     # ------------------------------------------------------------------
     # Internal: Record normalisation

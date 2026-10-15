@@ -373,6 +373,10 @@ async def mark_message_as_read(message_id: str) -> None:
     Send a 'read' receipt back to Meta so the farmer sees blue ticks.
     This is a best-effort call — failures are logged but not retried.
     """
+    if not message_id or not str(message_id).strip() or str(message_id).strip().lower() in ("unsupported", "none", "null"):
+        logger.debug("[WHATSAPP READ RECEIPT] Skipping read receipt for invalid/unsupported message ID")
+        return
+
     settings = get_settings()
 
     if not settings.whatsapp_api_token or not settings.whatsapp_phone_number_id:
