@@ -309,9 +309,9 @@ async def test_case_10_area_scaling_allowed_in_post_llm_validation():
 
     # Gemini generates valid grounded advice mentioning 30-35 kg per acre and 60-70 kg for 2 acres
     grounded_ai_response = (
-        "PJTSAU సిఫార్సుల ప్రకారం, నాట్లు వేసిన 30 రోజుల పిలకల దశలో మీ 2 ఎకరాల వరి పంటకు "
-        "మొత్తం 60-70 కేజీల యూరియా (ఎకరానికి 30-35 కేజీలు) పైపాటుగా వేయాలి. "
-        "గమనిక: నేల స్వభావం మరియు చివరి దుక్కిలో వేసిన ఎరువులను బట్టి సరిచూసుకోండి."
+        "ప్రాంతీయ విస్తరణ మార్గదర్శకాల ప్రకారం, నాట్లు వేసిన 30 రోజుల పిలకల దశలో మీ 2 ఎకరాల వరి పంటకు "
+        "మొత్తం 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కేజీలు) సాధారణ రిఫరెన్స్ మార్గదర్శకం మాత్రమే, ఇది మీ పొలానికి ఖరారైన నిర్ధారణ కాదు. "
+        "సరైన మోతాదును నిర్ణయించడానికి నాట్ల సమయంలో DAP లేదా SSP వేశారా మరియు ఏ వంగడం సాగు చేస్తున్నారో తెలపండి."
     )
 
     with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
@@ -323,8 +323,8 @@ async def test_case_10_area_scaling_allowed_in_post_llm_validation():
         resp = await service.generate_ai_response(req)
 
         # Grounded response is preserved and NOT replaced by refusal
-        assert "60-70 కేజీల యూరియా" in resp.response_text
-        assert "ఎకరానికి 30-35 కేజీలు" in resp.response_text
+        assert "60-70" in resp.response_text
+        assert "30-35" in resp.response_text
 
 
 # =============================================================================
@@ -353,9 +353,14 @@ async def test_case_12_whatsapp_pipeline_end_to_end_telugu_flow():
 
     mock_ai_resp = AIGenerateResponse(
         response_text=(
-            "PJTSAU & ICAR-IIRR సిఫార్సుల ప్రకారం, నాట్లు వేసిన 30 రోజుల పిలకల దశలో (Active Tillering Stage) "
-            "మీ 2 ఎకరాల వరి పంటకు మొదటి విడతగా మొత్తం 60-70 కేజీల యూరియా (ఎకరానికి 30-35 కేజీలు) వేయాలి. "
-            "నాట్ల సమయంలో మీరు వేసిన DAP లేదా కాంప్లెక్స్ ఎరువుల వివరాలు మరియు నేల పరీక్ష నివేదికను బట్టి మోతాదు సరిచూసుకోండి. 🙏"
+            "ప్రాంతీయ వ్యవసాయ విస్తరణ మార్గదర్శకాల ప్రకారం 2 ఎకరాలకు సుమారు 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కిలోలు) "
+            "సాధారణ ప్రచురిత రిఫరెన్స్ మాత్రమే, ఇది మీ పొలానికి ఖరారైన నిర్ధారణ కాదు. నాట్ల మరియు మునుపటి ఎరువుల వివరాలు లేకుండా "
+            "అదనపు మోతాదును నిర్ధారించలేము; అధిక నత్రజని పంట నేలకొరిగే ప్రమాదాన్ని, అగ్గి తెగులు మరియు కాండం తొలిచే పురుగుల ఉధృతిని పెంచుతుంది.\n\n"
+            "సరైన మోతాదును నిర్ణయించడానికి దయచేసి ఈ వివరాలు తెలపండి:\n"
+            "1. నాట్ల సమయంలో DAP, SSP లేదా కాంప్లెక్స్ ఎరువులు ఏవైనా వేశారా, ఎంత మోతాదులో వేశారు?\n"
+            "2. నాట్లు వేసిన తర్వాత ఇప్పటికే ఏదైనా యూరియా లేదా పొటాష్ వేశారా (ఎంత మోతాదు, ఏ తేదీ/దశలో)?\n"
+            "3. మీరు సాగు చేస్తున్న వరి రకం/వంగడం ఏది (స్వల్పకాలిక లేదా దీర్ఘకాలిక)?\n"
+            "4. నేల పరీక్ష నివేదిక (Soil Health Card) అందుబాటులో ఉందా? 🙏"
         ),
         intent="fertilizer_nutrient",
         confidence=0.95,
@@ -366,8 +371,23 @@ async def test_case_12_whatsapp_pipeline_end_to_end_telugu_flow():
          patch("src.shops.service.enrich_response_with_shops", side_effect=lambda db, msg, resp, *args, **kwargs: resp):
         whatsapp_response = await process_text_message(db_mock, farmer, conversation)
 
-        assert "60-70 కేజీల యూరియా" in whatsapp_response
-        assert "ఎకరానికి 30-35 కేజీలు" in whatsapp_response
+        # 1. Explains 60-70 kg / 30-35 kg/acre as attributed reference benchmark
+        assert "60-70" in whatsapp_response
+        assert "30-35" in whatsapp_response
+        assert "రిఫరెన్స్" in whatsapp_response
+
+        # 2. Distinguishes from confirmed field recommendation and does NOT instruct to apply immediately
+        assert "ఖరారైన నిర్ధారణ కాదు" in whatsapp_response or "నిర్ధారించలేము" in whatsapp_response
+        assert "వేయాలి" not in whatsapp_response
+        assert "సిఫార్సు చేయబడుతుంది" not in whatsapp_response
+
+        # 3. Inquires about basal DAP/SSP/complex, post-transplanting urea/potash, variety, soil test
+        assert "DAP" in whatsapp_response
+        assert "SSP" in whatsapp_response
+        assert "యూరియా" in whatsapp_response
+        assert "రకం" in whatsapp_response or "వంగడం" in whatsapp_response
+        assert "పరీక్ష" in whatsapp_response or "Soil Health Card" in whatsapp_response
+
         # Must not be the old generic refusal
         assert "ఖచ్చితమైన ఎరువుల/పురుగుమందుల మోతాదు (dosage) కోసం ప్రస్తుతం ధృవీకరించబడిన డేటా లేదు" not in whatsapp_response
 
@@ -742,3 +762,130 @@ def test_case_24_theoretical_seasonal_urea_accounting_and_dap_deduction():
     # 4. Keeps single application separate from seasonal requirement
     assert "strictly separate from the seasonal nutrient requirement" in text
 
+
+# =============================================================================
+# 25. Live WhatsApp Regression Query: Intercepts Premature Application Instruction
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_25_live_whatsapp_regression_query_intercepts_premature_application_instruction():
+    """
+    REGRESSION TEST for the live WhatsApp incident:
+    Farmer with 2 acres of paddy at 30 DAT asked:
+    "నేను 2 ఎకరాల్లో వరి పంట సాగు చేస్తున్నాను. నాట్లు వేసి 30 రోజులు అయ్యాయి. ఇప్పుడు ఏ ఎరువులు అవసరం? ఎంత మోతాదులో వేయాలి? సరైన మోతాదును నిర్ణయించడానికి నా నేల వివరాలు లేదా ఇప్పటికే వేసిన ఎరువుల వివరాలు అవసరమా?"
+
+    Simulates Gemini attempting to return the flawed instruction:
+    "మొత్తం 60 నుండి 70 కిలోల యూరియా ... సిఫార్సు చేయబడుతుంది ... దీనిని వేయండి ... DAP లేదా SSP వేశారా? వరి రకం ఏది?"
+
+    Asserts:
+    1. The initial response does NOT instruct the farmer to apply 60–70 kg immediately.
+    2. The dose is not confirmed while essential history is missing.
+    3. The 30-35 kg/acre (60-70 kg for 2 acres) tillering figure is explained as an attributed general extension reference benchmark.
+    4. Inquires about basal DAP/SSP/complex, post-transplanting urea/potash, variety, and soil test.
+    """
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=uuid4(), preferred_language="te"))
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "Regional Extension"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    # Flawed response identical to the observed WhatsApp regression:
+    flawed_gemini_response = (
+        "నాట్లు వేసిన 30 రోజుల పిలకల దశలో మీ 2 ఎకరాల వరి పంటకు మొత్తం 60 నుండి 70 కిలోల యూరియా సిఫార్సు చేయబడుతుంది. "
+        "దీనిని బురద పదునులో పైపాటుగా వేయండి. "
+        "గమనిక: నాట్లలో మీరు DAP, SSP లేదా ఇతర ఎరువులు వేశారా? వరి రకం ఏది?"
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=flawed_gemini_response):
+        req = AIGenerateRequest(
+            farmer_id=uuid4(),
+            message=TELUGU_FARMER_QUERY,
+        )
+        resp = await service.generate_ai_response(req)
+
+        # 1. Must NOT instruct the farmer to apply 60-70 kg immediately
+        assert "వేయండి" not in resp.response_text
+        assert "వేయాలి" not in resp.response_text
+        assert "సిఫార్సు చేయబడుతుంది" not in resp.response_text
+
+        # 2. Explains 60-70 kg / 30-35 kg/acre as an attributed reference benchmark, NOT confirmed recommendation
+        assert "60-70" in resp.response_text
+        assert "30-35" in resp.response_text
+        assert "రిఫరెన్స్" in resp.response_text
+        assert "ఖరారైన నిర్ధారణ కాదు" in resp.response_text or "నిర్ధారించలేము" in resp.response_text
+
+        # 3. Asks for missing essential history: basal DAP/SSP/complex, post-transplanting urea/potash, variety, soil test
+        assert "DAP" in resp.response_text
+        assert "SSP" in resp.response_text
+        assert "యూరియా" in resp.response_text
+        assert "రకం" in resp.response_text or "వంగడం" in resp.response_text
+        assert "పరీక్ష" in resp.response_text or "Soil Health Card" in resp.response_text
+
+        # 4. Explains excess nitrogen risk (lodging / blast / stem borer)
+        assert "నేలకొరిగే" in resp.response_text or "ప్రమాదం" in resp.response_text
+        assert "అగ్గి తెగులు" in resp.response_text or "తెగులు" in resp.response_text
+        assert "పురుగు" in resp.response_text
+
+# =============================================================================
+# 26. Fertilizer History Detection: Distinguishes Positive History from Negation
+# =============================================================================
+
+def test_case_26_fertilizer_history_detection_negation_and_positive_application():
+    """
+    Verifies that check_fertilizer_history_details properly distinguishes positive
+    application history from explicit statements that fertilizer was NOT applied.
+
+    Required test cases:
+    1. 'నాట్లలో DAP వేయలేదు': Must NOT be classified as positive DAP basal application.
+    2. 'యూరియా ఇంకా వేయలేదు': Must NOT be classified as positive prior urea application.
+    3. 'ఇంతవరకు ఏ ఎరువూ వేయలేదు': Must NOT be classified as positive fertilizer history.
+    4. 'నాట్లలో 50 కిలోల DAP వేశాను': Must recognize positive basal DAP application.
+    5. '25 రోజులప్పుడు 30 కిలోల యూరియా వేశాను': Must recognize positive prior urea application.
+    6. Original two-acre Telugu question: Must NOT be mistaken for applied history.
+    """
+    from src.ai.service import check_fertilizer_history_details
+
+    # 1. "నాట్లలో DAP వేయలేదు" -> NOT positive basal history
+    r1 = check_fertilizer_history_details("నాట్లలో DAP వేయలేదు")
+    assert r1["has_basal_history"] is False
+    assert r1["has_prior_urea_or_potash"] is False
+    assert r1["has_essential_history"] is False
+
+    # 2. "యూరియా ఇంకా వేయలేదు" -> NOT positive prior urea history
+    r2 = check_fertilizer_history_details("యూరియా ఇంకా వేయలేదు")
+    assert r2["has_basal_history"] is False
+    assert r2["has_prior_urea_or_potash"] is False
+    assert r2["has_essential_history"] is False
+
+    # 3. "ఇంతవరకు ఏ ఎరువూ వేయలేదు" -> NOT positive fertilizer history
+    r3 = check_fertilizer_history_details("ఇంతవరకు ఏ ఎరువూ వేయలేదు")
+    assert r3["has_basal_history"] is False
+    assert r3["has_prior_urea_or_potash"] is False
+    assert r3["has_essential_history"] is False
+
+    # 4. "నాట్లలో 50 కిలోల DAP వేశాను" -> Positive basal DAP application
+    r4 = check_fertilizer_history_details("నాట్లలో 50 కిలోల DAP వేశాను")
+    assert r4["has_basal_history"] is True
+    assert r4["has_prior_urea_or_potash"] is False
+    assert r4["has_essential_history"] is True
+
+    # 5. "25 రోజులప్పుడు 30 కిలోల యూరియా వేశాను" -> Positive prior urea application
+    r5 = check_fertilizer_history_details("25 రోజులప్పుడు 30 కిలోల యూరియా వేశాను")
+    assert r5["has_basal_history"] is False
+    assert r5["has_prior_urea_or_potash"] is True
+    assert r5["has_essential_history"] is True
+
+    # 6. Original WhatsApp query asking whether details are needed -> NOT positive history
+    r6 = check_fertilizer_history_details(TELUGU_FARMER_QUERY)
+    assert r6["has_basal_history"] is False
+    assert r6["has_prior_urea_or_potash"] is False
+    assert r6["has_soil_test_info"] is False
+    assert r6["has_essential_history"] is False
+    assert r6["asks_if_details_needed"] is True
