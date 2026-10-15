@@ -2,11 +2,13 @@
 BhoomiMitra AI — OpenWeatherMap API Client
 
 Fetches current weather and forecasts from OpenWeatherMap.
-Integrates Redis cache and graceful mock fallback for key-less setups.
+Integrates Redis cache, in-memory process fallback, and graceful mock fallback for key-less setups.
+Handles HTTP 401 without retries and respects Open-Meteo HTTP 429 rate limits with bounded backoff.
 """
 import json
 import hashlib
-from typing import Optional, Dict, List
+import copy
+from typing import Optional, Dict, List, Tuple
 from datetime import datetime, timedelta
 
 import httpx
@@ -15,17 +17,34 @@ from src.core.logging import logger
 from src.config import get_settings
 
 
+# Module-level in-memory cache to guarantee caching even when Redis is down or unconfigured
+_MEMORY_CACHE: Dict[str, Tuple[datetime, Dict]] = {}
+
+
+def clear_weather_memory_cache() -> None:
+    """Helper to clear process in-memory weather cache (primarily for tests)."""
+    _MEMORY_CACHE.clear()
+
+
 class OpenWeatherClient:
     """
-    Async HTTP client for OpenWeatherMap 5-day / 3-hour forecast API.
+    Async HTTP client for OpenWeatherMap 5-day / 3-hour forecast API with Open-Meteo live fallback.
     Never raises exceptions — handles errors gracefully and returns None.
     """
 
-    def __init__(self, api_key: str, api_url: str, cache_ttl_seconds: int = 1800, timeout_seconds: float = 5.0):
+    def __init__(
+        self,
+        api_key: str,
+        api_url: str,
+        cache_ttl_seconds: int = 1800,
+        timeout_seconds: float = 5.0,
+        max_stale_seconds: int = 21600,
+    ):
         self.api_key = api_key.strip() if api_key else ""
         self.api_url = api_url
         self.cache_ttl = cache_ttl_seconds
         self.timeout_seconds = timeout_seconds
+        self.max_stale_seconds = max_stale_seconds
 
     # ------------------------------------------------------------------
     # Public interface
@@ -39,7 +58,7 @@ class OpenWeatherClient:
         state: Optional[str] = None,
     ) -> Optional[Dict]:
         """
-        Fetch forecast payload from OpenWeatherMap or Redis cache.
+        Fetch forecast payload from OpenWeatherMap, Open-Meteo, or Redis/in-memory cache.
         Returns a dictionary structure matching schemas on success, or None on failure.
         """
         # Resolve target location name for logging/caching
@@ -52,10 +71,11 @@ class OpenWeatherClient:
             logger.warning("[WEATHER CLIENT] fetch_weather called with no location details.")
             return None
 
-        # 1. Try Cache First
-        cached = await self._get_from_cache(latitude, longitude, district, state)
+        # 1. Try Fresh Cache First (within normal TTL, e.g. 30 mins)
+        cached = await self._get_from_cache(latitude, longitude, district, state, allow_stale=False)
         if cached is not None:
-            logger.info(f"[WEATHER CLIENT] Cache HIT for location='{location_label}'")
+            freshness = cached.get("data_freshness_minutes", 0.0)
+            logger.info(f"[WEATHER CLIENT] Cache HIT for location='{location_label}' (freshness={freshness}m)")
             return cached
 
         # 2. Call OpenWeatherMap Live API if API key is present
@@ -77,7 +97,21 @@ class OpenWeatherClient:
                 await self._set_in_cache(latitude, longitude, district, state, open_meteo_data)
                 return open_meteo_data
 
-        # 4. Keyless Fallback Mock Data Generator (Non-prod only, when no API key configured)
+        # 4. Check for Recent Cached/Stale Weather Data when live providers fail
+        stale_cached = await self._get_from_cache(
+            latitude, longitude, district, state, allow_stale=True, max_age_seconds=self.max_stale_seconds
+        )
+        if stale_cached is not None:
+            freshness_min = stale_cached.get("data_freshness_minutes", 0.0)
+            logger.info(
+                f"[WEATHER CLIENT] Reusing recent cached weather data for '{location_label}' "
+                f"(age={freshness_min:.1f} mins) following live provider outage."
+            )
+            stale_cached["is_live"] = False
+            stale_cached["source_note"] = f"Cached Weather ({int(freshness_min)}m ago)"
+            return stale_cached
+
+        # 5. Keyless Fallback Mock Data Generator (Non-prod only, when no API key configured)
         if not self.api_key:
             settings = get_settings()
             if settings.app_env != "production":
@@ -105,7 +139,7 @@ class OpenWeatherClient:
         district: Optional[str],
         state: Optional[str],
     ) -> Optional[Dict]:
-        """Make async GET request to OpenWeatherMap."""
+        """Make async GET request to OpenWeatherMap. Never print API secrets in logs."""
         params = {
             "appid": self.api_key,
             "units": "metric",  # Celsius
@@ -122,9 +156,19 @@ class OpenWeatherClient:
             return None
 
         try:
+            # Mask sensitive API key in debug logs
+            safe_params = {k: ("***" if k == "appid" else v) for k, v in params.items()}
             async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                logger.info(f"[WEATHER CLIENT] Calling live OpenWeatherMap API: {params}")
+                logger.info(f"[WEATHER CLIENT] Calling live OpenWeatherMap API: {safe_params}")
                 response = await client.get(self.api_url, params=params)
+
+            if response.status_code == 401:
+                logger.warning(
+                    "[WEATHER CLIENT] OpenWeatherMap API returned HTTP 401 Unauthorized. "
+                    "The configured OPENWEATHER_API_KEY is invalid, unauthorized, or inactive. "
+                    "Skipping retries and proceeding immediately to fallback provider."
+                )
+                return None
 
             if response.status_code != 200:
                 logger.warning(
@@ -152,7 +196,10 @@ class OpenWeatherClient:
         longitude: float,
         loc_name: str,
     ) -> Optional[Dict]:
-        """Fetch live weather from Open-Meteo (keyless global weather service)."""
+        """
+        Fetch live weather from Open-Meteo (keyless global weather service).
+        Handles HTTP 429 rate limiting gracefully with bounded backoff and no retry storms.
+        """
         try:
             url = (
                 f"https://api.open-meteo.com/v1/forecast"
@@ -166,9 +213,45 @@ class OpenWeatherClient:
             }
             async with httpx.AsyncClient(timeout=self.timeout_seconds, headers=headers) as client:
                 resp = await client.get(url)
+
+                if resp.status_code == 429:
+                    retry_after_raw = resp.headers.get("Retry-After")
+                    retry_after_sec: Optional[float] = None
+                    if retry_after_raw:
+                        try:
+                            retry_after_sec = float(retry_after_raw)
+                        except (ValueError, TypeError):
+                            pass
+
+                    logger.warning(
+                        f"[WEATHER CLIENT] Open-Meteo returned HTTP 429 Too Many Requests. "
+                        f"Retry-After header: {retry_after_raw}."
+                    )
+
+                    # Bounded backoff: at most 1 retry if Retry-After is absent or small (<= 2.0s)
+                    if retry_after_sec is not None and retry_after_sec <= 2.0:
+                        backoff = max(0.1, min(retry_after_sec, 2.0))
+                        logger.info(f"[WEATHER CLIENT] Open-Meteo rate limit backoff: sleeping {backoff:.2f}s before 1 retry.")
+                        import asyncio
+                        await asyncio.sleep(backoff)
+                        resp = await client.get(url)
+                    elif retry_after_sec is None:
+                        # Short bounded backoff (0.5s) if no Retry-After header supplied
+                        logger.info("[WEATHER CLIENT] Open-Meteo rate limit backoff: sleeping 0.5s before 1 retry.")
+                        import asyncio
+                        await asyncio.sleep(0.5)
+                        resp = await client.get(url)
+                    else:
+                        logger.warning(
+                            f"[WEATHER CLIENT] Open-Meteo Retry-After ({retry_after_sec}s) exceeds threshold. "
+                            "Aborting retry to prevent retry storm."
+                        )
+                        return None
+
                 if resp.status_code != 200:
                     logger.warning(f"[WEATHER CLIENT] Open-Meteo responded with status {resp.status_code}")
                     return None
+
                 data = resp.json()
 
             curr = data.get("current", {})
@@ -229,6 +312,7 @@ class OpenWeatherClient:
                 },
                 "forecast": forecast,
                 "data_available": True,
+                "data_freshness_minutes": 0.0,
                 "is_live": True,
                 "source_note": "Live Weather (Open-Meteo)",
             }
@@ -265,6 +349,7 @@ class OpenWeatherClient:
                 },
                 "forecast": [],
                 "data_available": True,
+                "data_freshness_minutes": 0.0,
                 "is_live": True,
                 "source_note": "OpenWeatherMap API (Live)",
             }
@@ -309,18 +394,53 @@ class OpenWeatherClient:
         longitude: Optional[float],
         district: Optional[str],
         state: Optional[str],
+        allow_stale: bool = False,
+        max_age_seconds: Optional[int] = None,
     ) -> Optional[Dict]:
+        """
+        Fetch cached weather data from Redis or in-memory cache.
+        If allow_stale is False, only returns data within self.cache_ttl.
+        If allow_stale is True, returns data within max_age_seconds (or max_stale_seconds).
+        """
+        target_ttl = max_age_seconds if (allow_stale and max_age_seconds is not None) else (
+            self.max_stale_seconds if allow_stale else self.cache_ttl
+        )
+        key = self._cache_key(latitude, longitude, district, state)
+
+        # 1. Try Redis first
         try:
             import redis.asyncio as aioredis
             settings = get_settings()
             r = aioredis.from_url(settings.redis_url, decode_responses=True)
-            key = self._cache_key(latitude, longitude, district, state)
             val = await r.get(key)
             await r.aclose()
             if val:
-                return json.loads(val)
+                cached_data = json.loads(val)
+                cached_at_str = cached_data.get("_cached_at")
+                if cached_at_str:
+                    try:
+                        cached_dt = datetime.fromisoformat(cached_at_str)
+                        age_sec = (datetime.utcnow() - cached_dt).total_seconds()
+                        if age_sec <= target_ttl:
+                            cached_data["data_freshness_minutes"] = max(0.0, round(age_sec / 60.0, 1))
+                            _MEMORY_CACHE[key] = (cached_dt, copy.deepcopy(cached_data))
+                            return cached_data
+                    except Exception:
+                        return cached_data
+                else:
+                    return cached_data
         except Exception as exc:
             logger.debug(f"[WEATHER CLIENT] Redis get skipped: {exc}")
+
+        # 2. Try In-Memory Cache
+        if key in _MEMORY_CACHE:
+            cached_dt, cached_data = _MEMORY_CACHE[key]
+            age_sec = (datetime.utcnow() - cached_dt).total_seconds()
+            if age_sec <= target_ttl:
+                data_copy = copy.deepcopy(cached_data)
+                data_copy["data_freshness_minutes"] = max(0.0, round(age_sec / 60.0, 1))
+                return data_copy
+
         return None
 
     async def _set_in_cache(
@@ -331,14 +451,25 @@ class OpenWeatherClient:
         state: Optional[str],
         data: Dict,
     ) -> None:
+        """Store weather in both process in-memory cache and Redis."""
+        key = self._cache_key(latitude, longitude, district, state)
+        now = datetime.utcnow()
+        data_to_store = copy.deepcopy(data)
+        data_to_store["_cached_at"] = now.isoformat()
+        data_to_store["data_freshness_minutes"] = 0.0
+
+        # Update process memory cache
+        _MEMORY_CACHE[key] = (now, data_to_store)
+
+        # Update Redis with extended TTL so stale data is accessible on provider outages
         try:
             import redis.asyncio as aioredis
             settings = get_settings()
             r = aioredis.from_url(settings.redis_url, decode_responses=True)
-            key = self._cache_key(latitude, longitude, district, state)
-            await r.setex(key, self.cache_ttl, json.dumps(data))
+            redis_ttl = max(self.cache_ttl, self.max_stale_seconds)
+            await r.setex(key, redis_ttl, json.dumps(data_to_store))
             await r.aclose()
-            logger.debug(f"[WEATHER CLIENT] Cached weather for key '{key}' (TTL={self.cache_ttl}s)")
+            logger.debug(f"[WEATHER CLIENT] Cached weather in Redis for key '{key}' (TTL={redis_ttl}s)")
         except Exception as exc:
             logger.debug(f"[WEATHER CLIENT] Redis set skipped: {exc}")
 
@@ -385,6 +516,7 @@ class OpenWeatherClient:
             },
             "forecast": [],
             "data_available": True,
+            "data_freshness_minutes": 0.0,
             "is_live": False,
             "source_note": "Simulated Weather (Local Fallback)",
         }

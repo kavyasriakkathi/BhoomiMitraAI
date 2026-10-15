@@ -422,6 +422,7 @@ class WeatherService:
             ),
             forecast=forecast_items,
             data_available=True,
+            data_freshness_minutes=data.get("data_freshness_minutes"),
             source_note=data["source_note"],
             is_live=data["is_live"],
         )
@@ -462,6 +463,27 @@ class WeatherService:
 
         tomorrow_alert = labels["rain_alert"] if will_rain_tomorrow else labels["clear_alert"]
 
+        if response.is_live:
+            if "open-meteo" in (response.source_note or "").lower():
+                source_desc = "ఓపెన్-మెటియో (లైవ్)" if language == "te" else "Open-Meteo (Live)"
+            else:
+                source_desc = labels["source_live"]
+            source_line = f"📡 {source_desc}"
+        else:
+            freshness = response.data_freshness_minutes
+            if freshness is not None and freshness > 0:
+                if language == "te":
+                    time_desc = f"{int(freshness)} నిమిషాల క్రితం" if freshness < 60 else f"{round(freshness / 60, 1)} గంటల క్రితం"
+                    source_line = f"📡 {labels['source_local']} ({time_desc} సేకరించిన సమాచారం - తాజా లైవ్ కాదు)"
+                elif language == "hi":
+                    time_desc = f"{int(freshness)} मिनट पहले" if freshness < 60 else f"{round(freshness / 60, 1)} घंटे पहले"
+                    source_line = f"📡 {labels['source_local']} ({time_desc} का डेटा - लाइव नहीं)"
+                else:
+                    time_desc = f"{int(freshness)} mins ago" if freshness < 60 else f"{round(freshness / 60, 1)} hrs ago"
+                    source_line = f"📡 {labels['source_local']} (Cached data from {time_desc} - not live)"
+            else:
+                source_line = f"📡 {labels['source_local']}"
+
         lines = [
             labels["title"].format(location=response.location_name),
             f"\n🌡️ {labels['temp']}: {response.current.temp:.1f}°C ({labels['feels_like']}: {response.current.feels_like:.1f}°C)",
@@ -469,7 +491,7 @@ class WeatherService:
             f"💧 {labels['humidity']}: {response.current.humidity}%",
             f"💨 {labels['wind']}: {response.current.wind_speed:.1f} km/h",
             f"\n📅 {tomorrow_alert}",
-            f"\n📡 {labels['source_live'] if response.is_live else labels['source_local']}"
+            f"\n{source_line}"
         ]
 
         return "\n".join(lines)
@@ -524,11 +546,38 @@ async def enrich_response_with_weather(
     if not has_weather_intent:
         return ai_response
 
-    # Step 2: Resolve Location (Priority-ordered: Query District -> GPS -> Profile District -> Memory District)
+    # Step 2: Resolve Location (Priority-ordered: Query Coordinates -> Query District -> GPS from Memory/Farmer -> Profile District -> Memory District)
     latitude = None
     longitude = None
     district = query_district
     state = None
+
+    # Check if raw GPS coordinates were provided directly in user query (e.g., "17.409296, 78.649556")
+    coord_match = re.search(r'(-?\d{1,2}\.\d{3,7})\s*,\s*(-?\d{1,3}\.\d{3,7})', query_text)
+    if coord_match:
+        try:
+            lat_q = float(coord_match.group(1))
+            lon_q = float(coord_match.group(2))
+            if -90.0 <= lat_q <= 90.0 and -180.0 <= lon_q <= 180.0:
+                latitude = lat_q
+                longitude = lon_q
+        except (ValueError, TypeError):
+            pass
+
+    # Check if farmer object directly has memory attached with GPS coordinates
+    if latitude is None or longitude is None:
+        f_mem = getattr(farmer, "memory", None)
+        if f_mem and getattr(f_mem, "gps_coordinates", None):
+            gps = f_mem.gps_coordinates
+            if isinstance(gps, dict):
+                try:
+                    lat_m = float(gps.get("latitude") or 0.0)
+                    lon_m = float(gps.get("longitude") or 0.0)
+                    if lat_m != 0.0 and lon_m != 0.0:
+                        latitude = lat_m
+                        longitude = lon_m
+                except (ValueError, TypeError):
+                    pass
 
     try:
         from sqlalchemy import select
