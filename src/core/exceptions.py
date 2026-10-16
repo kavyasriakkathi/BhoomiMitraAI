@@ -10,7 +10,12 @@ class BhoomiMitraException(Exception):
 
 async def bhoomimitra_exception_handler(request: Request, exc: BhoomiMitraException):
     """Handle custom application exceptions."""
-    logger.error(f"App Error: {exc.message} on path {request.url.path}")
+    if exc.status_code == 401:
+        logger.info(f"Authentication notice ({exc.status_code}): {exc.message} on path {request.url.path}")
+    elif exc.status_code in (403, 404):
+        logger.info(f"Client notice ({exc.status_code}): {exc.message} on path {request.url.path}")
+    else:
+        logger.error(f"App Error: {exc.message} on path {request.url.path}")
     return JSONResponse(
         status_code=exc.status_code,
         content={

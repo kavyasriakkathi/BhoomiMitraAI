@@ -619,12 +619,15 @@ async def process_message_pipeline(
                     logger.exception(f"[PIPELINE STAGE FAILED: Stage 7 - DB Status Update] Conversation ID: {conversation.id}, Error: {db_status_err}")
 
             # ── STAGE 8: Mark Message as Read ──────────────────────────
-            logger.info("STAGE 8: Marking message as read with Meta API")
-            try:
-                await mark_message_as_read(parsed.message_id)
-                logger.info("STAGE 8: Read receipt sent.")
-            except Exception as read_err:
-                logger.warning(f"STAGE 8: Read receipt warning for {parsed.message_id}: {read_err}")
+            if parsed.message_type != "unsupported" and parsed.message_id:
+                logger.info("STAGE 8: Marking message as read with Meta API")
+                try:
+                    await mark_message_as_read(parsed.message_id)
+                    logger.info("STAGE 8: Read receipt sent.")
+                except Exception as read_err:
+                    logger.warning(f"STAGE 8: Read receipt warning for {parsed.message_id}: {read_err}")
+            else:
+                logger.info(f"STAGE 8: Skipping read receipt for message_type='{parsed.message_type}' (id={parsed.message_id})")
 
             total_pipeline_time = time.time() - pipeline_start
             logger.info("=" * 80)
