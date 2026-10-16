@@ -8,13 +8,28 @@ Handles HTTP 401 without retries and respects Open-Meteo HTTP 429 rate limits wi
 import json
 import hashlib
 import copy
+import logging
+import time
 from typing import Optional, Dict, List, Tuple
 from datetime import datetime, timedelta
 
 import httpx
 
-from src.core.logging import logger
+from src.core.logging import logger, SecretRedactingFilter, apply_secret_redacting_filter
 from src.config import get_settings
+
+# Ensure secret redaction is active on httpx/httpcore loggers across all environments
+apply_secret_redacting_filter(logging.getLogger("httpx"))
+apply_secret_redacting_filter(logging.getLogger("httpcore"))
+
+# Module-level rate-limit cooldown for Open-Meteo to prevent retry storms
+_OPEN_METEO_RATE_LIMITED_UNTIL: float = 0.0
+
+
+def clear_open_meteo_cooldown() -> None:
+    """Helper to reset Open-Meteo rate-limit cooldown (primarily for tests)."""
+    global _OPEN_METEO_RATE_LIMITED_UNTIL
+    _OPEN_METEO_RATE_LIMITED_UNTIL = 0.0
 
 
 # Module-level in-memory cache to guarantee caching even when Redis is down or unconfigured
@@ -24,6 +39,7 @@ _MEMORY_CACHE: Dict[str, Tuple[datetime, Dict]] = {}
 def clear_weather_memory_cache() -> None:
     """Helper to clear process in-memory weather cache (primarily for tests)."""
     _MEMORY_CACHE.clear()
+    clear_open_meteo_cooldown()
 
 
 class OpenWeatherClient:
@@ -163,9 +179,19 @@ class OpenWeatherClient:
                 response = await client.get(self.api_url, params=params)
 
             if response.status_code == 401:
+                detail_note = ""
+                try:
+                    err_json = response.json()
+                    raw_msg = err_json.get("message") or err_json.get("error")
+                    if raw_msg:
+                        clean_msg = SecretRedactingFilter.SENSITIVE_PARAM_PATTERN.sub(r'\1***', str(raw_msg))
+                        detail_note = f" Provider response: '{clean_msg}'."
+                except Exception:
+                    pass
+
                 logger.warning(
-                    "[WEATHER CLIENT] OpenWeatherMap API returned HTTP 401 Unauthorized. "
-                    "The configured OPENWEATHER_API_KEY is invalid, unauthorized, or inactive. "
+                    f"[WEATHER CLIENT] OpenWeatherMap API returned HTTP 401 Unauthorized.{detail_note} "
+                    "The configured OPENWEATHER_API_KEY lacks access, is inactive, or is invalid. "
                     "Skipping retries and proceeding immediately to fallback provider."
                 )
                 return None
@@ -184,10 +210,12 @@ class OpenWeatherClient:
             logger.warning(f"[WEATHER CLIENT] Connection timed out ({self.timeout_seconds}s threshold exceeded).")
             return None
         except httpx.RequestError as exc:
-            logger.warning(f"[WEATHER CLIENT] HTTP connection error: {exc}")
+            safe_exc = SecretRedactingFilter.SENSITIVE_PARAM_PATTERN.sub(r'\1***', str(exc))
+            logger.warning(f"[WEATHER CLIENT] HTTP connection error: {safe_exc}")
             return None
         except Exception as exc:
-            logger.warning(f"[WEATHER CLIENT] Unexpected error: {exc}")
+            safe_exc = SecretRedactingFilter.SENSITIVE_PARAM_PATTERN.sub(r'\1***', str(exc))
+            logger.warning(f"[WEATHER CLIENT] Unexpected error: {safe_exc}")
             return None
 
     async def _fetch_open_meteo(
@@ -200,6 +228,16 @@ class OpenWeatherClient:
         Fetch live weather from Open-Meteo (keyless global weather service).
         Handles HTTP 429 rate limiting gracefully with bounded backoff and no retry storms.
         """
+        global _OPEN_METEO_RATE_LIMITED_UNTIL
+        now_ts = time.time()
+        if now_ts < _OPEN_METEO_RATE_LIMITED_UNTIL:
+            remaining = int(_OPEN_METEO_RATE_LIMITED_UNTIL - now_ts)
+            logger.warning(
+                f"[WEATHER CLIENT] Open-Meteo is currently in rate-limit cooldown "
+                f"({remaining}s remaining). Skipping provider call to avoid retry storm."
+            )
+            return None
+
         try:
             url = (
                 f"https://api.open-meteo.com/v1/forecast"
@@ -244,8 +282,18 @@ class OpenWeatherClient:
                     else:
                         logger.warning(
                             f"[WEATHER CLIENT] Open-Meteo Retry-After ({retry_after_sec}s) exceeds threshold. "
-                            "Aborting retry to prevent retry storm."
+                            "Activating cooldown to prevent retry storms."
                         )
+                        _OPEN_METEO_RATE_LIMITED_UNTIL = time.time() + min(retry_after_sec, 300.0)
+                        return None
+
+                    # If 429 persisted after retry:
+                    if resp.status_code == 429:
+                        logger.warning(
+                            "[WEATHER CLIENT] Open-Meteo HTTP 429 persisted after bounded retry. "
+                            "Activating 30s cooldown to prevent retry storms."
+                        )
+                        _OPEN_METEO_RATE_LIMITED_UNTIL = time.time() + 30.0
                         return None
 
                 if resp.status_code != 200:
