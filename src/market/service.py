@@ -162,6 +162,9 @@ _TELUGU_DISTRICT_MAP = {
     "Anantapur": "అనంతపురం",
     "Chittoor": "చిత్తూరు",
     "Visakhapatnam": "విశాఖపట్నం",
+    "Medchal-Malkajgiri": "మేడ్చల్-మల్కాజ్‌గిరి",
+    "Ghatkesar": "ఘట్‌కేసర్",
+    "Medchal": "మేడ్చల్",
 }
 
 TELANGANA_DISTRICTS = {
@@ -171,7 +174,7 @@ TELANGANA_DISTRICTS = {
     "vikarabad", "sangareddy", "kamareddy", "rajanna sircilla", "peddapalli",
     "wanaparthy", "jogulamba gadwal", "nagarkurnool", "narayanpet", "mulugu",
     "jayashankar bhupalpally", "jangaon", "yadadri bhuvanagiri",
-    "komaram bheem asifabad", "nirmal", "medchal-malkajgiri", "mahabubabad",
+    "komaram bheem asifabad", "nirmal", "medchal-malkajgiri", "medchal", "ghatkesar", "mahabubabad",
     "korutla", "metpally", "sircilla", "tandur", "miryalaguda", "badepally", "bowenpally",
 }
 
@@ -211,6 +214,9 @@ TELUGU_TO_ENGLISH_PLACES = {
     "ఆసిఫాబాద్": "Komaram Bheem Asifabad",
     "నిర్మల్": "Nirmal",
     "మేడ్చల్": "Medchal-Malkajgiri",
+    "మేడ్చల్-మల్కాజ్‌గిరి": "Medchal-Malkajgiri",
+    "ఘట్‌కేసర్": "Ghatkesar",
+    "ఘట్కేసర్": "Ghatkesar",
     "మిర్యాలగూడ": "Miryalaguda",
     "బాదేపల్లి": "Badepally",
     "బోయిన్‌పల్లి": "Bowenpally",
@@ -259,6 +265,23 @@ _MARKET_LOCATION_STOPWORDS = {
     "ఎంత", "ఏంటి", "ఉందా", "ఉంది", "ఉన్నాయా", "చెప్పండి", "చెప్పు", "తెలియజేయండి",
     "మరియు", "ఇంకా", "కానీ", "కూడా", "మరి", "లేదా", "ఈరోజు", "నిన్న", "రేపు", "ఇప్పుడు",
     "market", "mandi", "మార్కెట్", "మండి", "మార్కెట్లో", "మార్కెట్ లో",
+    # Crop / Agronomic / Field generic terms (never valid mandi/town locations)
+    "crop", "crops", "field", "fields", "farm", "farms", "plant", "plants", "leaf", "leaves",
+    "panta", "pantalu", "pantalo", "pantallo", "pantala", "pantaku", "polam", "polamlo", "polalu",
+    "chenu", "chenulo", "chelu", "thota", "thotalo", "mokka", "mokkalu", "mokkallo", "aaku", "aakulu",
+    "spray", "spraying", "disease", "diseases", "pest", "pests", "insect", "insects",
+    "fungus", "fertilizer", "fertilizers", "manure", "pesticide", "pesticides", "dosage",
+    "పంట", "పంటలు", "పంటల", "పంటలో", "పంటల్లో", "పంటలలో", "పంటకు", "పంటలకు",
+    "పొలం", "పొలంలో", "పొలాలు", "పొలాల్లో", "పొలాల", "చేను", "చేనులో", "చేలు", "చేలలో",
+    "తోట", "తోటలో", "తోటల్లో", "మొక్క", "మొక్కలు", "మొక్కల్లో", "మొక్కలలో",
+    "ఆకు", "ఆకులు", "ఆకుల్లో", "ఆకులలో", "ఆకులపై",
+    "పురుగు", "పురుగులు", "పురుగుల", "పురుగుల్లో", "పురుగులలో",
+    "తెగులు", "తెగుళ్ళు", "తెగుళ్లలో", "తెగులులో",
+    "ఎరువు", "ఎరువులు", "ఎరువుల్లో", "ఎరువులలో",
+    "మందు", "మందులు", "మందుల్లో", "మందులలో",
+    "రసాయనం", "రసాయనాలు", "పిచికారీ", "నివారణ", "సలహా", "సలహాలు",
+    "వరిలో", "పత్తిలో", "మిరపలో", "మిర్చిలో", "మొక్కజొన్నలో", "సోయాబీన్‌లో",
+    "ఫసల్", "ఫసల్లో", "ఫసల్ మే", "కేత్", "కేతోన్",
 }
 
 
@@ -413,7 +436,42 @@ TOWN_TO_DISTRICT_MAP = {
     "మెట్పల్లి": "Jagtial",
     "sircilla": "Rajanna Sircilla",
     "సిరిసిల్ల": "Rajanna Sircilla",
+    "ghatkesar": "Medchal-Malkajgiri",
+    "ఘట్‌కేసర్": "Medchal-Malkajgiri",
+    "ఘట్కేసర్": "Medchal-Malkajgiri",
+    "medchal": "Medchal-Malkajgiri",
+    "మేడ్చల్": "Medchal-Malkajgiri",
+    "medchal-malkajgiri": "Medchal-Malkajgiri",
+    "మేడ్చల్-మల్కాజ్‌గిరి": "Medchal-Malkajgiri",
 }
+
+
+def get_distance_between_locations(loc1: Optional[str], loc2: Optional[str]) -> float:
+    """
+    Calculate Euclidean distance in degrees between two locations using known coordinates.
+    Returns 999.0 if coordinates are not available for either location.
+    """
+    if not loc1 or not loc2:
+        return 999.0
+    from src.shops.service import _KNOWN_COORDINATES
+
+    def _find_coord(l_name: str):
+        cleaned = l_name.strip().lower()
+        if cleaned in _KNOWN_COORDINATES:
+            return _KNOWN_COORDINATES[cleaned]
+        for word in cleaned.split():
+            if word in _KNOWN_COORDINATES:
+                return _KNOWN_COORDINATES[word]
+        norm = normalize_district_name(l_name)
+        if norm and norm.lower() in _KNOWN_COORDINATES:
+            return _KNOWN_COORDINATES[norm.lower()]
+        return None
+
+    c1 = _find_coord(loc1)
+    c2 = _find_coord(loc2)
+    if not c1 or not c2:
+        return 999.0
+    return ((c1[0] - c2[0]) ** 2 + (c1[1] - c2[1]) ** 2) ** 0.5
 
 
 def normalize_district_name(raw_district: Optional[str]) -> Optional[str]:
@@ -515,10 +573,12 @@ def _clean_ai_response_for_market_enrichment(ai_response: str) -> str:
     if any(marker in ai_lower for marker in refusal_markers):
         return ""
 
-    # Sentence markers that indicate speculative or duplicate price discussion
-    price_sentence_markers = [
+    # Sentence markers that indicate speculative or duplicate price / weather discussion
+    unrelated_sentence_markers = [
         "ధర", "ధరలు", "మండి", "క్వింటాల్", "క్వింటాలు", "రేటు", "రేట్లు",
-        "price", "prices", "mandi", "rate", "rates", "quintal", "₹", "rs."
+        "price", "prices", "mandi", "rate", "rates", "quintal", "₹", "rs.",
+        "వాతావరణం", "వర్షం", "ఉష్ణోగ్రత", "weather", "forecast", "rain", "temperature",
+        "मौसम", "तापमान", "बारिश",
     ]
 
     cleaned_paragraphs = []
@@ -527,12 +587,12 @@ def _clean_ai_response_for_market_enrichment(ai_response: str) -> str:
         if not para:
             continue
         sentences = [s.strip() for s in para.replace("।", ".").split(".") if s.strip()]
-        non_price_sentences = [
+        valid_sentences = [
             s for s in sentences
-            if not any(pm in s.lower() for pm in price_sentence_markers)
+            if not any(pm in s.lower() for pm in unrelated_sentence_markers)
         ]
-        if non_price_sentences:
-            cleaned_paragraphs.append(". ".join(non_price_sentences) + ".")
+        if valid_sentences:
+            cleaned_paragraphs.append(". ".join(valid_sentences) + ".")
 
     return "\n\n".join(cleaned_paragraphs).strip()
 
@@ -908,8 +968,9 @@ class MarketService:
             state=state,
         )
 
-        # If explicit_location is provided, enforce strict location matching:
-        # Never silently accept state-wide fallback records (e.g. Warangal) for a different requested village/town.
+        is_nearby = False
+
+        # If explicit_location is provided, check for direct location matching first:
         if explicit_location and db_records:
             norm_explicit = normalize_district_name(explicit_location)
             loc_candidates = {explicit_location.lower()}
@@ -930,7 +991,82 @@ class MarketService:
                 if explicit_location.lower() in getattr(r, "district", "").lower()
                 or explicit_location.lower() in getattr(r, "market_name", "").lower()
             ]
-            db_records = exact_db if exact_db else matching_db
+            if exact_db:
+                db_records = exact_db
+            elif matching_db:
+                db_records = matching_db
+            else:
+                # Requested explicit location has no direct mandi for this crop.
+                # Search valid relevant nearby agricultural markets in the SAME state.
+                state_clean = state.strip().lower() if state else None
+                same_state_records = [
+                    r for r in db_records
+                    if state_clean and state_clean in getattr(r, "state", "").lower()
+                ] if state_clean else []
+
+                if not same_state_records and state:
+                    all_state_records = await self.repository.get_prices_by_commodity(
+                        commodity=commodity,
+                        district=None,
+                        state=state,
+                    )
+                    same_state_records = [
+                        r for r in all_state_records
+                        if state_clean in getattr(r, "state", "").lower()
+                    ]
+
+                if same_state_records:
+                    target_loc = explicit_location or district
+                    same_state_records.sort(
+                        key=lambda rec: min(
+                            get_distance_between_locations(target_loc, getattr(rec, "market_name", "")),
+                            get_distance_between_locations(target_loc, getattr(rec, "district", "")),
+                        )
+                    )
+                    closest_market = getattr(same_state_records[0], "market_name", "")
+                    closest_records = [
+                        r for r in same_state_records
+                        if getattr(r, "market_name", "") == closest_market
+                    ]
+                    db_records = closest_records if closest_records else same_state_records[:3]
+                    is_nearby = True
+                    logger.info(
+                        f"[MARKET SERVICE] Explicit location '{explicit_location}' has no direct mandi for '{commodity}'. "
+                        f"Found nearby market '{closest_market}' in state='{state}'."
+                    )
+                else:
+                    db_records = []
+
+        elif district and not db_records and state:
+            # District has no direct mandi for this crop -> check nearby mandis in the same state
+            all_state_records = await self.repository.get_prices_by_commodity(
+                commodity=commodity,
+                district=None,
+                state=state,
+            )
+            state_clean = state.strip().lower()
+            same_state_records = [
+                r for r in all_state_records
+                if state_clean in getattr(r, "state", "").lower()
+            ]
+            if same_state_records:
+                same_state_records.sort(
+                    key=lambda rec: min(
+                        get_distance_between_locations(district, getattr(rec, "market_name", "")),
+                        get_distance_between_locations(district, getattr(rec, "district", "")),
+                    )
+                )
+                closest_market = getattr(same_state_records[0], "market_name", "")
+                closest_records = [
+                    r for r in same_state_records
+                    if getattr(r, "market_name", "") == closest_market
+                ]
+                db_records = closest_records if closest_records else same_state_records[:3]
+                is_nearby = True
+                logger.info(
+                    f"[MARKET SERVICE] District '{district}' has no direct mandi for '{commodity}'. "
+                    f"Found nearby market '{closest_market}' in state='{state}'."
+                )
 
         if not db_records:
             logger.info(
@@ -949,6 +1085,7 @@ class MarketService:
                 is_today_requested=is_today_requested,
                 explicit_location=explicit_location,
                 raw_commodity=raw_commodity,
+                is_nearby=False,
             )
 
         has_today_db = any(is_record_from_today(getattr(r, "price_date", None)) for r in db_records)
@@ -964,12 +1101,15 @@ class MarketService:
             else 0.0
         )
 
-        if api_records and not is_today_requested:
+        if api_records and not is_today_requested and not is_nearby:
             is_live = True
             source_note = "Live data from Agmarknet / data.gov.in"
         else:
             is_live = False
-            source_note = f"Local database (data is ~{freshness_hours}h old)"
+            if is_nearby:
+                source_note = f"Nearby market ({db_records[0].market_name}) in {state} (data is ~{freshness_hours}h old)"
+            else:
+                source_note = f"Local database (data is ~{freshness_hours}h old)"
 
         results = [MarketPriceResponse.model_validate(r) for r in db_records]
 
@@ -977,7 +1117,7 @@ class MarketService:
             f"[MARKET SERVICE] Selected DB record -> "
             f"market='{results[0].market_name}', modal={results[0].modal_price}, "
             f"price_date={results[0].price_date.strftime('%Y-%m-%d') if results[0].price_date else 'N/A'}, "
-            f"has_today_match={has_today_db}, is_live={is_live}"
+            f"has_today_match={has_today_db}, is_live={is_live}, is_nearby={is_nearby}"
         )
 
         return MarketPriceQueryResponse(
@@ -992,6 +1132,7 @@ class MarketService:
             is_today_requested=is_today_requested,
             explicit_location=explicit_location,
             raw_commodity=raw_commodity,
+            is_nearby=is_nearby,
         )
 
     async def list_commodities(self) -> List[str]:
@@ -1189,8 +1330,31 @@ class MarketService:
         has_today_data = any(is_record_from_today(r.price_date) for r in deduplicated)
         source_str = labels["source_live"] if query_response.is_live else labels["source_local"]
 
+        # If results are from nearby mandis because requested location has no direct mandi
+        if query_response.is_nearby:
+            req_name = getattr(query_response, "explicit_location", None) or query_response.district or "ఈ ప్రాంతంలో"
+            state_name = query_response.state or "తెలంగాణ"
+            if language == "te":
+                tel_req = _TELUGU_DISTRICT_MAP.get(req_name, req_name)
+                lines = [
+                    f"📍 {tel_req} వద్ద నేరుగా {commodity_display} మార్కెట్/మండి అందుబాటులో లేదు.\n"
+                    f"సమీప మార్కెట్లలో ధరలు ({state_name}):\n\n"
+                    f"{labels['title'].format(commodity=commodity_display)}"
+                ]
+            elif language == "hi":
+                lines = [
+                    f"📍 {req_name} में सीधे {commodity_display} की कोई मंडी उपलब्ध नहीं है।\n"
+                    f"निकटतम मंडी भाव ({state_name}):\n\n"
+                    f"{labels['title'].format(commodity=commodity_display)}"
+                ]
+            else:
+                lines = [
+                    f"📍 No direct {commodity_display} mandi at {req_name}.\n"
+                    f"Nearby market prices in {state_name}:\n\n"
+                    f"{labels['title'].format(commodity=commodity_display)}"
+                ]
         # If farmer specifically asked for today's price, but all available records are from older dates
-        if is_today_query and not has_today_data:
+        elif is_today_query and not has_today_data:
             newest_date = max(r.price_date for r in deduplicated)
             latest_date_str = newest_date.strftime("%d %b %Y")
 
@@ -1341,19 +1505,59 @@ async def enrich_response_with_market_prices(
     matched_commodity = None
     raw_commodity_word = None
     import re
+
+    # Find all matching commodities and their positions in query
     sorted_keywords = sorted(COMMODITY_MAP.items(), key=lambda x: len(x[0]), reverse=True)
+    commodity_matches = []
+    seen_canonicals = set()
     for kw, canonical in sorted_keywords:
         kw_lower = kw.lower()
+        pos = -1
         if kw_lower.isascii() and kw_lower.isalnum():
-            if re.search(rf"\b{re.escape(kw_lower)}\b", query_lower):
-                matched_commodity = canonical
-                raw_commodity_word = kw
-                break
+            m = re.search(rf"\b{re.escape(kw_lower)}\b", query_lower)
+            if m:
+                pos = m.start()
         else:
-            if kw in query_text or kw_lower in query_lower:
-                matched_commodity = canonical
-                raw_commodity_word = kw
-                break
+            if kw in query_text:
+                pos = query_text.find(kw)
+            elif kw_lower in query_lower:
+                pos = query_lower.find(kw_lower)
+        if pos != -1 and canonical not in seen_canonicals:
+            commodity_matches.append((pos, len(kw), canonical, kw))
+            seen_canonicals.add(canonical)
+
+    if len(commodity_matches) == 1:
+        matched_commodity = commodity_matches[0][2]
+        raw_commodity_word = commodity_matches[0][3]
+    elif len(commodity_matches) > 1:
+        # If multiple crops match, prioritize the one nearest to price keywords
+        price_positions = []
+        all_price_indicators = (
+            PRICE_INTENT_KEYWORDS_TE
+            | PRICE_INTENT_KEYWORDS_EN
+            | PRICE_INTENT_KEYWORDS_MULTILINGUAL
+            | {"ధర", "మార్కెట్", "మండి", "రేటు", "price", "mandi", "rate"}
+        )
+        for p_kw in all_price_indicators:
+            p_kw_lower = p_kw.lower()
+            start = 0
+            while True:
+                idx = query_lower.find(p_kw_lower, start)
+                if idx == -1:
+                    break
+                price_positions.append(idx)
+                start = idx + len(p_kw_lower)
+
+        if price_positions:
+            commodity_matches.sort(
+                key=lambda m: (min(abs(m[0] - p) for p in price_positions), -m[1])
+            )
+            matched_commodity = commodity_matches[0][2]
+            raw_commodity_word = commodity_matches[0][3]
+        else:
+            commodity_matches.sort(key=lambda m: (-m[1], m[0]))
+            matched_commodity = commodity_matches[0][2]
+            raw_commodity_word = commodity_matches[0][3]
 
     # Fallback to extract_crop_from_text if not matched directly in COMMODITY_MAP
     if not matched_commodity:

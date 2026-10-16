@@ -8,7 +8,7 @@ NO real API keys or external connections needed.
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -19,7 +19,7 @@ from src.weather.service import WeatherService
 from src.weather.dependencies import get_weather_service
 
 client = TestClient(app)
-NOW = datetime.utcnow()
+NOW = datetime.now(timezone.utc)
 
 
 @pytest.fixture
@@ -31,7 +31,7 @@ def mock_weather_service():
 
 
 def _mock_weather_response(location_name="Warangal", is_live=False, has_rain=False) -> WeatherForecastResponse:
-    tomorrow_str = (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d 12:00:00")
+    tomorrow_str = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d 12:00:00")
     forecast_item = {
         "dt_txt": tomorrow_str,
         "temp": 28.5,
@@ -926,7 +926,7 @@ async def test_valid_fallback_data_produces_weather_response():
         },
         "forecast": [
             {
-                "dt_txt": (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d 12:00:00"),
+                "dt_txt": (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d 12:00:00"),
                 "temp": 31.0,
                 "humidity": 65,
                 "description": "Rain",
@@ -995,7 +995,7 @@ async def test_cached_data_freshness_checked_and_disclosed():
         },
         "forecast": [],
         "data_available": True,
-        "_cached_at": (datetime.utcnow() - timedelta(minutes=45)).isoformat(),
+        "_cached_at": (datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat(),
         "is_live": True,
         "source_note": "OpenWeatherMap API (Live)",
     }
@@ -1003,7 +1003,7 @@ async def test_cached_data_freshness_checked_and_disclosed():
     # Populate in-memory cache directly
     cache_key = client._cache_key(17.409296, 78.649556, None, None)
     from src.weather.openweather_client import _MEMORY_CACHE
-    _MEMORY_CACHE[cache_key] = (datetime.utcnow() - timedelta(minutes=45), stale_payload)
+    _MEMORY_CACHE[cache_key] = (datetime.now(timezone.utc) - timedelta(minutes=45), stale_payload)
 
     # Simulate live providers failing (OWM 401, Open-Meteo 429)
     with patch.object(client, "_call_api", new_callable=AsyncMock, return_value=None), \
@@ -1029,8 +1029,8 @@ async def test_cached_data_freshness_checked_and_disclosed():
     # B. Cache older than 6 hours (e.g. 8 hours) -> NOT reused, returns honest unavailable
     clear_weather_memory_cache()
     very_old_payload = dict(stale_payload)
-    very_old_payload["_cached_at"] = (datetime.utcnow() - timedelta(hours=8)).isoformat()
-    _MEMORY_CACHE[cache_key] = (datetime.utcnow() - timedelta(hours=8), very_old_payload)
+    very_old_payload["_cached_at"] = (datetime.now(timezone.utc) - timedelta(hours=8)).isoformat()
+    _MEMORY_CACHE[cache_key] = (datetime.now(timezone.utc) - timedelta(hours=8), very_old_payload)
 
     with patch.object(client, "_call_api", new_callable=AsyncMock, return_value=None), \
          patch.object(client, "_fetch_open_meteo", new_callable=AsyncMock, return_value=None):

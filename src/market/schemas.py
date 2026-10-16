@@ -61,3 +61,4 @@ class MarketPriceQueryResponse(BaseModel):
     is_today_requested: bool = False                # True if user specifically queried for today's price
     explicit_location: Optional[str] = None         # Preserves farmer's explicitly mentioned query location
     raw_commodity: Optional[str] = None             # Preserves farmer's raw crop word from query (e.g. 'cotton', 'పత్తి')
+    is_nearby: bool = False                         # True if results are from nearby mandis because requested location has no direct mandi
