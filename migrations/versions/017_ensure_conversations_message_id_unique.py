@@ -7,7 +7,6 @@ Create Date: 2026-10-16 16:30:00.000000
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.engine.reflection import Inspector
 
 # revision identifiers, used by Alembic.
 revision = '017_conversations_message_id_unique'
