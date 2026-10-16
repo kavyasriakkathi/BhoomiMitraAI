@@ -1985,7 +1985,7 @@ def decompose_assembled_response(assembled_text: str) -> Dict[str, str]:
     if not assembled_text:
         return sections
 
-    pattern = r"(?=(?:^|\n\n)(?:🏬|📊|🌡️|🌦️|🏛️|👨‍🌾|⚠️|🔔|✅))"
+    pattern = r"(?=(?:^|\n\n)(?:🏬|📊|🌡️|🌦️|🏛️|👨‍🌾|⚠️|🔔|✅|📍))"
     chunks = re.split(pattern, assembled_text.strip())
 
     base_ai_parts = []
@@ -2001,6 +2001,8 @@ def decompose_assembled_response(assembled_text: str) -> Dict[str, str]:
         elif chunk.startswith("📊") or "Mandi Prices" in chunk or "మార్కెట్ ధరలు" in chunk or "मंडी भाव" in chunk or any(titles.get("market", "") in chunk for titles in _SECTION_TITLES.values() if titles.get("market")):
             sections["market"] = chunk
         elif chunk.startswith("⚠️") and ("మార్కెట్ ధర" in chunk or "market price" in chunk.lower() or "మండి" in chunk or "mandi" in chunk.lower() or "मंडी भाव" in chunk or any(titles.get("market", "") in chunk for titles in _SECTION_TITLES.values() if titles.get("market"))):
+            sections["market"] = chunk
+        elif chunk.startswith("📍") and ("మార్కెట్" in chunk or "market" in chunk.lower() or "మండి" in chunk or "mandi" in chunk.lower() or "ధర" in chunk or "price" in chunk.lower() or "भाव" in chunk):
             sections["market"] = chunk
         elif chunk.startswith("🌡️") or chunk.startswith("🌦️") or "Weather Information" in chunk or "వాతావరణ సమాచారం" in chunk or "मौसम जानकारी" in chunk or any(titles.get("weather", "") in chunk for titles in _SECTION_TITLES.values() if titles.get("weather")):
             sections["weather"] = chunk

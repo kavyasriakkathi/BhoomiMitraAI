@@ -1043,7 +1043,15 @@ class AIDecisionEngine:
             and not has_schemes
             and not has_stock_alert
         )
-        if not (is_pure_stock_or_shop_query or is_pure_weather_query):
+        is_pure_market_query = (
+            has_market
+            and not has_crop_advice
+            and not has_weather
+            and not has_shops
+            and not has_schemes
+            and not has_stock_alert
+        )
+        if not (is_pure_stock_or_shop_query or is_pure_weather_query or is_pure_market_query):
             from src.ai.repository import AIRepository
             from src.ai.service import AIService
             from src.ai.schemas import AIGenerateRequest

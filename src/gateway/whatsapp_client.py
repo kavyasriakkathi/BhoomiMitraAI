@@ -49,7 +49,7 @@ async def send_text_message(
         logger.error("[WHATSAPP OUTBOUND SAFETY] Cannot send message: recipient phone number is missing.")
         return None
 
-    to_phone = str(to_phone).strip()
+    to_phone = str(to_phone).replace("whatsapp:", "").strip().lstrip("+")
 
     # Empty response protection: reject None, empty, and whitespace-only strings
     if not message_text or not str(message_text).strip():

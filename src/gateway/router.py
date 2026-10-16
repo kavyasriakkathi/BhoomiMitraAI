@@ -110,6 +110,38 @@ def sanitize_headers_for_logging(headers: dict) -> dict:
 # POST — Incoming Message Handler
 # ──────────────────────────────────────────────
 
+import time
+from collections import OrderedDict
+
+# Global in-memory cache of recently queued message IDs across webhook requests (with 300s TTL)
+_RECENT_QUEUED_MESSAGE_IDS: OrderedDict[str, float] = OrderedDict()
+_RECENT_MESSAGE_TTL_SECONDS = 300.0
+_MAX_RECENT_MESSAGES = 2000
+
+
+def _is_recently_queued_message(msg_id: str) -> bool:
+    """Check if message_id was recently queued, and clean up expired entries."""
+    if not msg_id:
+        return False
+    now = time.time()
+    # Expire old entries
+    while _RECENT_QUEUED_MESSAGE_IDS:
+        oldest_id, ts = next(iter(_RECENT_QUEUED_MESSAGE_IDS.items()))
+        if now - ts > _RECENT_MESSAGE_TTL_SECONDS:
+            _RECENT_QUEUED_MESSAGE_IDS.pop(oldest_id, None)
+        else:
+            break
+
+    if msg_id in _RECENT_QUEUED_MESSAGE_IDS:
+        return True
+
+    # Add and bound capacity
+    if len(_RECENT_QUEUED_MESSAGE_IDS) >= _MAX_RECENT_MESSAGES:
+        _RECENT_QUEUED_MESSAGE_IDS.popitem(last=False)
+    _RECENT_QUEUED_MESSAGE_IDS[msg_id] = now
+    return False
+
+
 @router.post("/whatsapp")
 async def receive_message(
     request: Request,
@@ -119,7 +151,6 @@ async def receive_message(
     Receives incoming WhatsApp messages from Meta's Cloud API.
     Logs raw request safely, verifies signature, parses payload, and queues background processing.
     """
-    import time
     recv_time = time.time()
 
     # VERY FIRST LINE: Read body bytes and log sanitized request metadata before any parsing or validation
@@ -168,7 +199,6 @@ async def receive_message(
 
     # Step 4: Extract messages and queue background tasks
     messages_queued = 0
-    queued_message_ids: set[str] = set()
 
     if not payload.entry:
         logger.info("Webhook payload contained no 'entry' items.")
@@ -220,13 +250,11 @@ async def receive_message(
                     logger.info(f"Message dropped: sender or message ID missing. Skipping msg: {msg}.")
                     continue
 
-                if parsed.message_id in queued_message_ids:
+                if _is_recently_queued_message(parsed.message_id):
                     logger.warning(
-                        f"[DUPLICATE IN PAYLOAD] Duplicate message ID '{parsed.message_id}' detected within same webhook payload batch. Skipping."
+                        f"[DUPLICATE IN PAYLOAD] Duplicate message ID '{parsed.message_id}' detected (already queued recently). Skipping."
                     )
                     continue
-
-                queued_message_ids.add(parsed.message_id)
 
                 logger.info(f"[WEBHOOK EVENT] msg_id={parsed.message_id} meta_ts={parsed.timestamp} type={parsed.message_type} sender={mask_phone_number(parsed.phone_number)}")
                 logger.info(f"INCOMING MESSAGE PARSED SUCCESSFULLY:")

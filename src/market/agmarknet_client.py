@@ -21,7 +21,7 @@ import httpx
 
 from src.core.logging import logger
 
-# Known districts mapped to their respective Indian state for targeted Agmarknet API queries.
+# Known districts and mandals mapped to their respective Indian state for targeted Agmarknet API queries.
 _DISTRICT_STATE_MAP = {
     # Telangana
     "warangal": "Telangana",
@@ -41,12 +41,37 @@ _DISTRICT_STATE_MAP = {
     "jagtial": "Telangana",
     "mancherial": "Telangana",
     "bhadradri": "Telangana",
+    "bhadradri kothagudem": "Telangana",
     "kothagudem": "Telangana",
     "vikarabad": "Telangana",
     "sangareddy": "Telangana",
     "kamareddy": "Telangana",
     "sircilla": "Telangana",
     "rajanna sircilla": "Telangana",
+    "medchal": "Telangana",
+    "medchal-malkajgiri": "Telangana",
+    "medchal malkajgiri": "Telangana",
+    "ghatkesar": "Telangana",
+    "peddapalli": "Telangana",
+    "wanaparthy": "Telangana",
+    "jogulamba gadwal": "Telangana",
+    "gadwal": "Telangana",
+    "nagarkurnool": "Telangana",
+    "narayanpet": "Telangana",
+    "mulugu": "Telangana",
+    "jayashankar bhupalpally": "Telangana",
+    "bhupalpally": "Telangana",
+    "jangaon": "Telangana",
+    "yadadri": "Telangana",
+    "yadadri bhuvanagiri": "Telangana",
+    "komaram bheem asifabad": "Telangana",
+    "asifabad": "Telangana",
+    "nirmal": "Telangana",
+    "mahabubabad": "Telangana",
+    "korutla": "Telangana",
+    "metpally": "Telangana",
+    "tandur": "Telangana",
+    "miryalaguda": "Telangana",
     # Andhra Pradesh
     "guntur": "Andhra Pradesh",
     "krishna": "Andhra Pradesh",
@@ -54,7 +79,50 @@ _DISTRICT_STATE_MAP = {
     "anantapur": "Andhra Pradesh",
     "chittoor": "Andhra Pradesh",
     "visakhapatnam": "Andhra Pradesh",
+    "vijayawada": "Andhra Pradesh",
+    "kadapa": "Andhra Pradesh",
+    "ysr kadapa": "Andhra Pradesh",
+    "nellore": "Andhra Pradesh",
+    "ongole": "Andhra Pradesh",
+    "prakasam": "Andhra Pradesh",
+    "tirupati": "Andhra Pradesh",
+    "madanapalle": "Andhra Pradesh",
+    "eluru": "Andhra Pradesh",
+    "west godavari": "Andhra Pradesh",
+    "east godavari": "Andhra Pradesh",
+    "kakinada": "Andhra Pradesh",
+    "srikakulam": "Andhra Pradesh",
+    "vizianagaram": "Andhra Pradesh",
 }
+
+# Sub-district towns/mandals mapped to administrative districts for external Agmarknet queries
+_SUB_DISTRICT_TO_DISTRICT_MAP = {
+    "ghatkesar": "Medchal-Malkajgiri",
+    "medchal": "Medchal-Malkajgiri",
+    "korutla": "Jagtial",
+    "metpally": "Jagtial",
+    "sircilla": "Rajanna Sircilla",
+    "enumamula": "Warangal",
+    "hanamkonda": "Warangal",
+    "tandur": "Vikarabad",
+    "miryalaguda": "Nalgonda",
+    "vijayawada": "Krishna",
+    "tirupati": "Chittoor",
+    "madanapalle": "Chittoor",
+}
+
+
+def _redact_secrets(text: str) -> str:
+    """Mask API keys and secrets from error messages and logs."""
+    if not text:
+        return ""
+    import re
+    return re.sub(
+        r"(api[-_]?key[=:][\s]*)([^\s&]+)",
+        r"\1***REDACTED***",
+        text,
+        flags=re.IGNORECASE,
+    )
 
 
 class AgmarknetClient:
@@ -203,11 +271,20 @@ class AgmarknetClient:
         if isinstance(district, str) and district.strip().lower() in ("", "none"):
             district = None
 
+        canonical_district = district
+        if district:
+            d_lower = district.strip().lower()
+            if d_lower in _SUB_DISTRICT_TO_DISTRICT_MAP:
+                canonical_district = _SUB_DISTRICT_TO_DISTRICT_MAP[d_lower]
+
         # Resolve state from known district if state was not explicitly provided
         # (e.g. Warangal -> Telangana prevents unindexed nationwide table scan on data.gov.in)
         resolved_state = state
-        if not resolved_state and district:
-            resolved_state = _DISTRICT_STATE_MAP.get(district.strip().lower())
+        if not resolved_state:
+            if canonical_district:
+                resolved_state = _DISTRICT_STATE_MAP.get(canonical_district.strip().lower())
+            if not resolved_state and district:
+                resolved_state = _DISTRICT_STATE_MAP.get(district.strip().lower())
 
         params = {
             "api-key": self.api_key,
@@ -218,8 +295,8 @@ class AgmarknetClient:
             params["filters[commodity]"] = commodity
         if resolved_state:
             params["filters[state.keyword]"] = resolved_state
-        if district:
-            params["filters[district]"] = district
+        if canonical_district:
+            params["filters[district]"] = canonical_district
 
         headers = {
             "Accept": "application/json",
@@ -243,7 +320,7 @@ class AgmarknetClient:
                 async with httpx.AsyncClient(timeout=timeout_config) as client:
                     logger.info(
                         f"[AGMARKNET] Calling live API (attempt {attempt}/{total_attempts}): "
-                        f"commodity='{commodity}' state='{resolved_state}' district='{district}' "
+                        f"commodity='{commodity}' state='{resolved_state}' district='{canonical_district}' "
                         f"(timeout={self.timeout_seconds}s, connect_timeout={connect_timeout}s)"
                     )
                     response = await asyncio.wait_for(
@@ -281,17 +358,18 @@ class AgmarknetClient:
             except (httpx.ConnectTimeout, httpx.ConnectError, httpx.NetworkError) as exc:
                 elapsed = time.time() - req_start
                 time_spent = time.time() - overall_start
-                if attempt < total_attempts and (time_spent < self.timeout_seconds * 1.5):
+                clean_err = _redact_secrets(str(exc))
+                if attempt < total_attempts:
                     logger.warning(
                         f"[AGMARKNET] Transient network error on attempt {attempt}/{total_attempts} "
-                        f"after {elapsed:.2f}s for commodity='{commodity}': {exc}. Retrying..."
+                        f"after {elapsed:.2f}s for commodity='{commodity}': {clean_err}. Retrying..."
                     )
                     delay = min(self.retry_delay_seconds, max(0.01, self.timeout_seconds / 2))
                     if delay > 0:
                         await asyncio.sleep(delay)
                     continue
                 logger.warning(
-                    f"[AGMARKNET] Network error after {attempt} attempt(s) for commodity='{commodity}': {exc}. "
+                    f"[AGMARKNET] Network error after {attempt} attempt(s) for commodity='{commodity}': {clean_err}. "
                     "Using local DB fallback."
                 )
                 return None
@@ -299,6 +377,7 @@ class AgmarknetClient:
             except (httpx.TimeoutException, asyncio.TimeoutError) as exc:
                 # Overall request or read timeout limit reached - do NOT retry to keep total request bounded
                 elapsed = time.time() - req_start
+                clean_err = _redact_secrets(str(exc))
                 logger.warning(
                     f"[AGMARKNET] API timeout after {elapsed:.2f}s (limit={self.timeout_seconds}s) "
                     f"for commodity='{commodity}'. Using local DB fallback."
@@ -308,15 +387,17 @@ class AgmarknetClient:
             except httpx.RequestError as exc:
                 # Non-transient request errors (e.g. invalid URL scheme, protocol violation): do not retry
                 elapsed = time.time() - req_start
+                clean_err = _redact_secrets(str(exc))
                 logger.warning(
-                    f"[AGMARKNET] Non-transient request error after {elapsed:.2f}s for commodity='{commodity}': {exc}. "
+                    f"[AGMARKNET] Non-transient request error after {elapsed:.2f}s for commodity='{commodity}': {clean_err}. "
                     "Using local DB fallback."
                 )
                 return None
 
             except Exception as exc:
+                clean_err = _redact_secrets(str(exc))
                 logger.warning(
-                    f"[AGMARKNET] Unexpected error for commodity='{commodity}': {exc}. "
+                    f"[AGMARKNET] Unexpected error for commodity='{commodity}': {clean_err}. "
                     "Using local DB fallback."
                 )
                 return None
