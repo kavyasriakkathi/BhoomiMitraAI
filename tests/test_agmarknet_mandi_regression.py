@@ -427,3 +427,165 @@ async def test_service_pipeline_db_unique_constraint_safeguard():
         mock_ai.assert_not_called()
         mock_send.assert_not_called()
 
+
+# ==============================================================================
+# 8. Database Schema Compatibility, Migration Safety & Non-Destructive Dedup
+# ==============================================================================
+
+def test_conversation_model_has_database_unique_constraint():
+    """Verify Conversation.message_id defines database-level unique constraint."""
+    from src.core.models import Conversation
+    from sqlalchemy import UniqueConstraint
+
+    # Column-level unique attribute
+    col = Conversation.__table__.c.message_id
+    assert col.unique is True, "Conversation.message_id must have unique=True"
+
+    # Table constraints check
+    has_uq = any(
+        isinstance(c, UniqueConstraint) and "message_id" in [col.name for col in c.columns]
+        for c in Conversation.__table__.constraints
+    ) or col.unique is True
+    assert has_uq is True
+
+
+@pytest.mark.asyncio
+async def test_database_engine_enforces_message_id_unique_integrity_error():
+    """Verify database raises IntegrityError when duplicate message_id is committed."""
+    import uuid
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+    from src.core.models import Base, Farmer, Conversation
+
+    # Create isolated in-memory sqlite engine
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with session_factory() as session:
+        farmer = Farmer(id=uuid.uuid4(), phone_number="919999999999")
+        session.add(farmer)
+        await session.commit()
+
+        # Insert first message
+        conv1 = Conversation(
+            farmer_id=farmer.id,
+            message_id="wamid.DB_INTEGRITY_CHECK",
+            user_message="First message",
+        )
+        session.add(conv1)
+        await session.commit()
+
+        # Insert duplicate message with same message_id
+        conv2 = Conversation(
+            farmer_id=farmer.id,
+            message_id="wamid.DB_INTEGRITY_CHECK",
+            user_message="Duplicate message",
+        )
+        session.add(conv2)
+
+        with pytest.raises(IntegrityError):
+            await session.commit()
+
+        await session.rollback()
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_migration_017_disambiguates_duplicates_without_deleting_rows():
+    """
+    Verify migration 017 safely disambiguates duplicate message IDs
+    without deleting any conversation or message records.
+    """
+    from sqlalchemy import create_engine, text
+    import importlib
+    import uuid
+
+    # Synchronous in-memory sqlite engine to simulate existing legacy database
+    test_engine = create_engine("sqlite:///:memory:")
+    with test_engine.begin() as conn:
+        # Create legacy table without unique constraint on message_id
+        conn.execute(text("""
+            CREATE TABLE conversations (
+                id VARCHAR(36) PRIMARY KEY,
+                farmer_id VARCHAR(36),
+                message_id VARCHAR(100),
+                user_message TEXT,
+                created_at TIMESTAMP
+            )
+        """))
+        # Insert duplicate legacy records
+        id1, id2, id3 = str(uuid.uuid4()), str(uuid.uuid4()), str(uuid.uuid4())
+        conn.execute(text("""
+            INSERT INTO conversations (id, farmer_id, message_id, user_message, created_at)
+            VALUES 
+                (:id1, 'farmer1', 'wamid.LEGACY_DUP', 'Message 1', '2026-01-01 10:00:00'),
+                (:id2, 'farmer1', 'wamid.LEGACY_DUP', 'Message 2', '2026-01-01 10:05:00'),
+                (:id3, 'farmer1', 'wamid.LEGACY_DUP', 'Message 3', '2026-01-01 10:10:00')
+        """), {"id1": id1, "id2": id2, "id3": id3})
+
+        # Verify 3 rows initially exist
+        initial_count = conn.execute(text("SELECT COUNT(*) FROM conversations")).scalar()
+        assert initial_count == 3
+
+    # Import and run migration upgrade logic with mocked alembic op
+    mig = importlib.import_module("migrations.versions.017_ensure_conversations_message_id_unique")
+
+    with patch("alembic.op.get_bind", return_value=test_engine), \
+         patch("alembic.op.create_index") as mock_create_index:
+        mig.upgrade()
+        mock_create_index.assert_called_once_with(
+            'uq_conversations_message_id',
+            'conversations',
+            ['message_id'],
+            unique=True,
+        )
+
+    # Verify results in database:
+    # 1. Total row count is still 3 (NO rows were deleted)
+    with test_engine.connect() as conn:
+        final_count = conn.execute(text("SELECT COUNT(*) FROM conversations")).scalar()
+        assert final_count == 3, "Migration must never delete any conversation rows"
+
+        rows = conn.execute(text("SELECT id, message_id FROM conversations ORDER BY created_at ASC")).fetchall()
+        # Earliest row preserves original canonical message_id
+        assert rows[0][1] == "wamid.LEGACY_DUP"
+        # Duplicate rows were safely disambiguated with suffix
+        assert "__dup_1_" in rows[1][1]
+        assert "__dup_2_" in rows[2][1]
+
+        # Verify all message_id values are now unique
+        unique_ids = {r[1] for r in rows}
+        assert len(unique_ids) == 3
+
+
+@pytest.mark.asyncio
+async def test_migration_017_idempotent_when_constraint_already_exists():
+    """Verify migration 017 is a clean no-op if unique constraint/index already exists."""
+    from sqlalchemy import create_engine, text
+    import importlib
+
+    test_engine = create_engine("sqlite:///:memory:")
+    with test_engine.begin() as conn:
+        conn.execute(text("""
+            CREATE TABLE conversations (
+                id VARCHAR(36) PRIMARY KEY,
+                message_id VARCHAR(100)
+            )
+        """))
+        conn.execute(text("""
+            CREATE UNIQUE INDEX uq_conversations_message_id ON conversations (message_id)
+        """))
+
+    mig = importlib.import_module("migrations.versions.017_ensure_conversations_message_id_unique")
+
+    with patch("alembic.op.get_bind", return_value=test_engine), \
+         patch("alembic.op.create_index") as mock_create_index:
+        mig.upgrade()
+        # Index creation must NOT be called since unique constraint already exists
+        mock_create_index.assert_not_called()
+
+
