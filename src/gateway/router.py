@@ -120,7 +120,7 @@ _MAX_RECENT_MESSAGES = 2000
 
 
 def _is_recently_queued_message(msg_id: str) -> bool:
-    """Check if message_id was recently queued, and clean up expired entries."""
+    """Check if message_id was recently queued in memory, and clean up expired entries."""
     if not msg_id:
         return False
     now = time.time()
@@ -140,6 +140,45 @@ def _is_recently_queued_message(msg_id: str) -> bool:
         _RECENT_QUEUED_MESSAGE_IDS.popitem(last=False)
     _RECENT_QUEUED_MESSAGE_IDS[msg_id] = now
     return False
+
+
+async def _is_duplicate_or_record_message(msg_id: str) -> bool:
+    """
+    Check if a message_id has already been queued, recording it atomically if not.
+
+    Multi-worker & restart safety:
+    1. If Redis is configured (settings.redis_url), performs atomic SET NX with 300s TTL
+       shared across all production worker processes and server restarts.
+    2. Gracefully falls back to process-level in-memory cache if Redis is unavailable
+       or not configured.
+    3. The definitive, crash-proof ACID safeguard remains the database UniqueConstraint
+       on conversations.message_id in process_message_pipeline.
+    """
+    if not msg_id:
+        return False
+
+    settings = get_settings()
+    if settings.redis_url:
+        try:
+            import redis.asyncio as aioredis
+            redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+            redis_key = f"whatsapp:msg_dedup:{msg_id}"
+            acquired = await redis_client.set(
+                redis_key, "1", ex=int(_RECENT_MESSAGE_TTL_SECONDS), nx=True
+            )
+            try:
+                await redis_client.aclose()
+            except Exception:
+                pass
+            if not acquired:
+                return True
+            # Also record in-memory for fast local lookup
+            _is_recently_queued_message(msg_id)
+            return False
+        except Exception as r_err:
+            logger.debug(f"[ROUTER DEDUP] Redis dedup check error/skipped: {r_err}")
+
+    return _is_recently_queued_message(msg_id)
 
 
 @router.post("/whatsapp")
@@ -250,7 +289,7 @@ async def receive_message(
                     logger.info(f"Message dropped: sender or message ID missing. Skipping msg: {msg}.")
                     continue
 
-                if _is_recently_queued_message(parsed.message_id):
+                if await _is_duplicate_or_record_message(parsed.message_id):
                     logger.warning(
                         f"[DUPLICATE IN PAYLOAD] Duplicate message ID '{parsed.message_id}' detected (already queued recently). Skipping."
                     )

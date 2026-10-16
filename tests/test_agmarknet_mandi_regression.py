@@ -278,3 +278,152 @@ def test_decompose_response_handles_location_pin():
     sections = decompose_assembled_response(assembled)
     assert sections["market"] == assembled
     assert sections["crop_advice"] == ""
+
+
+# ==============================================================================
+# 7. Webhook Deduplication, Redis Atomic Locks, and DB Uniqueness Safeguards
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_redis_backed_deduplication_multi_worker():
+    """Verify atomic Redis SET NX blocks duplicate message IDs across workers."""
+    from src.gateway.router import _is_duplicate_or_record_message
+    from unittest.mock import AsyncMock
+
+    mock_redis = AsyncMock()
+    # First call acquires lock (returns True)
+    # Second call fails to acquire lock (returns None/False -> duplicate detected)
+    mock_redis.set = AsyncMock(side_effect=[True, None])
+    mock_redis.aclose = AsyncMock()
+
+    with patch("src.gateway.router.get_settings") as mock_settings, \
+         patch("redis.asyncio.from_url", return_value=mock_redis):
+        mock_settings.return_value.redis_url = "redis://localhost:6379/0"
+
+        # First worker receives message
+        is_dup1 = await _is_duplicate_or_record_message("wamid.CONCURRENT_REDIS_1")
+        assert is_dup1 is False  # Not a duplicate, queued successfully
+
+        # Second worker receives identical message concurrently
+        is_dup2 = await _is_duplicate_or_record_message("wamid.CONCURRENT_REDIS_1")
+        assert is_dup2 is True  # Duplicate detected across workers!
+
+
+@pytest.mark.asyncio
+async def test_redis_failure_falls_back_to_in_memory_deduplication():
+    """Verify router gracefully falls back to process in-memory cache if Redis is down."""
+    from src.gateway.router import _is_duplicate_or_record_message, _RECENT_QUEUED_MESSAGE_IDS
+
+    _RECENT_QUEUED_MESSAGE_IDS.clear()
+
+    with patch("src.gateway.router.get_settings") as mock_settings, \
+         patch("redis.asyncio.from_url", side_effect=ConnectionError("Redis unreachable")):
+        mock_settings.return_value.redis_url = "redis://broken-host:6379/0"
+
+        # First request should record in-memory
+        is_dup1 = await _is_duplicate_or_record_message("wamid.REDIS_FALLBACK_1")
+        assert is_dup1 is False
+
+        # Second request with same ID should be blocked by in-memory cache
+        is_dup2 = await _is_duplicate_or_record_message("wamid.REDIS_FALLBACK_1")
+        assert is_dup2 is True
+
+
+@pytest.mark.asyncio
+async def test_concurrent_duplicate_webhook_router_queues_once():
+    """Verify concurrent webhook POSTs with identical message IDs queue exactly one background task."""
+    from src.gateway.router import receive_message, _RECENT_QUEUED_MESSAGE_IDS
+    from fastapi import BackgroundTasks
+    from unittest.mock import MagicMock
+    import json
+
+    _RECENT_QUEUED_MESSAGE_IDS.clear()
+
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "123",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "messages": [
+                                {
+                                    "from": "919876543210",
+                                    "id": "wamid.CONCURRENT_POST_TEST",
+                                    "timestamp": "1700000000",
+                                    "text": {"body": "Ghatkesar cotton price?"},
+                                    "type": "text",
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    raw_bytes = json.dumps(payload).encode("utf-8")
+
+    class MockRequest:
+        def __init__(self, body):
+            self._body = body
+            self.client = MagicMock(host="127.0.0.1")
+            self.headers = {"content-type": "application/json"}
+        async def body(self):
+            return self._body
+
+    bg1 = BackgroundTasks()
+    bg2 = BackgroundTasks()
+
+    with patch("src.gateway.router.verify_webhook_signature", new_callable=AsyncMock, return_value=True), \
+         patch("src.gateway.router.get_settings") as mock_settings:
+        mock_settings.return_value.redis_url = None
+
+        res1 = await receive_message(MockRequest(raw_bytes), bg1)
+        res2 = await receive_message(MockRequest(raw_bytes), bg2)
+
+    assert res1["status"] == "ok"
+    assert res1["messages_queued"] == 1
+    assert len(bg1.tasks) == 1
+
+    assert res2["status"] == "ok"
+    assert res2["messages_queued"] == 0
+    assert len(bg2.tasks) == 0
+
+
+@pytest.mark.asyncio
+async def test_service_pipeline_db_unique_constraint_safeguard():
+    """
+    Verify that if two workers race into process_message_pipeline concurrently,
+    the DB unique constraint in Stage 3 catches the duplicate and cleanly rolls back
+    without generating an AI response or sending a duplicate outbound WhatsApp message.
+    """
+    import uuid
+    from src.gateway.service import process_message_pipeline
+    from src.core.models import Farmer
+    from src.gateway.schemas import ParsedIncomingMessage
+
+    parsed = ParsedIncomingMessage(
+        phone_number="919876543210",
+        message_id="wamid.DB_RACE_SAFEGUARD_TEST",
+        timestamp="1700000000",
+        message_type="text",
+        text_content="Cotton mandi price",
+    )
+    mock_farmer = Farmer(id=uuid.uuid4(), phone_number="919876543210")
+
+    with patch("src.gateway.service.is_duplicate_message", new_callable=AsyncMock, return_value=False), \
+         patch("src.gateway.service.get_or_create_farmer", new_callable=AsyncMock, return_value=mock_farmer), \
+         patch("src.gateway.service.store_incoming_message", new_callable=AsyncMock, return_value=None) as mock_store, \
+         patch("src.gateway.service.process_text_message", new_callable=AsyncMock) as mock_ai, \
+         patch("src.gateway.service.send_text_message", new_callable=AsyncMock) as mock_send:
+
+        # Worker 2 attempts pipeline but store_incoming_message returns None due to IntegrityError
+        await process_message_pipeline(parsed)
+
+        mock_store.assert_awaited_once()
+        mock_ai.assert_not_called()
+        mock_send.assert_not_called()
+
