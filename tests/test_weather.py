@@ -727,3 +727,421 @@ async def test_all_weather_providers_fail_honest_fallback_pipeline():
     assert "Weather forecast is currently unavailable for this location" in result
     assert "1800-180-1551" in result
     assert "🌡️" not in result
+
+
+# ===========================================================================
+# 25. Regression: OpenWeatherMap HTTP 401 triggers fallback without retries
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_openweather_http_401_triggers_fallback_without_retries():
+    """
+    When OpenWeatherMap returns HTTP 401 Unauthorized (e.g. invalid or inactive key),
+    the client must log a clear diagnostic, must NOT retry OWM repeatedly, and must
+    immediately fall back to Open-Meteo live weather.
+    """
+    from src.weather.openweather_client import OpenWeatherClient, clear_weather_memory_cache
+
+    clear_weather_memory_cache()
+    client = OpenWeatherClient(
+        api_key="invalid_test_api_key",
+        api_url="https://api.openweathermap.org/data/2.5/forecast",
+    )
+
+    owm_call_count = 0
+
+    class FakeAsyncClient:
+        def __init__(self, timeout=5.0, headers=None):
+            self.timeout = timeout
+            self.headers = headers
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def get(self, url, params=None):
+            nonlocal owm_call_count
+            resp = MagicMock()
+            if "openweathermap.org" in url:
+                owm_call_count += 1
+                resp.status_code = 401
+                resp.json.return_value = {"cod": 401, "message": "Invalid API key."}
+            else:
+                resp.status_code = 200
+                resp.json.return_value = {
+                    "current": {
+                        "temperature_2m": 31.2,
+                        "relative_humidity_2m": 58,
+                        "apparent_temperature": 33.0,
+                        "weather_code": 0,
+                        "wind_speed_10m": 11.2,
+                    },
+                    "daily": {
+                        "time": ["2026-10-16", "2026-10-17"],
+                        "temperature_2m_max": [33.5, 32.0],
+                        "weather_code": [0, 80],
+                    },
+                }
+            return resp
+
+    with patch("httpx.AsyncClient", FakeAsyncClient), \
+         patch.object(client, "_get_from_cache", new_callable=AsyncMock, return_value=None), \
+         patch.object(client, "_set_in_cache", new_callable=AsyncMock):
+
+        data = await client.fetch_weather(latitude=17.4093, longitude=78.6496)
+
+    # 1. OpenWeatherMap was called exactly ONCE (zero repeated retries for 401)
+    assert owm_call_count == 1
+    # 2. Live fallback to Open-Meteo succeeded
+    assert data is not None
+    assert data["data_available"] is True
+    assert data["is_live"] is True
+    assert data["current"]["temp"] == 31.2
+    assert "Open-Meteo" in data["source_note"]
+
+
+# ===========================================================================
+# 26. Regression: Open-Meteo HTTP 429 handled safely with bounded backoff
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_open_meteo_http_429_handled_safely_no_retry_storm():
+    """
+    When Open-Meteo returns HTTP 429 Too Many Requests:
+    - If Retry-After is large (> 2s), abort immediately with no retry storm.
+    - If Retry-After is small or absent, retry at most once with bounded sleep.
+    """
+    from src.weather.openweather_client import OpenWeatherClient, clear_weather_memory_cache
+
+    clear_weather_memory_cache()
+    # Use configured API key to simulate production/configured mode (avoiding keyless non-prod mock generator)
+    client = OpenWeatherClient(api_key="configured_test_key", api_url="")
+
+    # Case A: Retry-After = 60s (large) -> zero retry attempts
+    om_call_count = 0
+
+    class FakeClientLargeRetry:
+        def __init__(self, timeout=5.0, headers=None):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def get(self, url, params=None):
+            nonlocal om_call_count
+            om_call_count += 1
+            resp = MagicMock()
+            resp.status_code = 429
+            resp.headers = {"Retry-After": "60"}
+            return resp
+
+    with patch("httpx.AsyncClient", FakeClientLargeRetry), \
+         patch.object(client, "_call_api", new_callable=AsyncMock, return_value=None), \
+         patch.object(client, "_get_from_cache", new_callable=AsyncMock, return_value=None):
+        data_a = await client.fetch_weather(latitude=17.4093, longitude=78.6496)
+
+    assert om_call_count == 1
+    assert data_a is None
+
+    # Case B: Retry-After = 1s -> retries at most once
+    om_retry_count = 0
+
+    class FakeClientSmallRetry:
+        def __init__(self, timeout=5.0, headers=None):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def get(self, url, params=None):
+            nonlocal om_retry_count
+            om_retry_count += 1
+            resp = MagicMock()
+            if om_retry_count == 1:
+                resp.status_code = 429
+                resp.headers = {"Retry-After": "1"}
+            else:
+                resp.status_code = 200
+                resp.json.return_value = {
+                    "current": {
+                        "temperature_2m": 28.0,
+                        "relative_humidity_2m": 65,
+                        "apparent_temperature": 29.5,
+                        "weather_code": 1,
+                        "wind_speed_10m": 8.0,
+                    },
+                    "daily": {
+                        "time": ["2026-10-16", "2026-10-17"],
+                        "temperature_2m_max": [30.0, 29.0],
+                        "weather_code": [1, 2],
+                    },
+                }
+            return resp
+
+    with patch("httpx.AsyncClient", FakeClientSmallRetry), \
+         patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
+         patch.object(client, "_call_api", new_callable=AsyncMock, return_value=None), \
+         patch.object(client, "_get_from_cache", new_callable=AsyncMock, return_value=None), \
+         patch.object(client, "_set_in_cache", new_callable=AsyncMock):
+
+        data_b = await client.fetch_weather(latitude=17.4093, longitude=78.6496)
+
+    assert om_retry_count == 2
+    mock_sleep.assert_awaited_once_with(1.0)
+    assert data_b is not None
+    assert data_b["current"]["temp"] == 28.0
+
+
+# ===========================================================================
+# 27. Regression: Valid fallback data produces complete weather response
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_valid_fallback_data_produces_weather_response():
+    """
+    Verifies that when OpenWeatherMap fails (401), valid fallback Open-Meteo data
+    produces a complete, verified WeatherForecastResponse and localized WhatsApp message.
+    """
+    from src.weather.openweather_client import OpenWeatherClient, clear_weather_memory_cache
+    from src.weather.service import WeatherService
+
+    clear_weather_memory_cache()
+    client = OpenWeatherClient(api_key="bad_key", api_url="https://api.openweathermap.org/data/2.5/forecast")
+
+    open_meteo_live = {
+        "location_name": "17.4093,78.6496",
+        "latitude": 17.409296,
+        "longitude": 78.649556,
+        "current": {
+            "temp": 29.8,
+            "feels_like": 31.4,
+            "humidity": 62,
+            "wind_speed": 10.5,
+            "description": "Clear Sky",
+            "condition_code": 800,
+        },
+        "forecast": [
+            {
+                "dt_txt": (datetime.utcnow() + timedelta(days=1)).strftime("%Y-%m-%d 12:00:00"),
+                "temp": 31.0,
+                "humidity": 65,
+                "description": "Rain",
+                "condition_code": 500,
+            }
+        ],
+        "data_available": True,
+        "data_freshness_minutes": 0.0,
+        "is_live": True,
+        "source_note": "Live Weather (Open-Meteo)",
+    }
+
+    with patch.object(client, "_call_api", new_callable=AsyncMock, return_value=None), \
+         patch.object(client, "_fetch_open_meteo", new_callable=AsyncMock, return_value=open_meteo_live), \
+         patch.object(client, "_get_from_cache", new_callable=AsyncMock, return_value=None), \
+         patch.object(client, "_set_in_cache", new_callable=AsyncMock):
+
+        svc = WeatherService(client)
+        resp = await svc.get_weather_for_query(latitude=17.409296, longitude=78.649556)
+
+        assert resp.data_available is True
+        assert resp.is_live is True
+        assert resp.current.temp == 29.8
+        assert resp.latitude == 17.409296
+        assert resp.longitude == 78.649556
+
+        # Formatted reply in Telugu
+        reply_te = svc.format_whatsapp_reply(resp, language="te")
+        assert "వాతావరణ సమాచారం" in reply_te
+        assert "29.8°C" in reply_te
+        assert "ఓపెన్-మెటియో (లైవ్)" in reply_te
+        assert "వర్షం పడే అవకాశం ఉంది" in reply_te
+
+
+# ===========================================================================
+# 28. Regression: Cached data freshness is checked and disclosed
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_cached_data_freshness_checked_and_disclosed():
+    """
+    Verifies that when both live providers fail:
+    1. Recent cached data (< 6 hours) is reused safely.
+    2. Cached data freshness is computed accurately (data_freshness_minutes).
+    3. WhatsApp message clearly discloses that the data is cached from X minutes ago, not live.
+    4. Data older than 6 hours is NOT presented as current; safe fallback is used instead.
+    """
+    from src.weather.openweather_client import OpenWeatherClient, clear_weather_memory_cache
+    from src.weather.service import WeatherService
+
+    clear_weather_memory_cache()
+    client = OpenWeatherClient(api_key="bad_key", api_url="")
+
+    # A. 45-minute-old cached data
+    stale_payload = {
+        "location_name": "Ghatkesar Farm",
+        "latitude": 17.409296,
+        "longitude": 78.649556,
+        "current": {
+            "temp": 30.0,
+            "feels_like": 32.0,
+            "humidity": 60,
+            "wind_speed": 9.0,
+            "description": "Clear Sky",
+            "condition_code": 800,
+        },
+        "forecast": [],
+        "data_available": True,
+        "_cached_at": (datetime.utcnow() - timedelta(minutes=45)).isoformat(),
+        "is_live": True,
+        "source_note": "OpenWeatherMap API (Live)",
+    }
+
+    # Populate in-memory cache directly
+    cache_key = client._cache_key(17.409296, 78.649556, None, None)
+    from src.weather.openweather_client import _MEMORY_CACHE
+    _MEMORY_CACHE[cache_key] = (datetime.utcnow() - timedelta(minutes=45), stale_payload)
+
+    # Simulate live providers failing (OWM 401, Open-Meteo 429)
+    with patch.object(client, "_call_api", new_callable=AsyncMock, return_value=None), \
+         patch.object(client, "_fetch_open_meteo", new_callable=AsyncMock, return_value=None):
+
+        svc = WeatherService(client)
+        resp = await svc.get_weather_for_query(latitude=17.409296, longitude=78.649556)
+
+        assert resp.data_available is True
+        assert resp.is_live is False
+        assert resp.data_freshness_minutes is not None
+        assert 44.0 <= resp.data_freshness_minutes <= 46.0
+
+        # Formatted reply explicitly identifies stale data and discloses age
+        reply_te = svc.format_whatsapp_reply(resp, language="te")
+        assert "45 నిమిషాల క్రితం" in reply_te
+        assert "తాజా లైవ్ కాదు" in reply_te
+
+        reply_en = svc.format_whatsapp_reply(resp, language="en")
+        assert "45 mins ago" in reply_en
+        assert "not live" in reply_en
+
+    # B. Cache older than 6 hours (e.g. 8 hours) -> NOT reused, returns honest unavailable
+    clear_weather_memory_cache()
+    very_old_payload = dict(stale_payload)
+    very_old_payload["_cached_at"] = (datetime.utcnow() - timedelta(hours=8)).isoformat()
+    _MEMORY_CACHE[cache_key] = (datetime.utcnow() - timedelta(hours=8), very_old_payload)
+
+    with patch.object(client, "_call_api", new_callable=AsyncMock, return_value=None), \
+         patch.object(client, "_fetch_open_meteo", new_callable=AsyncMock, return_value=None):
+
+        resp_expired = await svc.get_weather_for_query(latitude=17.409296, longitude=78.649556)
+        assert resp_expired.data_available is False
+        reply_expired = svc.format_whatsapp_reply(resp_expired, language="te")
+        assert "వాతావరణ సమాచారం ప్రస్తుతం అందుబాటులో లేదు" in reply_expired
+
+
+# ===========================================================================
+# 29. Regression: Both providers failing returns safe Telugu fallback
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_both_providers_failing_returns_safe_telugu_fallback():
+    """
+    When OpenWeatherMap returns 401 and Open-Meteo returns 429 with no cache,
+    enrich_response_with_weather returns the safe, honest Telugu fallback.
+    """
+    from src.weather.service import enrich_response_with_weather
+    from src.weather.openweather_client import clear_weather_memory_cache
+
+    clear_weather_memory_cache()
+    farmer = _make_mock_farmer(language="te")
+    db = _mock_db_with_location(memory_gps={"latitude": 17.409296, "longitude": 78.649556})
+
+    class BothFailingClient:
+        def __init__(self, timeout=5.0, headers=None):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            pass
+        async def get(self, url, params=None):
+            resp = MagicMock()
+            if "openweathermap.org" in url:
+                resp.status_code = 401
+            else:
+                resp.status_code = 429
+                resp.headers = {"Retry-After": "60"}
+            return resp
+
+    with patch("httpx.AsyncClient", BothFailingClient), \
+         patch("src.config.get_settings") as mock_settings:
+        s = MagicMock()
+        s.openweather_api_key = "configured_live_key"
+        s.openweather_api_url = "https://api.openweathermap.org/data/2.5/forecast"
+        s.weather_cache_ttl_seconds = 1800
+        s.openweather_api_timeout_seconds = 5.0
+        s.redis_url = "redis://localhost:6379/0"
+        s.app_env = "production"
+        mock_settings.return_value = s
+
+        result = await enrich_response_with_weather(
+            db, "రేపు మా ఊర్లో వర్షం పడుతుందా?", "", farmer
+        )
+
+    assert "వాతావరణ సమాచారం ప్రస్తుతం అందుబాటులో లేదు" in result
+    assert "1800-180-1551" in result
+
+
+# ===========================================================================
+# 30. Regression: GPS coordinates passed correctly through pipeline
+# ===========================================================================
+
+@pytest.mark.asyncio
+async def test_gps_coordinates_passed_correctly_through_pipeline():
+    """
+    Verifies that coordinates 17.409296, 78.649556 supplied via FarmerMemory
+    or query text are extracted accurately and forwarded to weather clients.
+    """
+    from src.weather.service import enrich_response_with_weather
+    from src.weather.openweather_client import OpenWeatherClient, clear_weather_memory_cache
+
+    clear_weather_memory_cache()
+    farmer = _make_mock_farmer(language="te")
+    db = _mock_db_with_location(memory_gps={"latitude": 17.409296, "longitude": 78.649556})
+
+    captured_coords = {}
+
+    async def mock_fetch(self, latitude=None, longitude=None, district=None, state=None):
+        nonlocal captured_coords
+        captured_coords["lat"] = latitude
+        captured_coords["lon"] = longitude
+        return {
+            "location_name": f"{latitude:.4f},{longitude:.4f}",
+            "latitude": latitude,
+            "longitude": longitude,
+            "current": {
+                "temp": 32.0,
+                "feels_like": 34.0,
+                "humidity": 55,
+                "wind_speed": 12.0,
+                "description": "Clear Sky",
+                "condition_code": 800,
+            },
+            "forecast": [],
+            "data_available": True,
+            "data_freshness_minutes": 0.0,
+            "is_live": True,
+            "source_note": "Live Weather (Open-Meteo)",
+        }
+
+    with patch.object(OpenWeatherClient, "fetch_weather", mock_fetch):
+        # 1. Coordinate resolution from memory GPS
+        res = await enrich_response_with_weather(db, "వాతావరణం ఎలా ఉంది?", "", farmer)
+        assert captured_coords["lat"] == 17.409296
+        assert captured_coords["lon"] == 78.649556
+        assert "32.0°C" in res
+
+        # 2. Coordinate resolution from query text directly
+        empty_db = _mock_db_with_location(memory_gps=None, profile_district=None)
+        await enrich_response_with_weather(empty_db, "వాతావరణం 17.409296, 78.649556 వద్ద ఎలా ఉంది?", "", farmer)
+        assert round(captured_coords["lat"], 6) == 17.409296
+        assert round(captured_coords["lon"], 6) == 78.649556
