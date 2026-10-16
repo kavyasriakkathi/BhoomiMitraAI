@@ -1260,3 +1260,410 @@ async def test_case_32_example_query_returns_safe_clarification_without_numerica
         assert "నేలకొరిగే" in resp.response_text
         assert "అగ్గి తెగులు" in resp.response_text
         assert "పురుగు" in resp.response_text
+
+
+# =============================================================================
+# 33. Live Test Regression: Exact Two-Turn Telugu Fertilizer Conversation
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_33_exact_two_turn_telugu_fertilizer_conversation():
+    """
+    Regression Test for LIVE TEST PROBLEM (Telugu):
+    Turn 1:
+      Farmer:
+      "నాట్లలో DAP వేయలేదు.
+      ఇంతవరకు యూరియా కూడా వేయలేదు.
+      నాట్లు వేసి 30 రోజులు అయ్యాయి.
+      ఇప్పుడు ఏ ఎరువులు వేయాలి?"
+
+      AI correctly asks for:
+      1. SSP or complex fertilizer history.
+      2. Paddy variety/duration.
+      3. Soil test report availability.
+
+    Turn 2:
+      Farmer:
+      "నాట్ల సమయంలో SSP లేదా కాంప్లెక్స్ ఎరువులు కూడా వేయలేదు.
+      నా వరి రకం పేరు నాకు తెలియదు.
+      నా దగ్గర నేల పరీక్ష నివేదిక కూడా లేదు."
+
+    Expected AI response on Turn 2:
+      - Understands all 3 clarification questions were answered (even though negative or unknown).
+      - Does NOT repeat ANY of the three questions.
+      - Acknowledges information received.
+      - Explains next safe step (consult local AEO/KVK, avoid heavy unverified urea) and excess nitrogen risks.
+      - Zero numerical dose benchmarks (no 60-70 or 30-35 kg).
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from uuid import uuid4
+    from src.core.models import Farmer, Conversation
+    from src.ai.service import AIService, check_fertilizer_history_details, build_unconfirmed_paddy_fertilizer_guidance
+    from src.ai.schemas import AIGenerateRequest
+
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    farmer_id = uuid4()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=farmer_id, preferred_language="te"))
+
+    # Turn 1
+    turn1_user = (
+        "నాట్లలో DAP వేయలేదు.\n"
+        "ఇంతవరకు యూరియా కూడా వేయలేదు.\n"
+        "నాట్లు వేసి 30 రోజులు అయ్యాయి.\n"
+        "ఇప్పుడు ఏ ఎరువులు వేయాలి?"
+    )
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "PJTSAU Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "PJTSAU"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    # Flawed response attempting premature benchmark numbers in Turn 1
+    flawed_turn1_llm = (
+        "వరి పంట 30 రోజుల పిలకల దశలో 2 ఎకరాలకు సుమారు 60-70 కిలోల యూరియా సిఫార్సు చేయబడుతుంది. "
+        "సరైన మోతాదు కొరకు నాట్లలో SSP వేశారా? వరి రకం ఏది? నేల పరీక్ష నివేదిక ఉందా?"
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=flawed_turn1_llm):
+        resp1 = await service.generate_ai_response(AIGenerateRequest(farmer_id=farmer_id, message=turn1_user))
+
+    # Turn 1 verification: asks for SSP/complex, variety, soil test; no DAP or urea questions; no benchmarks
+    assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు" in resp1.response_text
+    assert "రకం/వంగడం" in resp1.response_text
+    assert "నేల పరీక్ష నివేదిక" in resp1.response_text
+    assert "DAP వేశారా" not in resp1.response_text
+    assert "యూరియా లేదా పొటాష్ వేశారా" not in resp1.response_text
+    assert "60-70" not in resp1.response_text and "60–70" not in resp1.response_text
+    assert "30-35" not in resp1.response_text and "30–35" not in resp1.response_text
+
+    # Turn 2
+    turn2_user = (
+        "నాట్ల సమయంలో SSP లేదా కాంప్లెక్స్ ఎరువులు కూడా వేయలేదు.\n"
+        "నా వరి రకం పేరు నాకు తెలియదు.\n"
+        "నా దగ్గర నేల పరీక్ష నివేదిక కూడా లేదు."
+    )
+    c1 = Conversation(farmer_id=farmer_id, user_message=turn1_user, ai_response=resp1.response_text)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[c1])
+
+    # Direct history detail check verification
+    details = check_fertilizer_history_details(turn2_user, [c1])
+    assert details["dap_negated"] is True
+    assert details["urea_negated"] is True
+    assert details["ssp_or_complex_negated"] is True
+    assert details["variety_unknown"] is True
+    assert details["soil_test_negated"] is True
+    assert details["all_clarifications_answered"] is True
+
+    # Flawed LLM attempting to re-ask questions in Turn 2
+    flawed_turn2_llm = (
+        "వరి పంటకు ఎరువుల కొరకు: నాట్ల సమయంలో SSP వేశారా? మీ వరి రకం ఏది? నేల పరీక్ష నివేదిక ఉందా?"
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=flawed_turn2_llm):
+        resp2 = await service.generate_ai_response(AIGenerateRequest(farmer_id=farmer_id, message=turn2_user))
+
+    # Turn 2 verification: AI must NOT repeat any of the 3 questions!
+    assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు ఏవైనా వేశారా" not in resp2.response_text
+    assert "SSP వేశారా" not in resp2.response_text
+    assert "మీరు సాగు చేస్తున్న వరి రకం/వంగడం ఏది" not in resp2.response_text
+    assert "వరి రకం ఏది" not in resp2.response_text
+    assert "నేల పరీక్ష నివేదిక (Soil Health Card) అందుబాటులో ఉందా" not in resp2.response_text
+    assert "నేల పరీక్ష నివేదిక ఉందా" not in resp2.response_text
+
+    # Turn 2 verification: Acknowledges information received & explains next safe steps
+    assert "DAP, SSP లేదా కాంప్లెక్స్ ఎరువులు ఏవీ వేయలేదని" in resp2.response_text or "ప్రాథమిక ఎరువులు" in resp2.response_text
+    assert "యూరియా కూడా ఇంకా వేయలేదని" in resp2.response_text or "యూరియా వేయలేదని" in resp2.response_text
+    assert "వరి రకం" in resp2.response_text
+    assert "నేల పరీక్ష నివేదిక అందుబాటులో లేదని" in resp2.response_text
+    assert "AEO" in resp2.response_text or "వ్యవసాయ విస్తరణ అధికారి" in resp2.response_text
+    assert "KVK" in resp2.response_text or "కృషి విజ్ఞాన కేంద్రం" in resp2.response_text
+
+    # No numerical benchmarks
+    assert "60-70" not in resp2.response_text and "60–70" not in resp2.response_text
+    assert "30-35" not in resp2.response_text and "30–35" not in resp2.response_text
+
+
+# =============================================================================
+# 34. Live Test Regression: Equivalent English Two-Turn Fertilizer Conversation
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_34_exact_two_turn_english_fertilizer_conversation():
+    """
+    Regression Test for Equivalent English Two-Turn Fertilizer Conversation.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from uuid import uuid4
+    from src.core.models import Farmer, Conversation
+    from src.ai.service import AIService, check_fertilizer_history_details
+    from src.ai.schemas import AIGenerateRequest
+
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    farmer_id = uuid4()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=farmer_id, preferred_language="en"))
+
+    turn1_user = (
+        "DAP was not applied at transplanting.\n"
+        "Urea has not been applied so far.\n"
+        "It has been 30 days since transplanting paddy.\n"
+        "Which fertilizers should I apply now?"
+    )
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "PJTSAU Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "PJTSAU"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    flawed_turn1_llm = (
+        "For paddy at 30 DAT, apply 60-70 kg Urea per 2 acres now. Did you apply SSP? What variety?"
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=flawed_turn1_llm):
+        resp1 = await service.generate_ai_response(AIGenerateRequest(farmer_id=farmer_id, message=turn1_user))
+
+    # Turn 1 asks for missing details in English without numerical dose benchmarks
+    assert "Whether SSP or another complex fertilizer was applied" in resp1.response_text
+    assert "Which rice variety or duration group" in resp1.response_text
+    assert "soil test report" in resp1.response_text
+    assert "60-70" not in resp1.response_text and "60–70" not in resp1.response_text
+    assert "30-35" not in resp1.response_text and "30–35" not in resp1.response_text
+
+    # Turn 2
+    turn2_user = (
+        "Neither SSP nor complex fertilizer was applied at transplanting.\n"
+        "I do not know my paddy variety name.\n"
+        "I do not have a soil test report either."
+    )
+    c1 = Conversation(farmer_id=farmer_id, user_message=turn1_user, ai_response=resp1.response_text)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[c1])
+
+    flawed_turn2_llm = (
+        "For paddy: Did you apply SSP? What variety are you growing? Do you have a soil test report?"
+    )
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=flawed_turn2_llm):
+        resp2 = await service.generate_ai_response(AIGenerateRequest(farmer_id=farmer_id, message=turn2_user))
+
+    # Turn 2: Must NOT repeat answered questions
+    assert "Whether SSP or another complex fertilizer was applied" not in resp2.response_text
+    assert "Did you apply SSP" not in resp2.response_text
+    assert "Which rice variety or duration group" not in resp2.response_text
+    assert "What variety are you growing" not in resp2.response_text
+    assert "Do you have a soil test report" not in resp2.response_text
+
+    # Turn 2: Acknowledges information & advises next safe step (AEO/KVK)
+    assert "Understood that no basal fertilizers" in resp2.response_text
+    assert "Agricultural Extension Officer" in resp2.response_text or "AEO" in resp2.response_text
+    assert "KVK" in resp2.response_text or "Krishi Vigyan Kendra" in resp2.response_text
+    assert "60-70" not in resp2.response_text and "30-35" not in resp2.response_text
+
+
+# =============================================================================
+# 35. Farmer Stating Variety is Unknown Does Not Get Asked Variety Again
+# =============================================================================
+
+def test_case_35_farmer_stating_variety_is_unknown_omits_variety_inquiry():
+    """
+    Verifies that when a farmer states variety is unknown:
+    1. check_fertilizer_history_details tracks variety_unknown as True.
+    2. build_unconfirmed_paddy_fertilizer_guidance omits the variety question.
+    3. Genuinely unanswered questions (e.g. SSP/complex and soil test) are still asked.
+    """
+    from src.ai.service import check_fertilizer_history_details, build_unconfirmed_paddy_fertilizer_guidance
+
+    # Telugu unknown variety
+    query_te = (
+        "వరి నాట్లలో DAP వేయలేదు, యూరియా వేయలేదు.\n"
+        "నా వరి రకం పేరు నాకు తెలియదు."
+    )
+    details_te = check_fertilizer_history_details(query_te)
+    assert details_te["variety_unknown"] is True
+    assert details_te["has_variety_info"] is False
+
+    resp_te = build_unconfirmed_paddy_fertilizer_guidance("te", fert_hist_info=details_te)
+    assert "రకం/వంగడం" not in resp_te
+    assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు" in resp_te
+    assert "నేల పరీక్ష నివేదిక" in resp_te
+
+    # English unknown variety
+    query_en = (
+        "DAP was not applied, urea was not applied.\n"
+        "I do not know the variety."
+    )
+    details_en = check_fertilizer_history_details(query_en)
+    assert details_en["variety_unknown"] is True
+    assert details_en["has_variety_info"] is False
+
+    resp_en = build_unconfirmed_paddy_fertilizer_guidance("en", fert_hist_info=details_en)
+    assert "variety or duration group" not in resp_en
+    assert "Whether SSP or another complex fertilizer was applied" in resp_en
+    assert "soil test report" in resp_en
+
+
+# =============================================================================
+# 36. Farmer Stating No Soil Test Report Does Not Get Asked Soil Test Again
+# =============================================================================
+
+def test_case_36_farmer_stating_no_soil_test_omits_soil_test_inquiry():
+    """
+    Verifies that when a farmer states no soil test report is available:
+    1. check_fertilizer_history_details tracks soil_test_negated as True.
+    2. build_unconfirmed_paddy_fertilizer_guidance omits the soil test question.
+    3. Genuinely unanswered questions (e.g. variety and SSP/complex) are still asked.
+    """
+    from src.ai.service import check_fertilizer_history_details, build_unconfirmed_paddy_fertilizer_guidance
+
+    # Telugu no soil test
+    query_te = (
+        "నాట్లలో DAP వేయలేదు, యూరియా వేయలేదు.\n"
+        "నా దగ్గర నేల పరీక్ష నివేదిక లేదు."
+    )
+    details_te = check_fertilizer_history_details(query_te)
+    assert details_te["soil_test_negated"] is True
+    assert details_te["has_soil_test_info"] is False
+
+    resp_te = build_unconfirmed_paddy_fertilizer_guidance("te", fert_hist_info=details_te)
+    assert "నేల పరీక్ష నివేదిక" not in resp_te
+    assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు" in resp_te
+    assert "రకం/వంగడం" in resp_te
+
+    # English no soil test
+    query_en = (
+        "DAP was not applied, urea was not applied.\n"
+        "No soil test report is available."
+    )
+    details_en = check_fertilizer_history_details(query_en)
+    assert details_en["soil_test_negated"] is True
+    assert details_en["has_soil_test_info"] is False
+
+    resp_en = build_unconfirmed_paddy_fertilizer_guidance("en", fert_hist_info=details_en)
+    assert "soil test report" not in resp_en
+    assert "Whether SSP or another complex fertilizer was applied" in resp_en
+    assert "variety or duration group" in resp_en
+
+
+# =============================================================================
+# 37. Farmer Stating SSP/Complex Not Applied Does Not Get Asked SSP/Complex Again
+# =============================================================================
+
+def test_case_37_farmer_stating_ssp_complex_not_applied_omits_ssp_inquiry():
+    """
+    Verifies that when a farmer states SSP or complex was not applied:
+    1. check_fertilizer_history_details tracks ssp_or_complex_negated as True.
+    2. build_unconfirmed_paddy_fertilizer_guidance omits the SSP/complex question.
+    3. Genuinely unanswered questions (e.g. variety and soil test) are still asked.
+    """
+    from src.ai.service import check_fertilizer_history_details, build_unconfirmed_paddy_fertilizer_guidance
+
+    # Telugu SSP negated
+    query_te = (
+        "నాట్లలో DAP వేయలేదు, యూరియా వేయలేదు.\n"
+        "నాట్ల సమయంలో SSP లేదా కాంప్లెక్స్ ఎరువులు కూడా వేయలేదు."
+    )
+    details_te = check_fertilizer_history_details(query_te)
+    assert details_te["ssp_or_complex_negated"] is True
+    assert details_te["dap_negated"] is True
+
+    resp_te = build_unconfirmed_paddy_fertilizer_guidance("te", fert_hist_info=details_te)
+    assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు" not in resp_te
+    assert "DAP, SSP లేదా కాంప్లెక్స్" not in resp_te
+    assert "రకం/వంగడం" in resp_te
+    assert "నేల పరీక్ష నివేదిక" in resp_te
+
+    # English SSP negated
+    query_en = (
+        "DAP was not applied, urea was not applied.\n"
+        "Neither SSP nor complex fertilizer was applied at transplanting."
+    )
+    details_en = check_fertilizer_history_details(query_en)
+    assert details_en["ssp_or_complex_negated"] is True
+
+    resp_en = build_unconfirmed_paddy_fertilizer_guidance("en", fert_hist_info=details_en)
+    assert "Whether SSP or another complex fertilizer was applied" not in resp_en
+    assert "variety or duration group" in resp_en
+    assert "soil test report" in resp_en
+
+
+# =============================================================================
+# 38. Multi-turn AI Pipeline Never Repeats Answered Questions or Gives Premature Dose
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_case_38_multi_turn_pipeline_never_repeats_answered_questions_or_premature_dose():
+    """
+    Verifies that across a sequence of turns, questions answered in previous turns
+    are never asked again by AIService, and numerical benchmark doses remain absent.
+    """
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from uuid import uuid4
+    from src.core.models import Farmer, Conversation
+    from src.ai.service import AIService
+    from src.ai.schemas import AIGenerateRequest
+
+    mock_repo = MagicMock()
+    mock_repo.session = AsyncMock()
+    farmer_id = uuid4()
+    mock_repo.get_farmer_profile = AsyncMock(return_value=Farmer(id=farmer_id, preferred_language="te"))
+    service = AIService(mock_repo)
+
+    mock_rag_item = MagicMock()
+    mock_rag_item.document_title = "PJTSAU Paddy Fertilizer Guide"
+    mock_rag_item.crop = "Paddy"
+    mock_rag_item.source = "PJTSAU"
+    mock_rag_item.chunk_text = MOCK_PJTSAU_RAG_SNIPPET
+
+    # Turn 1: Farmer mentions 30 DAT, DAP not applied, urea not applied
+    t1_msg = "నాట్లలో DAP వేయలేదు, యూరియా వేయలేదు, నాట్లు వేసి 30 రోజులు అయ్యాయి. ఇప్పుడు ఏ ఎరువు వేయాలి?"
+    mock_repo.get_conversation_history = AsyncMock(return_value=[])
+
+    flawed_llm_dose = "వరి పంట 30 రోజుల పిలకల దశలో 2 ఎకరాలకు సుమారు 60-70 కిలోల యూరియా సిఫార్సు చేయబడుతుంది."
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=flawed_llm_dose):
+        r1 = await service.generate_ai_response(AIGenerateRequest(farmer_id=farmer_id, message=t1_msg))
+
+    # Turn 2: Farmer supplies variety only ("మాది స్వల్పకాలిక వరి రకం RNR 15048")
+    t2_msg = "మాది స్వల్పకాలిక వరి రకం RNR 15048."
+    c1 = Conversation(farmer_id=farmer_id, user_message=t1_msg, ai_response=r1.response_text)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[c1])
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=flawed_llm_dose):
+        r2 = await service.generate_ai_response(AIGenerateRequest(farmer_id=farmer_id, message=t2_msg))
+
+    # In Turn 2, variety MUST NOT be asked (it was just answered!)
+    assert "రకం/వంగడం" not in r2.response_text
+    # DAP and urea MUST NOT be asked
+    assert "DAP వేశారా" not in r2.response_text
+    assert "యూరియా లేదా పొటాష్ వేశారా" not in r2.response_text
+    # SSP and soil test remain missing, so they can be asked
+    assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు" in r2.response_text
+    assert "నేల పరీక్ష నివేదిక" in r2.response_text
+
+    # Turn 3: Farmer provides SSP negation and no soil test
+    t3_msg = "నాట్లలో SSP వేయలేదు. నేల పరీక్ష నివేదిక కూడా లేదు."
+    c2 = Conversation(farmer_id=farmer_id, user_message=t2_msg, ai_response=r2.response_text)
+    mock_repo.get_conversation_history = AsyncMock(return_value=[c1, c2])
+
+    with patch("src.rag.service.RAGService.search_knowledge", new_callable=AsyncMock, return_value=[mock_rag_item]), \
+         patch("src.ai.service.generate_response", new_callable=AsyncMock, return_value=flawed_llm_dose):
+        r3 = await service.generate_ai_response(AIGenerateRequest(farmer_id=farmer_id, message=t3_msg))
+
+    # In Turn 3, ALL questions have been answered. None should be repeated!
+    assert "SSP లేదా ఇతర కాంప్లెక్స్ ఎరువులు ఏవైనా వేశారా" not in r3.response_text
+    assert "మీరు సాగు చేస్తున్న వరి రకం/వంగడం ఏది" not in r3.response_text
+    assert "నేల పరీక్ష నివేదిక (Soil Health Card) అందుబాటులో ఉందా" not in r3.response_text
+    assert "60-70" not in r3.response_text and "60–70" not in r3.response_text
+    assert "30-35" not in r3.response_text and "30–35" not in r3.response_text
