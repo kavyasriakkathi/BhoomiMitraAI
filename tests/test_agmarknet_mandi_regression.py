@@ -589,6 +589,48 @@ async def test_migration_017_idempotent_when_constraint_already_exists():
         mock_create_index.assert_not_called()
 
 
+def test_alembic_revision_identifiers_conform_to_varchar_32_and_single_head():
+    """
+    Regression test for Render deployment:
+    Ensure all Alembic revision identifiers do not exceed the 32-character limit
+    of the standard alembic_version.version_num column (VARCHAR(32)), avoiding
+    StringDataRightTruncationError on PostgreSQL / asyncpg.
+    Also verifies single head and correct down_revision hierarchy.
+    """
+    import os
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    alembic_cfg = Config(os.path.join(root_dir, "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", os.path.join(root_dir, "migrations"))
+    script = ScriptDirectory.from_config(alembic_cfg)
+
+    # 1. Single head
+    heads = script.get_heads()
+    assert len(heads) == 1, f"Expected exactly 1 migration head, got: {heads}"
+    assert heads[0] == "017_msg_id_unique"
+
+    # 2. All revision identifiers <= 32 chars
+    revisions = list(script.walk_revisions())
+    assert len(revisions) > 0
+
+    seen_revisions = set()
+    for rev in revisions:
+        assert len(rev.revision) <= 32, (
+            f"Revision ID '{rev.revision}' is {len(rev.revision)} characters; "
+            f"must be <= 32 characters for alembic_version VARCHAR(32) column."
+        )
+        assert rev.revision not in seen_revisions, f"Duplicate revision ID found: {rev.revision}"
+        seen_revisions.add(rev.revision)
+
+    # 3. Migration 017 properties
+    rev_017 = script.get_revision("017_msg_id_unique")
+    assert rev_017 is not None
+    assert rev_017.down_revision == "016_maps_url_text"
+
+
+
 # ==============================================================================
 # 9. Pipeline E2E Market Availability, Multi-Intent & Purity Regression Tests
 # ==============================================================================
