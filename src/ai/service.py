@@ -627,7 +627,7 @@ def is_paddy_tillering_fertilizer_query(
 
     is_paddy = has_paddy_mention or ("నాట్లు" in t or "నాట్లలో" in t or "transplanting" in t)
     is_fert = any(k in t for k in [
-        "ఎరువు", "ఎరువులు", "యూరియా", "మోతాదు", "fertilizer", "fertilizers", "urea", "dose", "dosage", "eruvu", "eruvulu", "ఖాతరు", "खाद", "dap", "ssp", "కాంప్లెక్స్", "complex", "potash", "పొటాష్"
+        "ఎరువు", "ఎరువులు", "యూరియా", "మోతాదు", "fertilizer", "fertilizers", "urea", "dose", "dosage", "eruvu", "eruvulu", "ఖాతరు", "खाद", "dap", "ssp", "కాంప్లెక్స్", "complex", "potash", "పొటాష్", "అంచనా", "guess", "estimate"
     ])
     is_stage = any(k in t for k in [
         "30", "35", "25", "20", "రోజులు", "రోజుల", "days", "dat", "పిలక", "పిలకల", "tillering", "నాట్లు వేసి", "transplanting"
@@ -649,7 +649,8 @@ def is_paddy_tillering_fertilizer_query(
             is_clarification_reply = any(k in t for k in [
                 "ssp", "dap", "urea", "కాంప్లెక్స్", "complex", "ఎరువు", "యూరియా", "రకం", "వంగడం", "variety", "duration",
                 "సాయిల్", "భూసార", "నేల", "పరీక్ష", "soil", "health card", "card", "నివేదిక", "వేయలేదు", "లేదు", "తెలియదు",
-                "తెలీదు", "not applied", "don't know", "unknown", "not available", "no report", "खाद", "किस्म", "नहीं पता"
+                "తెలీదు", "not applied", "don't know", "unknown", "not available", "no report", "खाद", "किस्म", "नहीं पता",
+                "అంచనా", "guess", "estimate", "మోతాదు", "dose", "dosage", "ఎంత", "how much"
             ])
             if is_clarification_reply:
                 return True
@@ -661,14 +662,10 @@ def build_unconfirmed_paddy_fertilizer_guidance(
     fert_hist_info: Optional[dict] = None,
 ) -> str:
     """
-    Constructs an attributed, unconfirmed extension reference guidance response
-    for paddy at 30 DAT tillering stage when essential fertilizer history is missing.
-    Personalizes clarifying inquiries based on what information has already been supplied
-    (avoids re-asking about DAP, SSP/complex, urea, variety, or soil test if already provided, negated, or unknown).
-    When all clarification questions have been answered but a field-specific recommendation cannot be safely confirmed,
-    acknowledges the information received and explains the next safe step without repeating any questions.
-    When essential fertilizer history details/negations have been supplied, omits numerical dose benchmarks
-    (30-35 kg/acre or 60-70 kg/2 acres) so farmers do not mistake them for an immediate application instruction.
+    Constructs an attributed, safe unconfirmed guidance response for paddy at 30 DAT tillering stage
+    when essential fertilizer history is missing.
+    NEVER includes numerical dosage benchmarks (e.g. 30-35 kg/acre or 60-70 kg/2 acres) before history is established.
+    Personalizes clarifying inquiries based on what information has already been supplied or negated.
     """
     info = fert_hist_info or {}
     dap_neg = info.get("dap_negated", False)
@@ -682,19 +679,8 @@ def build_unconfirmed_paddy_fertilizer_guidance(
     general_fert_neg = info.get("general_fert_negated", False)
     ssp_neg = info.get("ssp_or_complex_negated", False)
     ssp_applied = info.get("ssp_or_complex_applied", False)
-    all_answered = info.get("all_clarifications_answered", False)
-    omit_dose_benchmark = info.get("omit_dose_benchmark", False) or dap_neg or urea_neg or general_fert_neg or ssp_neg or all_answered
 
     if user_lang == "te":
-        if acres == 2.0:
-            qty_text = "2 ఎకరాలకు సుమారు 60-70 కిలోల యూరియా (ఎకరానికి 30-35 కిలోలు)"
-        elif acres and acres > 0:
-            min_q = int(30 * acres)
-            max_q = int(35 * acres)
-            qty_text = f"{acres:g} ఎకరాలకు సుమారు {min_q}-{max_q} కిలోల యూరియా (ఎకరానికి 30-35 కిలోలు)"
-        else:
-            qty_text = "ఎకరానికి సుమారు 30-35 కిలోల యూరియా"
-
         questions = []
         if dap_neg:
             if not ssp_neg and not ssp_applied and not general_fert_neg:
@@ -725,44 +711,26 @@ def build_unconfirmed_paddy_fertilizer_guidance(
 
         q_block = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
 
-        if omit_dose_benchmark:
-            return (
-                "వరి పంట 30 రోజుల పిలకల దశలో ప్రాంతీయ వ్యవసాయ విస్తరణ మార్గదర్శకాల ప్రకారం "
-                "సాధారణ ప్రచురిత రిఫరెన్స్ మాత్రమే, ఇది మీ పొలానికి ఖరారైన నిర్ధారణ కాదు. నాట్ల మరియు మునుపటి ఎరువుల వివరాలు లేకుండా "
-                "అదనపు మోతాదును నిర్ధారించలేము; అధిక నత్రజని పంట నేలకొరిగే ప్రమాదాన్ని, అగ్గి తెగులు మరియు కాండం తొలిచే పురుగుల ఉధృతిని పెంచుతుంది.\n\n"
-                "సరైన మోతాదును నిర్ణయించడానికి దయచేసి ఈ వివరాలు తెలపండి:\n"
-                f"{q_block}"
-            )
-
         return (
-            f"వరి పంట 30 రోజుల పిలకల దశలో ప్రాంతీయ వ్యవసాయ విస్తరణ మార్గదర్శకాల ప్రకారం {qty_text} "
-            f"సాధారణ ప్రచురిత రిఫరెన్స్ మాత్రమే, ఇది మీ పొలానికి ఖరారైన నిర్ధారణ కాదు. నాట్ల మరియు మునుపటి ఎరువుల వివరాలు లేకుండా "
-            f"అదనపు మోతాదును నిర్ధారించలేము; అధిక నత్రజని పంట నేలకొరిగే ప్రమాదాన్ని, అగ్గి తెగులు మరియు కాండం తొలిచే పురుగుల ఉధృతిని పెంచుతుంది.\n\n"
-            f"సరైన మోతాదును నిర్ణయించడానికి దయచేసి ఈ వివరాలు తెలపండి:\n"
+            "వరి పంట 30 రోజుల పిలకల దశలో ప్రాంతీయ వ్యవసాయ విస్తరణ మార్గదర్శకాల ప్రకారం "
+            "సాధారణ ప్రచురిత రిఫరెన్స్ మాత్రమే, ఇది మీ పొలానికి ఖరారైన నిర్ధారణ కాదు. నాట్ల మరియు మునుపటి ఎరువుల వివరాలు లేకుండా "
+            "అదనపు మోతాదును నిర్ధారించలేము; అధిక నత్రజని పంట నేలకొరిగే ప్రమాదాన్ని, అగ్గి తెగులు మరియు కాండం తొలిచే పురుగుల ఉధృతిని పెంచుతుంది.\n\n"
+            "సరైన మోతాదును నిర్ణయించడానికి దయచేసి ఈ వివరాలు తెలపండి:\n"
             f"{q_block}"
         )
     elif user_lang == "hi":
-        if acres == 2.0:
-            qty_text = "2 एकड़ के लिए लगभग 60-70 किलो यूरिया (30-35 किलो प्रति एकड़)"
-        elif acres and acres > 0:
-            min_q = int(30 * acres)
-            max_q = int(35 * acres)
-            qty_text = f"{acres:g} एकड़ के लिए लगभग {min_q}-{max_q} किलो यूरिया (30-35 किलो प्रति एकड़)"
-        else:
-            qty_text = "लगभग 30-35 किलो यूरिया प्रति एकड़"
-
         questions = []
         if dap_neg:
             if not ssp_neg and not ssp_applied and not general_fert_neg:
-                questions.append("रोपाई के समय क्या SSP या कोई अन्य कॉम्प्लेक्स खाद डाली थी, और कितनी मात्रा में?")
+                questions.append("रोपाई के समय क्या SSP या अन्य कॉम्प्लेक्स खाद डाली थी, और कितनी मात्रा में?")
         elif not has_basal and not general_fert_neg and not ssp_neg:
-            questions.append("रोपाई के समय DAP, SSP या कोई कॉम्प्लेक्स खाद डाली थी, और कितनी मात्रा में?")
+            questions.append("रोपाई के समय कौन सी बेसल खाद (DAP, SSP या कॉम्प्लेक्स) डाली थी, और कितनी मात्रा में?")
 
         if not urea_neg and not has_prior_urea and not general_fert_neg:
-            questions.append("रोपाई के बाद क्या पहले कोई यूरिया या पोटाश डाला गया है (कितनी मात्रा और किस तारीख को)?")
+            questions.append("रोपाई के बाद क्या कोई यूरिया या पोटाश डाला गया है (मात्रा और तारीख/दशा)?")
 
         if not has_variety and not var_unk:
-            questions.append("आप धान की कौन सी किस्म उगा रहे हैं (कम अवधि या लंबी अवधि)?")
+            questions.append("आप धान की कौन सी किस्म (कम अवधि या लंबी अवधि) उगा रहे हैं?")
 
         if not has_soil and not soil_neg:
             questions.append("क्या मृदा परीक्षण रिपोर्ट (Soil Health Card) उपलब्ध है? 🙏")
@@ -781,32 +749,14 @@ def build_unconfirmed_paddy_fertilizer_guidance(
 
         q_block = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
 
-        if omit_dose_benchmark:
-            return (
-                "धान की फसल में 30 दिन की कल्ले फूटने की अवस्था पर क्षेत्रीय कृषि विस्तार दिशा-निर्देशों के अनुसार "
-                "केवल एक सामान्य प्रकाशित संदर्भ (रेफरेंस) है, यह आपके खेत के लिए अंतिम सिफारिश नहीं है। पिछली खाद की जानकारी के बिना "
-                "अतिरिक्त मात्रा तय नहीं की जा सकती; अधिक नाइट्रोजन से फसल गिरने का खतरा तथा झुलसा (ब्लास्ट) व तना छेदक कीट का प्रकोप बढ़ जाता है।\n\n"
-                "सटीक मात्रा तय करने के लिए कृपया बताएं:\n"
-                f"{q_block}"
-            )
-
         return (
-            f"धान की फसल में 30 दिन की कल्ले फूटने की अवस्था पर क्षेत्रीय कृषि विस्तार दिशा-निर्देशों के अनुसार {qty_text} "
-            f"केवल एक सामान्य प्रकाशित संदर्भ (रेफरेंस) है, यह आपके खेत के लिए अंतिम सिफारिश नहीं है। पिछली खाद की जानकारी के बिना "
-            f"अतिरिक्त मात्रा तय नहीं की जा सकती; अधिक नाइट्रोजन से फसल गिरने का खतरा तथा झुलसा (ब्लास्ट) व तना छेदक कीट का प्रकोप बढ़ जाता है।\n\n"
-            f"सटीक मात्रा तय करने के लिए कृपया बताएं:\n"
+            "धान की फसल में 30 दिन की कल्ले फूटने की अवस्था पर क्षेत्रीय कृषि विस्तार दिशा-निर्देशों के अनुसार "
+            "केवल एक सामान्य प्रकाशित संदर्भ (रेफरेंस) है, यह आपके खेत के लिए अंतिम सिफारिश नहीं है। पिछली खाद की जानकारी के बिना "
+            "अतिरिक्त मात्रा तय नहीं की जा सकती; अधिक नाइट्रोजन से फसल गिरने का खतरा तथा झुलसा (ब्लास्ट) व तना छेदक कीट का प्रकोप बढ़ जाता है।\n\n"
+            "सटीक मात्रा तय करने के लिए कृपया बताएं:\n"
             f"{q_block}"
         )
     else:
-        if acres == 2.0:
-            qty_text = "approximately 60-70 kg Urea for 2 acres (30-35 kg per acre)"
-        elif acres and acres > 0:
-            min_q = int(30 * acres)
-            max_q = int(35 * acres)
-            qty_text = f"approximately {min_q}-{max_q} kg Urea for {acres:g} acres (30-35 kg per acre)"
-        else:
-            qty_text = "approximately 30-35 kg Urea per acre"
-
         questions = []
         if dap_neg:
             if not ssp_neg and not ssp_applied and not general_fert_neg:
@@ -838,22 +788,12 @@ def build_unconfirmed_paddy_fertilizer_guidance(
 
         q_block = "\n".join(f"{i+1}. {q}" for i, q in enumerate(questions))
 
-        if omit_dose_benchmark:
-            return (
-                "For paddy at the 30-day tillering stage, regional agricultural extension guidelines provide "
-                "strictly as an attributed general extension reference benchmark, not a confirmed field-specific recommendation. "
-                "An additional fertilizer dose cannot be confirmed without knowing prior fertilizer applications and variety duration, "
-                "as excess nitrogen increases risks of crop lodging, blast disease, and stem borer attack.\n\n"
-                "To determine the correct field recommendation, please share:\n"
-                f"{q_block}"
-            )
-
         return (
-            f"For paddy at the 30-day tillering stage, regional agricultural extension guidelines cite {qty_text} "
-            f"strictly as an attributed general extension reference benchmark, not a confirmed field-specific recommendation. "
-            f"An additional fertilizer dose cannot be confirmed without knowing prior fertilizer applications and variety duration, "
-            f"as excess nitrogen increases risks of crop lodging, blast disease, and stem borer attack.\n\n"
-            f"To determine the correct field recommendation, please share:\n"
+            "For paddy at the 30-day tillering stage, regional agricultural extension guidelines provide "
+            "strictly as an attributed general extension reference benchmark, not a confirmed field-specific recommendation. "
+            "An additional fertilizer dose cannot be confirmed without knowing prior fertilizer applications and variety duration, "
+            "as excess nitrogen increases risks of crop lodging, blast disease, and stem borer attack.\n\n"
+            "To determine the correct field recommendation, please share:\n"
             f"{q_block}"
         )
 
@@ -1067,18 +1007,11 @@ class AIService:
                 notes_block = ("\nKNOWN CONTEXT (DO NOT RE-ASK):\n" + "\n".join(history_known_notes)) if history_known_notes else ""
                 inquiry_block = ("\nMISSING DETAILS TO ASK ABOUT:\n" + "\n".join(missing_inquiry_points)) if missing_inquiry_points else ""
 
-                if fert_hist_info.get("dap_negated") or fert_hist_info.get("urea_negated") or fert_hist_info.get("general_fert_negated") or fert_hist_info.get("ssp_or_complex_negated") or fert_hist_info.get("all_clarifications_answered"):
-                    benchmark_instruction = (
-                        "1. Do NOT recommend, calculate, prescribe, or include ANY numerical fertilizer dose benchmarks (such as 30–35 kg/acre or 60–70 kg for 2 acres) now, "
-                        "because the farmer has already provided negative application history and can easily mistake benchmark numbers for an immediate instruction to apply.\n"
-                    )
-                else:
-                    benchmark_instruction = (
-                        "1. Do NOT present 60–70 kg for two acres (or 30–35 kg/acre) as a confirmed additional dose, and do NOT tell the farmer to apply it now "
-                        "(NEVER instruct 'వేయండి', 'వేయాలి', 'సిఫార్సు చేయబడుతుంది', or 'apply now' for an unconfirmed dose).\n"
-                        "2. You may explain the published 30–35 kg/acre tillering figure (60–70 kg for 2 acres) strictly as an attributed general extension reference benchmark "
-                        "(e.g., 'ప్రాంతీయ విస్తరణ మార్గదర్శకాల ప్రకారం ప్రచురిత సాధారణ రిఫరెన్స్ మాత్రమే'), and clearly distinguish it from a confirmed field-specific recommendation.\n"
-                    )
+                benchmark_instruction = (
+                    "1. Do NOT recommend, calculate, prescribe, or include ANY numerical fertilizer dose benchmarks (such as 30–35 kg/acre or 60–70 kg for 2 acres) now, "
+                    "because essential fertilizer history and variety information are missing and the farmer can easily mistake benchmark numbers for an immediate instruction to apply.\n"
+                    "2. If the farmer asks you to guess, estimate, or assume a dose without providing context, explain that guessing chemical fertilizer doses without knowing variety duration, basal fertilizer history, and soil conditions is unsafe, and direct them to local AEO or KVK.\n"
+                )
 
                 if fert_hist_info.get("all_clarifications_answered") or not missing_inquiry_points:
                     inquiry_instruction = (
@@ -1175,14 +1108,17 @@ class AIService:
 
             # 6.6 Safety Guardrail: Prevent unconfirmed additional fertilizer dosage or premature application instruction
             if is_paddy_tillering_fert and not fert_hist_info["has_essential_history"]:
-                has_premature_dose_benchmark = (
-                    (fert_hist_info.get("dap_negated") or fert_hist_info.get("urea_negated") or fert_hist_info.get("general_fert_negated") or fert_hist_info.get("ssp_or_complex_negated") or fert_hist_info.get("all_clarifications_answered"))
-                    and bool(re.search(
-                        r'\b(?:60\s*(?:-|to|నుండి|–)\s*70|30\s*(?:-|to|నుండి|–)\s*35)\s*(?:kg|kgs|కేజీల|కిలోల|కిలోలు)?\b',
-                        ai_text,
-                        re.IGNORECASE
-                    ))
-                )
+                has_premature_dose_benchmark = bool(re.search(
+                    r'\b(?:60\s*(?:-|to|నుండి|–)\s*70|30\s*(?:-|to|నుండి|–)\s*35)\s*(?:kg|kgs|కేజీల|కిలోల|కిలోలు)?\b',
+                    ai_text,
+                    re.IGNORECASE
+                ))
+                proposes_specific_fertilizer_dose = bool(re.search(
+                    r'\b\d+(?:\s*(?:-|to|నుండి|–)\s*\d+)?\s*(?:kg|kgs|కేజీల|కిలోల|కిలోలు)\s*(?:యూరియా|urea|dap|డిఎపి|ssp|పొటాష్|potash|mop)\b'
+                    r'|(?:యూరియా|urea|dap|ssp|పొటాష్|potash|mop)\s*(?:సుమారు\s*)?\b\d+(?:\s*(?:-|to|నుండి|–)\s*\d+)?\s*(?:kg|kgs|కేజీల|కిలోల|కిలోలు)\b',
+                    ai_text,
+                    re.IGNORECASE
+                ))
                 instructs_immediate_apply = bool(re.search(
                     r'(?:60\s*(?:-|to|నుండి|–)\s*70|30\s*(?:-|to|నుండి|–)\s*35)?\s*(?:kg|kgs|కేజీల|కిలోల|కిలోలు)?\s*(?:యూరియా|urea)?.*'
                     r'(?:సిఫార్సు\s*చేయబడుతుంది|సిఫారసు\s*చేయబడుతుంది|వేయండి|వేయాలి|వేసుకోవాలి|చల్లుకోండి|చల్లాలి|apply\s+now|is\s+recommended\s+to\s+apply)',
@@ -1208,7 +1144,7 @@ class AIService:
                 if fert_hist_info.get("all_clarifications_answered") and ("?" in ai_text or "తెలపండి" in ai_text or "తెలుపండి" in ai_text or "please share" in ai_text.lower() or "please tell" in ai_text.lower()):
                     repeats_answered_questions = True
 
-                if has_premature_dose_benchmark or instructs_immediate_apply or confirms_without_qualification or repeats_answered_questions:
+                if has_premature_dose_benchmark or proposes_specific_fertilizer_dose or instructs_immediate_apply or confirms_without_qualification or repeats_answered_questions:
                     logger.warning(
                         f"[FERTILIZER GUIDANCE GUARD TRIGGERED] Unconfirmed paddy dosage, premature instruction, or repeated question detected for farmer {request.farmer_id}. "
                         f"Replacing with compliant safe guidance."
