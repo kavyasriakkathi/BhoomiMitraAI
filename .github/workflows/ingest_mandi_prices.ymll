@@ -1,0 +1,101 @@
+name: Scheduled Mandi Price Ingestion
+
+on:
+  schedule:
+    # 06:30 AM, 11:30 AM, 04:30 PM IST (01:00, 06:00, 11:00 UTC)
+    - cron: '0 1,6,11 * * *'
+  workflow_dispatch: # Allows manual trigger from GitHub Actions UI
+
+jobs:
+  ingest-mandi-prices:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install httpx
+
+      - name: Ingest Agmarknet Mandi Prices
+        env:
+          DATA_GOV_API_KEY: ${{ secrets.DATA_GOV_API_KEY }}
+          MARKET_SYNC_SECRET: ${{ secrets.MARKET_SYNC_SECRET }}
+          APP_URL: "https://bhoomimitra-ai-whatsapp.onrender.com"
+        run: |
+          python - << 'EOF'
+          import os
+          import sys
+          import httpx
+
+          api_key = os.environ.get("DATA_GOV_API_KEY", "").strip()
+          sync_secret = os.environ.get("MARKET_SYNC_SECRET", "").strip()
+          app_url = os.environ.get("APP_URL", "https://bhoomimitra-ai-whatsapp.onrender.com").rstrip("/")
+
+          if not api_key:
+              print("ERROR: DATA_GOV_API_KEY secret is missing in GitHub Repository Secrets!")
+              sys.exit(1)
+          if not sync_secret:
+              print("ERROR: MARKET_SYNC_SECRET secret is missing in GitHub Repository Secrets!")
+              sys.exit(1)
+
+          base_api = "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
+          headers = {
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+              "Accept": "application/json",
+          }
+
+          states = ["Telangana", "Andhra Pradesh"]
+          all_records = []
+
+          with httpx.Client(timeout=30.0, headers=headers) as client:
+              for state in states:
+                  print(f"Fetching Agmarknet records for state='{state}'...")
+                  params = {
+                      "api-key": api_key,
+                      "format": "json",
+                      "limit": 500,
+                      "filters[state.keyword]": state,
+                  }
+                  try:
+                      resp = client.get(base_api, params=params)
+                      if resp.status_code == 200:
+                          data = resp.json()
+                          records = data.get("records", [])
+                          print(f"  -> Found {len(records)} records for {state}")
+                          all_records.extend(records)
+                      else:
+                          print(f"  -> Warning: Data.gov.in returned HTTP {resp.status_code} for {state}: {resp.text[:200]}")
+                  except Exception as exc:
+                      print(f"  -> Error connecting to Data.gov.in for {state}: {exc}")
+
+              if not all_records:
+                  print("No records retrieved from Data.gov.in. Exiting.")
+                  sys.exit(0)
+
+              print(f"Total records to sync: {len(all_records)}")
+              sync_endpoint = f"{app_url}/market/sync-internal"
+              sync_headers = {
+                  "X-Sync-Token": sync_secret,
+                  "Content-Type": "application/json",
+              }
+
+              chunk_size = 200
+              total_inserted = 0
+              for i in range(0, len(all_records), chunk_size):
+                  chunk = all_records[i : i + chunk_size]
+                  try:
+                      resp = client.post(sync_endpoint, headers=sync_headers, json=chunk)
+                      if resp.status_code == 200:
+                          result = resp.json()
+                          inserted = result.get("records_inserted", 0)
+                          total_inserted += inserted
+                          print(f"  -> Batch {i // chunk_size + 1}: sent {len(chunk)} records, {inserted} newly inserted")
+                      else:
+                          print(f"  -> Batch {i // chunk_size + 1} failed with HTTP {resp.status_code}: {resp.text[:200]}")
+                  except Exception as sync_exc:
+                      print(f"  -> Batch {i // chunk_size + 1} error: {sync_exc}")
+
+              print(f"Successfully finished ingestion. Total new records inserted into database: {total_inserted}")
+          EOF
