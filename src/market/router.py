@@ -111,3 +111,49 @@ async def create_market_price(
             detail="A price record for this commodity, market, and date already exists.",
         )
     return result
+
+
+# ------------------------------------------------------------------
+# POST /market/sync-internal — Batch ingest Agmarknet records
+# ------------------------------------------------------------------
+
+@router.post(
+    "/sync-internal",
+    status_code=status.HTTP_200_OK,
+    summary="[Internal] Ingest Agmarknet records into local DB",
+    description=(
+        "Batch upserts mandi price records from external background worker. "
+        "Requires X-Sync-Token matching MARKET_SYNC_SECRET (or WHATSAPP_VERIFY_TOKEN), "
+        "X-Admin-Token, or an active Admin session."
+    ),
+)
+async def sync_market_prices(
+    records: List[dict],
+    x_sync_token: Optional[str] = Header(None, alias="X-Sync-Token"),
+    x_admin_token: Optional[str] = Header(None, alias="X-Admin-Token"),
+    current_user: Optional[UserAccount] = Depends(get_optional_current_user),
+    service: MarketService = Depends(get_market_service),
+):
+    settings = get_settings()
+    expected_sync = (getattr(settings, "market_sync_secret", "") or "").strip()
+    expected_verify = (settings.whatsapp_verify_token or "").strip()
+
+    token = (x_sync_token or x_admin_token or "").strip()
+
+    is_valid_token = (expected_sync and token == expected_sync) or (
+        expected_verify and token == expected_verify
+    )
+    is_admin = current_user and current_user.role == UserRole.ADMIN
+
+    if not (is_valid_token or is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Valid X-Sync-Token, X-Admin-Token, or Admin authentication required.",
+        )
+
+    inserted = await service.sync_records(records)
+    return {
+        "status": "success",
+        "records_received": len(records),
+        "records_inserted": inserted,
+    }

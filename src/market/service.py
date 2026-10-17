@@ -1143,6 +1143,80 @@ class MarketService:
         """Admin: manually insert a market price record."""
         return await self.repository.create_price(data)
 
+    async def sync_records(self, records: List[dict]) -> int:
+        """
+        Batch ingest price records from Agmarknet or an external sync runner.
+        Accepts raw Data.gov.in format or pre-parsed schema dicts.
+        Returns the number of new records inserted.
+        """
+        if not records:
+            return 0
+
+        creates = []
+        for r in records:
+            try:
+                commodity = str(r.get("commodity", "")).strip()
+                if not commodity:
+                    continue
+
+                market_name = str(
+                    r.get("market_name") or r.get("market") or "Unknown Market"
+                ).strip()
+                district = str(r.get("district", "")).strip()
+                state = str(r.get("state", "")).strip()
+                min_p = float(r.get("min_price", 0) or 0)
+                max_p = float(r.get("max_price", 0) or 0)
+                modal_p = float(r.get("modal_price", 0) or 0)
+                unit = str(r.get("unit", "Quintal")).strip() or "Quintal"
+
+                # Parse arrival/price date
+                arr_date = r.get("price_date") or r.get("arrival_date") or r.get("date")
+                if isinstance(arr_date, datetime):
+                    price_dt = arr_date
+                elif isinstance(arr_date, str):
+                    price_dt = self.client._parse_date(arr_date)
+                    if not price_dt:
+                        try:
+                            price_dt = datetime.fromisoformat(arr_date.strip())
+                        except Exception:
+                            price_dt = datetime.utcnow()
+                else:
+                    price_dt = datetime.utcnow()
+
+                # Determine Telugu name if not provided
+                telugu_name = r.get("commodity_telugu")
+                if not telugu_name:
+                    for kw, canon in COMMODITY_MAP.items():
+                        if canon.lower() == commodity.lower() and any(
+                            ord(c) > 127 for c in kw
+                        ):
+                            telugu_name = kw
+                            break
+
+                creates.append(
+                    MarketPriceCreate(
+                        commodity=commodity,
+                        commodity_telugu=telugu_name,
+                        market_name=market_name,
+                        district=district,
+                        state=state,
+                        min_price=min_p,
+                        max_price=max_p,
+                        modal_price=modal_p,
+                        unit=unit,
+                        price_date=price_dt,
+                        source="agmarknet_sync",
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"[MARKET SYNC] Skipping malformed record {r}: {e}")
+                continue
+
+        if creates:
+            inserted = await self.repository.upsert_prices(creates)
+            return inserted
+        return 0
+
     async def _upsert_api_records(self, records: List[dict], commodity: str):
         """Convert Agmarknet client dicts into MarketPriceCreate schemas and save to DB."""
         creates = []

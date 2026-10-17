@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="")
     google_gemini_api_key: str = Field(default="")
     gemini_model: str = Field(default="gemini-3.6-flash")
-    gemini_api_timeout_seconds: float = Field(default=15.0)
+    gemini_api_timeout_seconds: float = Field(default=10.0)
     ai_confidence_threshold: float = Field(default=0.75)
 
     # Google Cloud
@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     )
     agmarknet_api_timeout_seconds: float = Field(default=5.0)
     market_price_cache_ttl_seconds: int = Field(default=21600)  # 6 hours
+    market_sync_secret: str = Field(default="")
 
     # Weather (OpenWeatherMap)
     # OPENWEATHER_API_KEY is OPTIONAL. If empty, the client returns mock weather forecasts.

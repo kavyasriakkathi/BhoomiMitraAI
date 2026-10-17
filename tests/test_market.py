@@ -1478,3 +1478,37 @@ def test_existing_market_deduplication_and_formatting_preserved():
     # Must only contain Warangal Mandi once
     assert formatted.count("Warangal Mandi") == 1
     assert "7,450" in formatted
+
+
+def test_sync_internal_unauthorized(mock_market_service):
+    """Calling /market/sync-internal without token returns 401."""
+    resp = client.post(
+        "/market/sync-internal",
+        json=[{"commodity": "Tomato", "market": "Bowenpally", "modal_price": 2000}],
+    )
+    assert resp.status_code == 401
+
+
+def test_sync_internal_authorized(mock_market_service):
+    """Calling /market/sync-internal with valid X-Sync-Token calls service.sync_records."""
+    mock_market_service.sync_records = AsyncMock(return_value=2)
+    from src.config import get_settings
+    settings = get_settings()
+    settings.whatsapp_verify_token = "test_verify_token"
+
+    payload = [
+        {"commodity": "Tomato", "market": "Bowenpally", "modal_price": 2000, "arrival_date": "2026-10-17"},
+        {"commodity": "Paddy", "market": "Suryapet", "modal_price": 2400, "arrival_date": "2026-10-17"},
+    ]
+    resp = client.post(
+        "/market/sync-internal",
+        headers={"X-Sync-Token": "test_verify_token"},
+        json=payload,
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "success"
+    assert data["records_received"] == 2
+    assert data["records_inserted"] == 2
+    mock_market_service.sync_records.assert_awaited_once_with(payload)
+
