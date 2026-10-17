@@ -1356,10 +1356,16 @@ class AIService:
             # 6.7 Unconfirmed / Conditional Diagnosis Dosage Gate
             if is_unconfirmed_diag:
                 has_any_dosage = bool(re.search(dosage_pattern, ai_text, re.IGNORECASE))
-                has_chem_keyword = any(k in ai_text.lower() for k in [
+                chem_words = [
                     "mancozeb", "మాంకోజెబ్", "propiconazole", "ప్రొపికొనజోల్", "profenofos", "ప్రొఫెనోఫాస్",
-                    "fipronil", "ఫిప్రోనిల్", "spinosad", "స్పైనోసాడ్", "chlorantraniliprole", "క్లోరాంట్రానిలిప్రోల్"
-                ])
+                    "fipronil", "ఫిప్రోనిల్", "spinosad", "స్పైనోసాడ్", "chlorantraniliprole", "క్లోరాంట్రానిలిప్రోల్",
+                    "acetamiprid", "అసిటామప్రిడ్", "spinetoram", "స్పైనిటోరం", "cartap", "కార్టాప్",
+                    "tricyclazole", "ట్రైసైక్లాజోల్", "hexaconazole", "హెక్సాకొనజోల్", "diafenthiuron", "డయాఫెంథియురాన్",
+                    "carbendazim", "కార్బెండజిమ్", "copper oxychloride", "కాపర్ ఆక్సిక్లోరైడ్",
+                    "మందును పిచికారీ", "పిచికారీ చేయండి", "పిచికారీ చేసుకోండి", "లీటరు నీటికి", "పురుగుల మందు",
+                    "కీటకనాశిని", "శిలీంద్రనాశిని", "రసాయన మందు", "pesticide", "fungicide", "insecticide"
+                ]
+                has_chem_keyword = any(k in ai_text.lower() for k in chem_words)
                 if has_any_dosage or has_chem_keyword:
                     logger.warning(
                         f"[UNCONFIRMED DIAGNOSIS GATE] Blocked pesticide dosage for unconfirmed diagnosis. Farmer: {request.farmer_id}."
