@@ -6,7 +6,7 @@ Integrates directly into the AI pipeline (ai/service.py).
 """
 import re
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from src.core.logging import logger
 from src.weather.openweather_client import OpenWeatherClient
@@ -446,7 +446,7 @@ class WeatherService:
         )
 
         # Determine rain forecast for tomorrow
-        tomorrow_date = (datetime.utcnow() + timedelta(days=1)).date()
+        tomorrow_date = (datetime.now(timezone.utc) + timedelta(days=1)).date()
         will_rain_tomorrow = False
 
         for f_item in response.forecast:

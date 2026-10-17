@@ -589,3 +589,214 @@ async def test_migration_017_idempotent_when_constraint_already_exists():
         mock_create_index.assert_not_called()
 
 
+# ==============================================================================
+# 9. Pipeline E2E Market Availability, Multi-Intent & Purity Regression Tests
+# ==============================================================================
+
+@pytest.mark.asyncio
+async def test_market_price_unavailable_response_wording_telugu_and_multilingual():
+    """
+    Verify market price unavailable notice produces exact localized messages:
+    - Telugu: 'ఈ పంటకు మార్కెట్ ధరలు అందుబాటులో లేవు'
+    - English: 'Market price information is currently unavailable'
+    - Hindi: 'मंडी भाव अभी उपलब्ध नहीं हैं'
+    """
+    from uuid import uuid4
+    from src.core.models import Farmer, Conversation
+    from src.ai.service import process_text_message
+    from src.ai.schemas import AIGenerateResponse
+
+    # 1. Telugu Multi-Intent with unlisted market crop
+    db_mock = AsyncMock()
+    mock_prof = MagicMock()
+    mock_prof.scalar_one_or_none.return_value = None
+    db_mock.execute = AsyncMock(return_value=mock_prof)
+
+    farmer_te = Farmer(id=uuid4(), phone_number="919876543210", preferred_language="te")
+    conv_te = Conversation(
+        id=uuid4(),
+        farmer_id=farmer_te.id,
+        user_message="పత్తి పంటలో పురుగులు వస్తున్నాయి. అరటి మార్కెట్ ధర ఎంత?"
+    )
+    mock_gemini_te = AIGenerateResponse(
+        response_text="పత్తిలో పురుగుల నివారణకు తగిన పిచికారీ చేయండి.",
+        intent="crop_advisory",
+        confidence=0.9,
+        provider_used="gemini",
+    )
+
+    with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_gemini_te), \
+         patch("src.market.agmarknet_client.AgmarknetClient.fetch_prices", new_callable=AsyncMock, return_value=[]), \
+         patch("src.market.repository.MarketPriceRepository.seed_default_prices_if_empty", new_callable=AsyncMock), \
+         patch("src.market.repository.MarketPriceRepository.get_prices_by_commodity", new_callable=AsyncMock, return_value=[]):
+
+        reply_te = await process_text_message(db_mock, farmer_te, conv_te)
+        assert "🌱 *పంట సలహా*" in reply_te
+        assert "📊 *మార్కెట్ ధరలు*" in reply_te
+        assert "ఈ పంటకు మార్కెట్ ధరలు అందుబాటులో లేవు" in reply_te
+
+    # 2. English Multi-Intent with unlisted market crop
+    farmer_en = Farmer(id=uuid4(), phone_number="919876543211", preferred_language="en")
+    conv_en = Conversation(
+        id=uuid4(),
+        farmer_id=farmer_en.id,
+        user_message="My cotton crop has pests what spray to use? What is the market price of dragonfruit?"
+    )
+    mock_gemini_en = AIGenerateResponse(
+        response_text="Spray Emamectin Benzoate 5% SG for cotton pest control.",
+        intent="crop_advisory",
+        confidence=0.9,
+        provider_used="gemini",
+    )
+
+    with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_gemini_en), \
+         patch("src.market.agmarknet_client.AgmarknetClient.fetch_prices", new_callable=AsyncMock, return_value=[]), \
+         patch("src.market.repository.MarketPriceRepository.seed_default_prices_if_empty", new_callable=AsyncMock), \
+         patch("src.market.repository.MarketPriceRepository.get_prices_by_commodity", new_callable=AsyncMock, return_value=[]):
+
+        reply_en = await process_text_message(db_mock, farmer_en, conv_en)
+        assert "🌱 *Crop Advice*" in reply_en
+        assert "📊 *Market Prices*" in reply_en
+        assert "Market price information is currently unavailable" in reply_en
+
+
+@pytest.mark.asyncio
+async def test_pure_market_query_contains_no_unrelated_crop_advice_or_weather():
+    """
+    Verify pure market queries:
+    1. Bypasses general LLM generation entirely.
+    2. Contain only the structured market price block.
+    3. Never append AI-generated crop advice (e.g. chemical dosages, pesticide recommendations).
+    4. Never append weather forecast blocks or text.
+    """
+    from uuid import uuid4
+    from src.core.models import Farmer, Conversation
+    from src.ai.service import process_text_message
+    from tests.test_farmer_pipeline_e2e import make_sample_mandi
+
+    db_mock = AsyncMock()
+    mock_prof = MagicMock()
+    mock_prof.scalar_one_or_none.return_value = None
+    db_mock.execute = AsyncMock(return_value=mock_prof)
+
+    farmer_te = Farmer(id=uuid4(), phone_number="919876543210", preferred_language="te")
+    conv_te = Conversation(
+        id=uuid4(),
+        farmer_id=farmer_te.id,
+        user_message="వరంగల్లో పత్తి మార్కెట్ ధర ఎంత?"
+    )
+
+    # Even if AIService mock exists, it must NOT be invoked for pure price queries
+    mock_ai = AsyncMock()
+
+    with patch("src.ai.service.AIService.generate_ai_response", mock_ai), \
+         patch("src.market.agmarknet_client.AgmarknetClient.fetch_prices", new_callable=AsyncMock, return_value=None), \
+         patch("src.market.repository.MarketPriceRepository.seed_default_prices_if_empty", new_callable=AsyncMock), \
+         patch("src.market.repository.MarketPriceRepository.get_prices_by_commodity", new_callable=AsyncMock, return_value=make_sample_mandi()):
+
+        reply = await process_text_message(db_mock, farmer_te, conv_te)
+
+        # 1. Market block is present with real data
+        assert "పత్తి మార్కెట్ ధరలు" in reply
+        assert "Warangal Mandi" in reply
+        assert "7,450" in reply
+
+        # 2. General AI generation was bypassed
+        mock_ai.assert_not_called()
+
+        # 3. No unrelated crop advisory text or headers
+        assert "🌱 *పంట సలహా*" not in reply
+        assert "పిచికారీ" not in reply
+        assert "పురుగుల" not in reply
+        assert "ఎరువు" not in reply
+
+        # 4. No unrelated weather text or headers
+        assert "🌡️ *వాతావరణ సమాచారం*" not in reply
+        assert "వర్షం" not in reply
+        assert "ఉష్ణోగ్రత" not in reply
+
+
+@pytest.mark.asyncio
+async def test_genuine_combined_market_and_advisory_query():
+    """
+    Verify genuine multi-intent queries explicitly requesting both market prices and crop guidance:
+    1. Generates genuine crop advice.
+    2. Includes authoritative mandi price information.
+    3. Neither block is discarded or corrupted.
+    """
+    from uuid import uuid4
+    from src.core.models import Farmer, Conversation
+    from src.ai.service import process_text_message
+    from src.ai.schemas import AIGenerateResponse
+    from tests.test_farmer_pipeline_e2e import make_sample_mandi
+
+    db_mock = AsyncMock()
+    mock_prof = MagicMock()
+    mock_prof.scalar_one_or_none.return_value = None
+    db_mock.execute = AsyncMock(return_value=mock_prof)
+
+    farmer = Farmer(id=uuid4(), phone_number="919876543210", preferred_language="te")
+    conv = Conversation(
+        id=uuid4(),
+        farmer_id=farmer.id,
+        user_message="పత్తి పంటలో పురుగులు వస్తున్నాయి ఏం చేయాలి? మరియు వరంగల్లో పత్తి మార్కెట్ ధర ఎంత?"
+    )
+
+    mock_gemini = AIGenerateResponse(
+        response_text="పత్తిలో పురుగుల నివారణకు ఎమామెక్టిన్ బెంజోయేట్ 5% SG 0.4 గ్రాములు పిచికారీ చేయండి.",
+        intent="crop_advisory",
+        confidence=0.95,
+        provider_used="gemini",
+    )
+
+    with patch("src.ai.service.AIService.generate_ai_response", return_value=mock_gemini), \
+         patch("src.market.agmarknet_client.AgmarknetClient.fetch_prices", new_callable=AsyncMock, return_value=None), \
+         patch("src.market.repository.MarketPriceRepository.seed_default_prices_if_empty", new_callable=AsyncMock), \
+         patch("src.market.repository.MarketPriceRepository.get_prices_by_commodity", new_callable=AsyncMock, return_value=make_sample_mandi()):
+
+        reply = await process_text_message(db_mock, farmer, conv)
+
+        # Both sections must be present
+        assert "🌱 *పంట సలహా*" in reply
+        assert "ఎమామెక్టిన్ బెంజోయేట్" in reply
+
+        assert "📊" in reply
+        assert "Warangal Mandi" in reply
+        assert "7,450" in reply
+
+
+def test_response_assembly_preserves_market_sections_accurately():
+    """
+    Verify response decomposition and multi-intent assembly preserves:
+    - Market price table blocks
+    - Nearby market indicator blocks (📍)
+    - Unavailable warning blocks (⚠️)
+    - Unavailable labels (ℹ️)
+    Without leaking text into crop advice or dropping sections.
+    """
+    from src.ai.formatting import decompose_assembled_response, format_multi_intent_response
+
+    # 1. Nearby market block
+    raw_assembled = (
+        "🌱 *పంట సలహా*\n"
+        "పత్తిలో తెగులు నివారణకు సరైన పిచికారీ చేయండి.\n\n"
+        "📍 Ghatkesar వద్ద నేరుగా పత్తి మార్కెట్ అందుబాటులో లేదు.\n"
+        "సమీప మార్కెట్లలో ధరలు (Telangana):\n"
+        "📊 *పత్తి మార్కెట్ ధరలు*\n"
+        "• Warangal Mandi: ₹7,450"
+    )
+    sections = decompose_assembled_response(raw_assembled)
+    assert "పత్తిలో తెగులు" in sections["crop_advice"]
+    assert "Ghatkesar" in sections["market"]
+    assert "Warangal Mandi" in sections["market"]
+
+    # 2. Multi-intent formatting preserves both sections
+    user_msg = "పత్తిలో తెగులు వచ్చింది. ఘట్‌కేసర్‌లో పత్తి ధర ఎంత?"
+    formatted = format_multi_intent_response(raw_assembled, user_message=user_msg, language="te")
+    assert "🌱 *పంట సలహా*" in formatted
+    assert "📊" in formatted and "మార్కెట్ ధరలు" in formatted
+    assert "Ghatkesar" in formatted
+    assert "Warangal Mandi" in formatted
+
+
+

@@ -11,7 +11,7 @@ import copy
 import logging
 import time
 from typing import Optional, Dict, List, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -319,7 +319,7 @@ class OpenWeatherClient:
             else:
                 cond_desc, cond_code = "Cloudy", 803
 
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             forecast = []
             daily_times = daily.get("time", [])
             daily_max = daily.get("temperature_2m_max", [])
@@ -468,7 +468,8 @@ class OpenWeatherClient:
                 if cached_at_str:
                     try:
                         cached_dt = datetime.fromisoformat(cached_at_str)
-                        age_sec = (datetime.utcnow() - cached_dt).total_seconds()
+                        now_utc = datetime.now(timezone.utc) if getattr(cached_dt, "tzinfo", None) is not None else datetime.utcnow()
+                        age_sec = (now_utc - cached_dt).total_seconds()
                         if age_sec <= target_ttl:
                             cached_data["data_freshness_minutes"] = max(0.0, round(age_sec / 60.0, 1))
                             _MEMORY_CACHE[key] = (cached_dt, copy.deepcopy(cached_data))
@@ -483,7 +484,8 @@ class OpenWeatherClient:
         # 2. Try In-Memory Cache
         if key in _MEMORY_CACHE:
             cached_dt, cached_data = _MEMORY_CACHE[key]
-            age_sec = (datetime.utcnow() - cached_dt).total_seconds()
+            now_utc = datetime.now(timezone.utc) if getattr(cached_dt, "tzinfo", None) is not None else datetime.utcnow()
+            age_sec = (now_utc - cached_dt).total_seconds()
             if age_sec <= target_ttl:
                 data_copy = copy.deepcopy(cached_data)
                 data_copy["data_freshness_minutes"] = max(0.0, round(age_sec / 60.0, 1))
@@ -501,7 +503,7 @@ class OpenWeatherClient:
     ) -> None:
         """Store weather in both process in-memory cache and Redis."""
         key = self._cache_key(latitude, longitude, district, state)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         data_to_store = copy.deepcopy(data)
         data_to_store["_cached_at"] = now.isoformat()
         data_to_store["data_freshness_minutes"] = 0.0
@@ -548,7 +550,7 @@ class OpenWeatherClient:
         cond_desc = "Moderate Rain" if has_rain_tomorrow else "Partly Cloudy"
         cond_code = 501 if has_rain_tomorrow else 802
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         mock_payload = {
             "location_name": loc_name,

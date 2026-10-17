@@ -265,6 +265,23 @@ _MARKET_LOCATION_STOPWORDS = {
     "ఎంత", "ఏంటి", "ఉందా", "ఉంది", "ఉన్నాయా", "చెప్పండి", "చెప్పు", "తెలియజేయండి",
     "మరియు", "ఇంకా", "కానీ", "కూడా", "మరి", "లేదా", "ఈరోజు", "నిన్న", "రేపు", "ఇప్పుడు",
     "market", "mandi", "మార్కెట్", "మండి", "మార్కెట్లో", "మార్కెట్ లో",
+    # Crop / Agronomic / Field generic terms (never valid mandi/town locations)
+    "crop", "crops", "field", "fields", "farm", "farms", "plant", "plants", "leaf", "leaves",
+    "panta", "pantalu", "pantalo", "pantallo", "pantala", "pantaku", "polam", "polamlo", "polalu",
+    "chenu", "chenulo", "chelu", "thota", "thotalo", "mokka", "mokkalu", "mokkallo", "aaku", "aakulu",
+    "spray", "spraying", "disease", "diseases", "pest", "pests", "insect", "insects",
+    "fungus", "fertilizer", "fertilizers", "manure", "pesticide", "pesticides", "dosage",
+    "పంట", "పంటలు", "పంటల", "పంటలో", "పంటల్లో", "పంటలలో", "పంటకు", "పంటలకు",
+    "పొలం", "పొలంలో", "పొలాలు", "పొలాల్లో", "పొలాల", "చేను", "చేనులో", "చేలు", "చేలలో",
+    "తోట", "తోటలో", "తోటల్లో", "మొక్క", "మొక్కలు", "మొక్కల్లో", "మొక్కలలో",
+    "ఆకు", "ఆకులు", "ఆకుల్లో", "ఆకులలో", "ఆకులపై",
+    "పురుగు", "పురుగులు", "పురుగుల", "పురుగుల్లో", "పురుగులలో",
+    "తెగులు", "తెగుళ్ళు", "తెగుళ్లలో", "తెగులులో",
+    "ఎరువు", "ఎరువులు", "ఎరువుల్లో", "ఎరువులలో",
+    "మందు", "మందులు", "మందుల్లో", "మందులలో",
+    "రసాయనం", "రసాయనాలు", "పిచికారీ", "నివారణ", "సలహా", "సలహాలు",
+    "వరిలో", "పత్తిలో", "మిరపలో", "మిర్చిలో", "మొక్కజొన్నలో", "సోయాబీన్‌లో",
+    "ఫసల్", "ఫసల్లో", "ఫసల్ మే", "కేత్", "కేతోన్",
 }
 
 
@@ -1488,19 +1505,59 @@ async def enrich_response_with_market_prices(
     matched_commodity = None
     raw_commodity_word = None
     import re
+
+    # Find all matching commodities and their positions in query
     sorted_keywords = sorted(COMMODITY_MAP.items(), key=lambda x: len(x[0]), reverse=True)
+    commodity_matches = []
+    seen_canonicals = set()
     for kw, canonical in sorted_keywords:
         kw_lower = kw.lower()
+        pos = -1
         if kw_lower.isascii() and kw_lower.isalnum():
-            if re.search(rf"\b{re.escape(kw_lower)}\b", query_lower):
-                matched_commodity = canonical
-                raw_commodity_word = kw
-                break
+            m = re.search(rf"\b{re.escape(kw_lower)}\b", query_lower)
+            if m:
+                pos = m.start()
         else:
-            if kw in query_text or kw_lower in query_lower:
-                matched_commodity = canonical
-                raw_commodity_word = kw
-                break
+            if kw in query_text:
+                pos = query_text.find(kw)
+            elif kw_lower in query_lower:
+                pos = query_lower.find(kw_lower)
+        if pos != -1 and canonical not in seen_canonicals:
+            commodity_matches.append((pos, len(kw), canonical, kw))
+            seen_canonicals.add(canonical)
+
+    if len(commodity_matches) == 1:
+        matched_commodity = commodity_matches[0][2]
+        raw_commodity_word = commodity_matches[0][3]
+    elif len(commodity_matches) > 1:
+        # If multiple crops match, prioritize the one nearest to price keywords
+        price_positions = []
+        all_price_indicators = (
+            PRICE_INTENT_KEYWORDS_TE
+            | PRICE_INTENT_KEYWORDS_EN
+            | PRICE_INTENT_KEYWORDS_MULTILINGUAL
+            | {"ధర", "మార్కెట్", "మండి", "రేటు", "price", "mandi", "rate"}
+        )
+        for p_kw in all_price_indicators:
+            p_kw_lower = p_kw.lower()
+            start = 0
+            while True:
+                idx = query_lower.find(p_kw_lower, start)
+                if idx == -1:
+                    break
+                price_positions.append(idx)
+                start = idx + len(p_kw_lower)
+
+        if price_positions:
+            commodity_matches.sort(
+                key=lambda m: (min(abs(m[0] - p) for p in price_positions), -m[1])
+            )
+            matched_commodity = commodity_matches[0][2]
+            raw_commodity_word = commodity_matches[0][3]
+        else:
+            commodity_matches.sort(key=lambda m: (-m[1], m[0]))
+            matched_commodity = commodity_matches[0][2]
+            raw_commodity_word = commodity_matches[0][3]
 
     # Fallback to extract_crop_from_text if not matched directly in COMMODITY_MAP
     if not matched_commodity:
