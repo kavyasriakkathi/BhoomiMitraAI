@@ -1512,3 +1512,123 @@ def test_sync_internal_authorized(mock_market_service):
     assert data["records_inserted"] == 2
     mock_market_service.sync_records.assert_awaited_once_with(payload)
 
+
+# ---------------------------------------------------------------------------
+# Multilingual Market Price Normalization & Response Regression Tests
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_multilingual_mandi_exact_three_queries():
+    """
+    Regression test for the three production queries:
+    1. Telugu: మహబూబ్నగర్లో టమాటా ధర ఎంత?
+    2. English: Tomato price in Mahabubnagar?
+    3. Hindi: महबूबनगर में आज टमाटर का भाव कितना है?
+
+    Verifies:
+    - All three resolve to canonical commodity 'Tomato', location 'Mahabubnagar', state 'Telangana'
+    - All three retrieve the same market price record (Mahabubnagar(Rythu Bazar) ₹3,000)
+    - Hindi response contains NO Telugu text (contains 'टमाटर मंडी भाव', NOT 'టమాటా')
+    - Telugu response contains NO unnecessary English text (no 'market-price data')
+    """
+    from src.market.service import (
+        extract_market_explicit_location,
+        normalize_extracted_location,
+        normalize_district_name,
+        infer_state_from_district,
+        COMMODITY_MAP,
+        enrich_response_with_market_prices,
+    )
+
+    q_te = "మహబూబ్నగర్లో టమాటా ధర ఎంత?"
+    q_en = "Tomato price in Mahabubnagar?"
+    q_hi = "महबूबनगर में आज टमाटर का भाव कितना है?"
+
+    # 1. Location extraction & normalization
+    loc_te = extract_market_explicit_location(q_te)
+    loc_en = extract_market_explicit_location(q_en)
+    loc_hi = extract_market_explicit_location(q_hi)
+
+    assert loc_te == "Mahabubnagar", f"Telugu location extraction failed: {loc_te}"
+    assert loc_en == "Mahabubnagar", f"English location extraction failed: {loc_en}"
+    assert loc_hi == "Mahabubnagar", f"Hindi location extraction failed: {loc_hi}"
+
+    # District normalization
+    assert normalize_district_name(loc_te) == "Mahabubnagar"
+    assert normalize_district_name(loc_en) == "Mahabubnagar"
+    assert normalize_district_name(loc_hi) == "Mahabubnagar"
+
+    # State inference
+    assert infer_state_from_district(loc_te) == "Telangana"
+    assert infer_state_from_district(loc_en) == "Telangana"
+    assert infer_state_from_district(loc_hi) == "Telangana"
+
+    # Commodity resolution
+    assert COMMODITY_MAP["టమాటా"] == "Tomato"
+    assert COMMODITY_MAP["tomato"] == "Tomato"
+    assert COMMODITY_MAP["टमाटर"] == "Tomato"
+
+    # 2. Database retrieval and WhatsApp response formatting
+    mock_db = AsyncMock()
+    mock_repo = AsyncMock()
+    mock_client = AsyncMock()
+
+    m_record = _mock_price_response(
+        commodity="Tomato",
+        commodity_telugu="టమాటా",
+        market_name="Mahabubnagar(Rythu Bazar)",
+        district="Mahabubnagar",
+        state="Telangana",
+        modal_price=3000.0,
+        min_price=2500.0,
+        max_price=3500.0,
+        price_date=datetime(2026, 10, 18),
+    )
+
+    query_resp = MarketPriceQueryResponse(
+        commodity="Tomato",
+        district="Mahabubnagar",
+        state="Telangana",
+        results=[m_record],
+        data_available=True,
+        data_freshness_hours=1.0,
+        source_note="Local database",
+        is_live=False,
+        is_today_requested=False,
+        explicit_location="Mahabubnagar",
+        raw_commodity="Tomato",
+    )
+
+    mock_svc = MarketService(repository=mock_repo, client=mock_client)
+
+    # Format replies
+    reply_te = mock_svc.format_whatsapp_reply(query_resp, language="te")
+    reply_en = mock_svc.format_whatsapp_reply(query_resp, language="en")
+    reply_hi = mock_svc.format_whatsapp_reply(query_resp, language="hi")
+
+    # Assert Telugu response correctness
+    assert "📊 టమాటా మార్కెట్ ధరలు" in reply_te
+    assert "Mahabubnagar(Rythu Bazar)" in reply_te
+    assert "₹3,000" in reply_te
+    assert "క్వింటాల్కు" in reply_te
+    assert "తెలంగాణ" in reply_te
+    assert "market-price data" not in reply_te
+
+    # Assert English response correctness
+    assert "📊 Tomato Mandi Prices" in reply_en
+    assert "Mahabubnagar(Rythu Bazar)" in reply_en
+    assert "₹3,000" in reply_en
+    assert "per Quintal" in reply_en
+    assert "Telangana" in reply_en
+
+    # Assert Hindi response correctness
+    assert "📊 टमाटर मंडी भाव" in reply_hi
+    assert "Mahabubnagar(Rythu Bazar)" in reply_hi
+    assert "₹3,000" in reply_hi
+    assert "प्रति क्विंटल" in reply_hi
+    assert "तेलंगाना" in reply_hi
+    # Must contain NO Telugu characters anywhere in Hindi reply
+    telugu_chars_in_hindi = [c for c in reply_hi if 0x0C00 <= ord(c) <= 0x0C7F]
+    assert len(telugu_chars_in_hindi) == 0, f"Found Telugu characters in Hindi reply: {telugu_chars_in_hindi}"
+
+

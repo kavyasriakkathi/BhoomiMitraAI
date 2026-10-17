@@ -178,6 +178,90 @@ TELANGANA_DISTRICTS = {
     "korutla", "metpally", "sircilla", "tandur", "miryalaguda", "badepally", "bowenpally",
 }
 
+def strip_zero_width_chars(s: Optional[str]) -> str:
+    """Strip zero-width non-joiner (ZWNJ), zero-width joiner (ZWJ), and invisible characters."""
+    if not s or not isinstance(s, str):
+        return ""
+    return re.sub(r"[\u200b\u200c\u200d\ufeff]", "", s).strip()
+
+
+_HINDI_DISTRICT_MAP = {
+    "Warangal": "वारंगल",
+    "Enumamula": "वारंगल (एनूमामुला)",
+    "Adilabad": "आदिलाबाद",
+    "Khammam": "खम्मम",
+    "Nizamabad": "निजामाबाद",
+    "Karimnagar": "करीमनगर",
+    "Jagtial": "जगतियाल",
+    "Nalgonda": "नलगोंडा",
+    "Mahabubnagar": "महबूबनगर",
+    "Hyderabad": "हैदराबाद",
+    "Guntur": "गुंटूर",
+    "Krishna": "कृष्णा",
+    "Kurnool": "कर्नूल",
+    "Anantapur": "अनंतपुर",
+    "Chittoor": "चित्तूर",
+    "Visakhapatnam": "विशाखापत्तनम",
+    "Medchal-Malkajgiri": "मेडचल-मलकाजगिरि",
+    "Ghatkesar": "घाटकेसर",
+    "Medchal": "मेडचल",
+    "Bowenpally": "बोवेनपल्ली",
+    "Madanapalle": "मदनपल्ले",
+    "Suryapet": "सूर्यपेट",
+    "Siddipet": "सिद्दिपेट",
+    "Mancherial": "मंचेरियल",
+    "Sircilla": "सिरसिल्ला",
+    "Wanaparthy": "वानापर्थी",
+    "Gadwal": "गडवाल",
+    "Jogulamba Gadwal": "जोगुलाम्बा गडवाल",
+    "Nagarkurnool": "नागरकुरनूल",
+    "Narayanpet": "नारायणपेट",
+    "Kamareddy": "कामारेड्डी",
+    "Vikarabad": "विकाराबाद",
+    "Sangareddy": "संगारेड्डी",
+    "Peddapalli": "पेद्दापल्ली",
+    "Bhadradri Kothagudem": "भद्राद्री कोठागुडेम",
+    "Mulugu": "मुलुगु",
+    "Jayashankar Bhupalpally": "जयशंकर भूपालपल्ली",
+    "Jangaon": "जनगांव",
+    "Yadadri Bhuvanagiri": "यादाद्री भुवनगिरि",
+    "Komaram Bheem Asifabad": "कोमाराम भीम आसिफाबाद",
+    "Nirmal": "निर्मल",
+}
+
+HINDI_TO_ENGLISH_PLACES = {
+    "महबूबनगर": "Mahabubnagar",
+    "वारंगल": "Warangal",
+    "हैदराबाद": "Hyderabad",
+    "करीमनगर": "Karimnagar",
+    "खम्मम": "Khammam",
+    "निजामाबाद": "Nizamabad",
+    "नलगोंडा": "Nalgonda",
+    "सूर्यपेट": "Suryapet",
+    "आदिलाबाद": "Adilabad",
+    "सिद्दिपेट": "Siddipet",
+    "मंचेरियल": "Mancherial",
+    "जगतियाल": "Jagtial",
+    "जगित्याल": "Jagtial",
+    "सिरसिल्ला": "Sircilla",
+    "मेडक": "Medak",
+    "रंगारेड्डी": "Rangareddy",
+    "विकाराबाद": "Vikarabad",
+    "कामारेड्डी": "Kamareddy",
+    "गुंटूर": "Guntur",
+    "विजयवाड़ा": "Vijayawada",
+    "कर्नूल": "Kurnool",
+    "अनंतपुर": "Anantapur",
+    "कडपा": "Kadapa",
+    "नेल्लूर": "Nellore",
+    "चित्तूर": "Chittoor",
+    "तिरुपति": "Tirupati",
+    "विशाखापत्तनम": "Visakhapatnam",
+    "मदनपल्ले": "Madanapalle",
+    "बोवेनपल्ली": "Bowenpally",
+    "घाटकेसर": "Ghatkesar",
+}
+
 TELUGU_TO_ENGLISH_PLACES = {
     "కోరుట్ల": "Korutla",
     "మెట్పల్లి": "Metpally",
@@ -192,6 +276,7 @@ TELUGU_TO_ENGLISH_PLACES = {
     "నల్గొండ": "Nalgonda",
     "సూర్యాపేట": "Suryapet",
     "మహబూబ్‌నగర్": "Mahabubnagar",
+    "మహబూబ్నగర్": "Mahabubnagar",
     "ఆదిలాబాద్": "Adilabad",
     "హైదరాబాద్": "Hyderabad",
     "సిద్దిపేట": "Siddipet",
@@ -206,6 +291,7 @@ TELUGU_TO_ENGLISH_PLACES = {
     "వనపర్తి": "Wanaparthy",
     "గద్వాల": "Jogulamba Gadwal",
     "నాగర్‌కర్నూల్": "Nagarkurnool",
+    "నాగర్కర్నూల్": "Nagarkurnool",
     "నారాయణపేట": "Narayanpet",
     "ములుగు": "Mulugu",
     "భూపాలపల్లి": "Jayashankar Bhupalpally",
@@ -215,11 +301,13 @@ TELUGU_TO_ENGLISH_PLACES = {
     "నిర్మల్": "Nirmal",
     "మేడ్చల్": "Medchal-Malkajgiri",
     "మేడ్చల్-మల్కాజ్‌గిరి": "Medchal-Malkajgiri",
+    "మేడ్చల్-మల్కాజ్గిరి": "Medchal-Malkajgiri",
     "ఘట్‌కేసర్": "Ghatkesar",
     "ఘట్కేసర్": "Ghatkesar",
     "మిర్యాలగూడ": "Miryalaguda",
     "బాదేపల్లి": "Badepally",
     "బోయిన్‌పల్లి": "Bowenpally",
+    "బోయిన్పల్లి": "Bowenpally",
     "గుంటూరు": "Guntur",
     "విజయవాడ": "Vijayawada",
     "కర్నూలు": "Kurnool",
@@ -240,6 +328,8 @@ _MARKET_LOCATION_STOPWORDS = {
     "to", "in", "at", "from", "for", "of", "the", "a", "an",
     "నా", "మా", "మన", "ఇక్కడ", "మేము", "నన్ను", "నాకు", "నాది", "మాది",
     "దగ్గర", "దగ్గర్లో", "దగ్గరలో", "సమీపం", "సమీపంలో", "చుట్టుపక్కల",
+    # Hindi query stopwords
+    "में", "मे", "का", "की", "के", "भाव", "दाम", "रेट", "मंडी", "बाजार", "कितना", "कितने", "है", "आज", "कल", "फसल", "खेत",
     # Generic place words (e.g. 'oorilo', 'in my village')
     "oori", "ooru", "oorilo", "oorlo", "village", "town", "city", "district", "state",
     "apmc", "yard", "area", "region", "place",
@@ -282,6 +372,10 @@ _MARKET_LOCATION_STOPWORDS = {
     "రసాయనం", "రసాయనాలు", "పిచికారీ", "నివారణ", "సలహా", "సలహాలు",
     "వరిలో", "పత్తిలో", "మిరపలో", "మిర్చిలో", "మొక్కజొన్నలో", "సోయాబీన్‌లో",
     "ఫసల్", "ఫసల్లో", "ఫసల్ మే", "కేత్", "కేతోన్",
+    # Weight, unit, and quantity words
+    "quintal", "quintals", "kg", "kgs", "kilo", "kilos", "gram", "grams", "ton", "tons", "bag", "bags",
+    "క్వింటాల్", "క్వింటాలు", "క్వింటా", "క్వింటాకు", "క్వింటాల్‌కు", "క్వింటాల్ కు", "క్వింటాలుకు", "కిలో", "కిలోలు", "కిలోకు", "కేజీ", "కేజీలు", "కేజీకి", "బస్తా", "బస్తాలు", "టన్ను", "టన్నులు",
+    "क्विंटल", "किलो", "टन", "बोरी",
 }
 
 
@@ -289,8 +383,8 @@ def clean_location_candidate(candidate: Optional[str]) -> Optional[str]:
     """Clean candidate string and strip stopwords/punctuation."""
     if not candidate or not isinstance(candidate, str):
         return None
-    c = candidate.strip()
-    c_clean = re.sub(r"^[^\w\u0C00-\u0C7F]+|[^\w\u0C00-\u0C7F]+$", "", c)
+    c = strip_zero_width_chars(candidate.strip())
+    c_clean = re.sub(r"^[^\w\u0900-\u097F\u0C00-\u0C7F]+|[^\w\u0900-\u097F\u0C00-\u0C7F]+$", "", c)
     if not c_clean:
         return None
     c_lower = c_clean.lower()
@@ -308,12 +402,35 @@ def normalize_extracted_location(loc: Optional[str]) -> Optional[str]:
     if not loc or not isinstance(loc, str):
         return None
     loc = loc.strip()
+    loc_clean = strip_zero_width_chars(loc)
+    loc_lower = loc_clean.lower()
+
     if loc in TELUGU_TO_ENGLISH_PLACES:
         return TELUGU_TO_ENGLISH_PLACES[loc]
-    loc_lower = loc.lower()
+    if loc_clean in TELUGU_TO_ENGLISH_PLACES:
+        return TELUGU_TO_ENGLISH_PLACES[loc_clean]
+
     for tel, eng in TELUGU_TO_ENGLISH_PLACES.items():
-        if tel == loc or eng.lower() == loc_lower:
+        tel_clean = strip_zero_width_chars(tel)
+        if tel == loc or tel_clean == loc_clean or eng.lower() == loc_lower:
             return eng
+
+    if loc in HINDI_TO_ENGLISH_PLACES:
+        return HINDI_TO_ENGLISH_PLACES[loc]
+    if loc_clean in HINDI_TO_ENGLISH_PLACES:
+        return HINDI_TO_ENGLISH_PLACES[loc_clean]
+
+    for hi, eng in HINDI_TO_ENGLISH_PLACES.items():
+        hi_clean = strip_zero_width_chars(hi)
+        if hi == loc or hi_clean == loc_clean or eng.lower() == loc_lower:
+            return eng
+
+    from src.weather.service import _KNOWN_DISTRICTS
+    for kw, canon in _KNOWN_DISTRICTS.items():
+        kw_clean = strip_zero_width_chars(kw)
+        if kw == loc or kw_clean == loc_clean or kw.lower() == loc_lower:
+            return canon
+
     return loc[0].upper() + loc[1:] if len(loc) > 1 and loc.isascii() else loc
 
 
@@ -321,93 +438,124 @@ def extract_market_explicit_location(query_text: Optional[str]) -> Optional[str]
     """
     Extract explicitly requested location from farmer's market-price query text.
     Handles ANY location mentioned (village, town, mandal, district, city, APMC, or mandi).
-    Supports English, Tanglish, and Telugu patterns:
+    Supports English, Tanglish, Telugu, and Hindi patterns:
       - 'Korutla lo' / 'metpally lo' / 'Jagtial lo' / 'Warangal lo'
-      - 'కోరుట్లలో' / 'మెట్పల్లిలో' / 'జగిత్యాలలో' / 'వరంగల్లో'
+      - 'కోరుట్లలో' / 'మెట్పల్లిలో' / 'జగిత్యాలలో' / 'వరంగల్లో' / 'మహబూబ్నగర్లో'
+      - 'महबूबनगर में' / 'वारंगल में' / 'में महबूबनगर'
       - 'at Korutla' / 'in Korutla' / 'near Korutla'
-      - 'Korutla market' / 'Korutla mandi' / 'కోరుట్ల మార్కెట్'
+      - 'Korutla market' / 'Korutla mandi' / 'కోరుట్ల మార్కెట్' / 'महबूबनगर मंडी'
       - 'Korutla lo cotton rate' / 'Korutla cotton price'
       - 'Sircilla lo patti dhara entha?'
-    Returns None if no explicit place was specified (e.g. 'Cotton price entha?', 'నా ఊరిలో', 'Na daggara').
+    Returns None if no explicit place was specified.
     """
     if not query_text or not isinstance(query_text, str):
         return None
-    q = query_text.strip()
+    q = strip_zero_width_chars(query_text.strip())
 
-    # 1. Pattern: <Place> lo / <Place>lo (Romanized or Telugu with space)
+    # 1. Hindi Pattern: <Place> में / <Place> मे
+    for m in re.finditer(r"([A-Za-z\u0900-\u097F\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0900-\u097F\u0C00-\u0C7F]+)?)\s+(?:में|मे)(?:\s+|$|[?.,!])", q):
+        c = clean_location_candidate(m.group(1))
+        if c:
+            norm = normalize_extracted_location(c)
+            if norm:
+                return norm
+
+    # 2. Hindi Pattern: में <Place> / मे <Place>
+    for m in re.finditer(r"(?:में|मे)\s+([A-Za-z\u0900-\u097F\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0900-\u097F\u0C00-\u0C7F]+)?)(?:\s+|$|[?.,!])", q):
+        c = clean_location_candidate(m.group(1))
+        if c:
+            norm = normalize_extracted_location(c)
+            if norm:
+                return norm
+
+    # 3. Pattern: <Place> lo / <Place>lo (Romanized or Telugu with space)
     for m in re.finditer(r"\b([A-Za-z\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0C00-\u0C7F]+)?)\s+lo(?:\s+|$|[?.,!])", q, re.IGNORECASE):
         c = clean_location_candidate(m.group(1))
         if c:
-            return normalize_extracted_location(c)
+            norm = normalize_extracted_location(c)
+            if norm:
+                return norm
 
     for m in re.finditer(r"\b([A-Za-z]{3,})lo(?:\s+|$|[?.,!])", q, re.IGNORECASE):
         c = clean_location_candidate(m.group(1))
         if c:
-            return normalize_extracted_location(c)
+            norm = normalize_extracted_location(c)
+            if norm:
+                return norm
 
-    # 2. Pattern: <Place> లో
+    # 4. Pattern: <Place> లో
     for m in re.finditer(r"([A-Za-z\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0C00-\u0C7F]+)?)\s+లో(?:\s+|$|[?.,!])", q):
         c = clean_location_candidate(m.group(1))
         if c:
-            return normalize_extracted_location(c)
+            norm = normalize_extracted_location(c)
+            if norm:
+                return norm
 
-    # 3. Telugu script words ending in 'లో' or 'ల్లో' or 'లొ' (e.g. కోరుట్లలో, మెట్పల్లిలో, జగిత్యాలలో, వరంగల్లో)
+    # 5. Telugu script words ending in 'లో' or 'ల్లో' or 'లొ' (e.g. కోరుట్లలో, మెట్పల్లిలో, జగిత్యాలలో, వరంగల్లో, మహబూబ్నగర్లో)
     for word in q.split():
         clean_w = re.sub(r"[^\w\u0C00-\u0C7F]", "", word)
+        clean_w = strip_zero_width_chars(clean_w)
         if not clean_w or clean_w.lower() in _MARKET_LOCATION_STOPWORDS:
             continue
         if clean_w.endswith("ల్లో"):
-            # e.g. వరంగల్లో -> stem వరంగల్, or stem వరంగ
             candidate_stems = [clean_w[:-len("ల్లో")] + "ల్", clean_w[:-len("ల్లో")]]
             for st in candidate_stems:
                 c = clean_location_candidate(st)
                 if c:
-                    return normalize_extracted_location(c)
+                    norm = normalize_extracted_location(c)
+                    if norm:
+                        return norm
         elif clean_w.endswith("లో") or clean_w.endswith("లొ"):
             suffix_len = len("లో") if clean_w.endswith("లో") else len("లొ")
             stem = clean_w[:-suffix_len]
             c = clean_location_candidate(stem)
             if c:
-                return normalize_extracted_location(c)
+                norm = normalize_extracted_location(c)
+                if norm:
+                    return norm
 
-    # 4. Pattern: at <Place> / in <Place> / near <Place> / around <Place>
-    for m in re.finditer(r"\b(?:at|in|near|around)\s+([A-Za-z\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0C00-\u0C7F]+)?)(?:\s+|$|[?.,!])", q, re.IGNORECASE):
+    # 6. Pattern: at <Place> / in <Place> / near <Place> / around <Place>
+    for m in re.finditer(r"\b(?:at|in|near|around)\s+([A-Za-z\u0900-\u097F\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0900-\u097F\u0C00-\u0C7F]+)?)(?:\s+|$|[?.,!])", q, re.IGNORECASE):
         c = clean_location_candidate(m.group(1))
         if c:
-            return normalize_extracted_location(c)
+            norm = normalize_extracted_location(c)
+            if norm:
+                return norm
 
-    # 5. Pattern: <Place> market / <Place> mandi / <Place> మార్కెట్ / <Place> మండి
-    for m in re.finditer(r"\b([A-Za-z\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0C00-\u0C7F]+)?)\s+(?:market|mandi|మార్కెట్|మండి)(?:\s+|$|[?.,!])", q, re.IGNORECASE):
+    # 7. Pattern: <Place> market / <Place> mandi / <Place> మార్కెట్ / <Place> మండి / <Place> मंडी / <Place> बाजार
+    for m in re.finditer(r"\b([A-Za-z\u0900-\u097F\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0900-\u097F\u0C00-\u0C7F]+)?)\s+(?:market|mandi|మార్కెట్|మండి|मंडी|बाजार)(?:\s+|$|[?.,!])", q, re.IGNORECASE):
         c = clean_location_candidate(m.group(1))
         if c:
-            return normalize_extracted_location(c)
+            norm = normalize_extracted_location(c)
+            if norm:
+                return norm
 
-    # 6. Pattern: <Place> [lo] <crop> price / rate (e.g. 'Korutla cotton price', 'Metpally cotton rate')
+    # 8. Pattern: <Place> [lo/में] <crop> price / rate / भाव
     crop_keywords = "|".join([
         "cotton", "kapas", "paddy", "rice", "chilli", "chili", "maize", "corn", "turmeric",
         "soybean", "groundnut", "wheat", "onion", "tomato", "sugarcane", "banana", "jowar",
         "పత్తి", "కాపాస్", "వరి", "ధాన్యం", "మిర్చి", "మొక్కజొన్న", "పసుపు", "సోయాబీన్",
-        "వేరుశనగ", "గోధుమ", "ఉల్లి", "ఉల్లిపాయ", "టమాటా", "చెరుకు", "అరటి", "జొన్న", "శనగ", "patti", "patthi"
+        "వేరుశనగ", "గోధుమ", "ఉల్లి", "ఉల్లిపాయ", "టమాటా", "చెరుకు", "అరటి", "జొన్న", "శనగ", "patti", "patthi",
+        "टमाटर", "धान", "चावल", "कपास", "मक्का", "मिर्च", "मूंगफली", "सोयाबीन", "हल्दी", "गेहूं", "प्याज"
     ])
-    price_keywords = "price|prices|rate|rates|mandi|market|ధర|ధరలు|రేటు|రేట్లు|ఖరీదు|dhara|dhare"
-    m_cp = re.search(rf"\b([A-Za-z\u0C00-\u0C7F]+)\s+(?:lo\s+)?(?:{crop_keywords})\s+(?:{price_keywords})\b", q, re.IGNORECASE)
+    price_keywords = "price|prices|rate|rates|mandi|market|ధర|ధరలు|రేటు|రేట్లు|ఖరీదు|dhara|dhare|भाव|दाम|रेट|मंडी"
+    m_cp = re.search(rf"\b([A-Za-z\u0900-\u097F\u0C00-\u0C7F]+)\s+(?:lo\s+|में\s+|मे\s+)?(?:{crop_keywords})\s+(?:{price_keywords})\b", q, re.IGNORECASE)
     if m_cp:
         c = clean_location_candidate(m_cp.group(1))
         if c:
-            return normalize_extracted_location(c)
+            norm = normalize_extracted_location(c)
+            if norm:
+                return norm
 
-    # 7. Fallback to known districts/towns if mentioned standalone
-    q_words = re.findall(r"[A-Za-z\u0C00-\u0C7F]+", q)
+    # 9. Fallback to known districts/towns if mentioned standalone
+    q_words = re.findall(r"[A-Za-z\u0900-\u097F\u0C00-\u0C7F]+", q)
     for w in q_words:
         w_clean = clean_location_candidate(w)
         if not w_clean:
             continue
-        if w_clean in TELUGU_TO_ENGLISH_PLACES:
-            return TELUGU_TO_ENGLISH_PLACES[w_clean]
-        w_lower = w_clean.lower()
-        for tel, eng in TELUGU_TO_ENGLISH_PLACES.items():
-            if eng.lower() == w_lower:
-                return eng
+        norm = normalize_extracted_location(w_clean)
+        if norm and norm.lower() not in _MARKET_LOCATION_STOPWORDS:
+            return norm
 
     return None
 
@@ -474,42 +622,58 @@ def get_distance_between_locations(loc1: Optional[str], loc2: Optional[str]) -> 
     return ((c1[0] - c2[0]) ** 2 + (c1[1] - c2[1]) ** 2) ** 0.5
 
 
+ANDHRA_PRADESH_DISTRICTS = {
+    "guntur", "krishna", "kurnool", "anantapur", "kadapa", "nellore", "ongole",
+    "prakasam", "chittoor", "tirupati", "visakhapatnam", "madanapalle", "srikakulam",
+    "vizianagaram", "eluru", "ntr", "palnadu", "bapatla", "nandyal", "annamayya", "sri sathya sai"
+}
+
+
 def normalize_district_name(raw_district: Optional[str]) -> Optional[str]:
     """
-    Normalize Telugu and English district/location names to canonical English district names.
+    Normalize Telugu, Hindi, and English district/location names to canonical English district names.
     Maps sub-district towns/mandals (e.g. Korutla, Metpally) to their administrative districts (e.g. Jagtial).
     """
     if not raw_district or not isinstance(raw_district, str):
         return None
     d = raw_district.strip()
-    d_lower = d.lower()
+    d_clean = strip_zero_width_chars(d)
+    d_lower = d_clean.lower()
+
     if d_lower in TOWN_TO_DISTRICT_MAP:
         return TOWN_TO_DISTRICT_MAP[d_lower]
-    if d in TELUGU_TO_ENGLISH_PLACES:
-        eng_p = TELUGU_TO_ENGLISH_PLACES[d]
-        if eng_p.lower() in TOWN_TO_DISTRICT_MAP:
-            return TOWN_TO_DISTRICT_MAP[eng_p.lower()]
-        return eng_p
-    if d_lower in TELUGU_TO_ENGLISH_PLACES:
-        eng_p = TELUGU_TO_ENGLISH_PLACES[d_lower]
-        if eng_p.lower() in TOWN_TO_DISTRICT_MAP:
-            return TOWN_TO_DISTRICT_MAP[eng_p.lower()]
-        return eng_p
+
+    for tel, eng in TELUGU_TO_ENGLISH_PLACES.items():
+        tel_clean = strip_zero_width_chars(tel)
+        if tel == d or tel_clean == d_clean or tel.lower() == d_lower:
+            if eng.lower() in TOWN_TO_DISTRICT_MAP:
+                return TOWN_TO_DISTRICT_MAP[eng.lower()]
+            return eng
+
+    for hi, eng in HINDI_TO_ENGLISH_PLACES.items():
+        hi_clean = strip_zero_width_chars(hi)
+        if hi == d or hi_clean == d_clean or hi.lower() == d_lower:
+            if eng.lower() in TOWN_TO_DISTRICT_MAP:
+                return TOWN_TO_DISTRICT_MAP[eng.lower()]
+            return eng
+
     from src.weather.service import _KNOWN_DISTRICTS
     if d in _KNOWN_DISTRICTS:
         return _KNOWN_DISTRICTS[d]
     if d_lower in _KNOWN_DISTRICTS:
         return _KNOWN_DISTRICTS[d_lower]
     for kw, canon in _KNOWN_DISTRICTS.items():
-        if kw in d_lower or kw in d:
+        kw_clean = strip_zero_width_chars(kw)
+        if kw in d_lower or kw in d or kw_clean == d_clean or kw.lower() == d_lower:
             return canon
+
     return d[0].upper() + d[1:] if len(d) > 1 and d.isascii() else d
 
 
 def infer_state_from_district(district: Optional[str], current_state: Optional[str] = None) -> Optional[str]:
     """
     If current_state is NULL/empty, safely infer Telangana only when the district
-    is unambiguously a known Telangana district.
+    is unambiguously a known Telangana district, or Andhra Pradesh when known AP district.
     """
     if current_state and current_state.strip():
         return current_state.strip()
@@ -518,6 +682,8 @@ def infer_state_from_district(district: Optional[str], current_state: Optional[s
     canon = normalize_district_name(district)
     if canon and canon.lower() in TELANGANA_DISTRICTS:
         return "Telangana"
+    if canon and canon.lower() in ANDHRA_PRADESH_DISTRICTS:
+        return "Andhra Pradesh"
     return None
 
 
@@ -729,6 +895,15 @@ _LABELS_BY_LANG = {
 }
 
 
+def _calculate_freshness_hours(dt: Optional[datetime]) -> float:
+    """Calculate hours elapsed since dt, safely handling timezone-aware and naive datetimes."""
+    if not dt or not isinstance(dt, datetime):
+        return 0.0
+    now = datetime.now(timezone.utc) if dt.tzinfo is not None else datetime.utcnow()
+    diff_sec = (now - dt).total_seconds()
+    return round(max(0.0, diff_sec) / 3600, 1)
+
+
 class MarketService:
     def __init__(self, repository: MarketPriceRepository, client: AgmarknetClient):
         self.repository = repository
@@ -842,11 +1017,7 @@ class MarketService:
                 if getattr(r, "price_date", None) and isinstance(r.price_date, datetime)
             ]
             newest = max(dates) if dates else None
-            freshness_hours = (
-                round((datetime.utcnow() - newest).total_seconds() / 3600, 1)
-                if newest
-                else 0.0
-            )
+            freshness_hours = _calculate_freshness_hours(newest)
 
             results = [MarketPriceResponse.model_validate(r) for r in db_records]
 
@@ -1095,11 +1266,7 @@ class MarketService:
             if getattr(r, "price_date", None) and isinstance(r.price_date, datetime)
         ]
         newest = max(dates) if dates else None
-        freshness_hours = (
-            round((datetime.utcnow() - newest).total_seconds() / 3600, 1)
-            if newest
-            else 0.0
-        )
+        freshness_hours = _calculate_freshness_hours(newest)
 
         if api_records and not is_today_requested and not is_nearby:
             is_live = True
@@ -1292,14 +1459,39 @@ class MarketService:
         if commodity:
             if language == "te":
                 for kw, canon in COMMODITY_MAP.items():
-                    if canon.lower() == commodity.lower() and any(ord(c) > 127 for c in kw):
+                    if canon.lower() == commodity.lower() and any(0x0C00 <= ord(c) <= 0x0C7F for c in kw):
                         commodity_display = kw
                         break
-            elif language in ["hi", "ta", "kn", "mr", "bn", "gu", "or", "pa", "as", "ur"]:
+            elif language == "hi":
                 for kw, canon in COMMODITY_MAP.items():
-                    if canon.lower() == commodity.lower() and any(ord(c) > 127 for c in kw):
+                    if canon.lower() == commodity.lower() and any(0x0900 <= ord(c) <= 0x097F for c in kw):
                         commodity_display = kw
                         break
+            elif language == "ta":
+                for kw, canon in COMMODITY_MAP.items():
+                    if canon.lower() == commodity.lower() and any(0x0B80 <= ord(c) <= 0x0BFF for c in kw):
+                        commodity_display = kw
+                        break
+            elif language == "kn":
+                for kw, canon in COMMODITY_MAP.items():
+                    if canon.lower() == commodity.lower() and any(0x0C80 <= ord(c) <= 0x0CFF for c in kw):
+                        commodity_display = kw
+                        break
+            else:
+                ranges = {
+                    "mr": (0x0900, 0x097F),
+                    "bn": (0x0980, 0x09FF),
+                    "as": (0x0980, 0x09FF),
+                    "gu": (0x0A80, 0x0AFF),
+                    "pa": (0x0A00, 0x0A7F),
+                    "or": (0x0B00, 0x0B7F),
+                }
+                if language in ranges:
+                    lo, hi = ranges[language]
+                    for kw, canon in COMMODITY_MAP.items():
+                        if canon.lower() == commodity.lower() and any(lo <= ord(c) <= hi for c in kw):
+                            commodity_display = kw
+                            break
 
         if not query_response.data_available or not query_response.results:
             req_loc = getattr(query_response, "explicit_location", None)
@@ -1315,7 +1507,13 @@ class MarketService:
                                     break
                         return f"📍 {tel_loc} మార్కెట్ ధరల సమాచారం ప్రస్తుతం అందుబాటులో లేదు. సమీప మార్కెట్లలో ధరలు చూడటానికి దయచేసి నిర్దిష్ట పంట పేరును (ఉదా: పత్తి, వరి, మిర్చి) తెలపండి."
                     elif language == "hi":
-                        return f"📍 {no_crop_loc} के लिए वर्तमान में मंडी भाव उपलब्ध नहीं है। नजदीकी मंडियों के भाव देखने के लिए कृपया फसल का नाम (उदा: कपास, धान, मिर्च) बताएं।"
+                        hi_loc = _HINDI_DISTRICT_MAP.get(no_crop_loc, no_crop_loc)
+                        if hi_loc == no_crop_loc:
+                            for hi, eng in HINDI_TO_ENGLISH_PLACES.items():
+                                if eng.lower() == no_crop_loc.lower():
+                                    hi_loc = hi
+                                    break
+                        return f"📍 {hi_loc} के लिए वर्तमान में मंडी भाव उपलब्ध नहीं है। नजदीकी मंडियों के भाव देखने के लिए कृपया फसल का नाम (उदा: कपास, धान, मिर्च) बताएं।"
                     else:
                         return f"📍 Currently market-price data is not available for {no_crop_loc}. Please specify which crop you are looking for (e.g., Cotton, Paddy, Chilli) to check prices in nearby markets."
                 else:
@@ -1327,13 +1525,36 @@ class MarketService:
                         return "📊 Please specify the crop and market location to check prices (e.g., 'Cotton price in Warangal' or 'Paddy price in Suryapet')."
 
             comm_name = getattr(query_response, "raw_commodity", None) or commodity_display
-            if comm_name and isinstance(comm_name, str) and comm_name.isascii():
+            if language == "te":
+                for kw, canon in COMMODITY_MAP.items():
+                    if canon.lower() == (commodity or "").lower() and any(0x0C00 <= ord(c) <= 0x0C7F for c in kw):
+                        comm_name = kw
+                        break
+            elif language == "hi":
+                for kw, canon in COMMODITY_MAP.items():
+                    if canon.lower() == (commodity or "").lower() and any(0x0900 <= ord(c) <= 0x097F for c in kw):
+                        comm_name = kw
+                        break
+            elif comm_name and isinstance(comm_name, str) and comm_name.isascii():
                 comm_name = comm_name.capitalize()
+
             if req_loc:
                 if language == "te":
-                    return f"📍 {req_loc} కోసం ప్రస్తుతం {comm_name} market-price data అందుబాటులో లేదు."
+                    tel_req = _TELUGU_DISTRICT_MAP.get(req_loc, req_loc)
+                    if tel_req == req_loc:
+                        for tel, eng in TELUGU_TO_ENGLISH_PLACES.items():
+                            if eng.lower() == req_loc.lower():
+                                tel_req = tel
+                                break
+                    return f"📍 {tel_req} కోసం ప్రస్తుతం {comm_name} మార్కెట్ ధరల సమాచారం అందుబాటులో లేదు."
                 elif language == "hi":
-                    return f"📍 {req_loc} के लिए वर्तमान में {comm_name} का मंडी भाव डेटा उपलब्ध नहीं है।"
+                    hi_req = _HINDI_DISTRICT_MAP.get(req_loc, req_loc)
+                    if hi_req == req_loc:
+                        for hi, eng in HINDI_TO_ENGLISH_PLACES.items():
+                            if eng.lower() == req_loc.lower():
+                                hi_req = hi
+                                break
+                    return f"📍 {hi_req} के लिए वर्तमान में {comm_name} का मंडी भाव डेटा उपलब्ध नहीं है।"
                 else:
                     return f"📍 Currently market-price data for {comm_name} is not available for {req_loc}."
             return labels["no_data"].format(commodity=commodity_display)
@@ -1360,15 +1581,48 @@ class MarketService:
                             tel_loc = tel
                             break
                 market_title = deduplicated[0].market_name
+                state_disp = "తెలంగాణ" if (deduplicated[0].state or "").lower() == "telangana" else ("ఆంధ్రప్రదేశ్" if (deduplicated[0].state or "").lower() == "andhra pradesh" else deduplicated[0].state)
                 lines = [
                     f"📊 {tel_loc} మార్కెట్ ధరలు\n"
-                    f"మార్కెట్: {market_title}, {deduplicated[0].state}\n"
+                    f"మార్కెట్: {market_title}, {state_disp}\n"
                 ]
                 for r in deduplicated:
                     c_name = r.commodity_telugu or r.commodity
+                    if c_name.isascii():
+                        for kw, canon in COMMODITY_MAP.items():
+                            if canon.lower() == c_name.lower() and any(0x0C00 <= ord(c) <= 0x0C7F for c in kw):
+                                c_name = kw
+                                break
                     lines.append(
                         f"• {c_name}: ₹{r.modal_price:,.0f}/{labels['unit_suffix']} "
                         f"(కనిష్టం ₹{r.min_price:,.0f} | గరిష్టం ₹{r.max_price:,.0f})"
+                    )
+                newest_date = max(r.price_date for r in deduplicated)
+                lines.append(f"\n{labels['date']}: {newest_date.strftime('%d %b %Y')}")
+                lines.append(f"📡 {source_str}")
+                return "\n".join(lines)
+            elif language == "hi":
+                hi_loc = _HINDI_DISTRICT_MAP.get(loc_name, loc_name)
+                if hi_loc == loc_name:
+                    for hi, eng in HINDI_TO_ENGLISH_PLACES.items():
+                        if eng.lower() == loc_name.lower():
+                            hi_loc = hi
+                            break
+                market_title = deduplicated[0].market_name
+                state_disp = "तेलंगाना" if (deduplicated[0].state or "").lower() == "telangana" else ("आंध्र प्रदेश" if (deduplicated[0].state or "").lower() == "andhra pradesh" else deduplicated[0].state)
+                lines = [
+                    f"📊 {hi_loc} मंडी भाव\n"
+                    f"मंडी: {market_title}, {state_disp}\n"
+                ]
+                for r in deduplicated:
+                    c_name = r.commodity
+                    for kw, canon in COMMODITY_MAP.items():
+                        if canon.lower() == c_name.lower() and any(0x0900 <= ord(c) <= 0x097F for c in kw):
+                            c_name = kw
+                            break
+                    lines.append(
+                        f"• {c_name}: औसत ₹{r.modal_price:,.0f}/{labels['unit_suffix']} "
+                        f"(न्यूनतम ₹{r.min_price:,.0f} | अधिकतम ₹{r.max_price:,.0f})"
                     )
                 newest_date = max(r.price_date for r in deduplicated)
                 lines.append(f"\n{labels['date']}: {newest_date.strftime('%d %b %Y')}")
@@ -1407,18 +1661,31 @@ class MarketService:
         # If results are from nearby mandis because requested location has no direct mandi
         if query_response.is_nearby:
             req_name = getattr(query_response, "explicit_location", None) or query_response.district or "ఈ ప్రాంతంలో"
-            state_name = query_response.state or "తెలంగాణ"
+            state_name = query_response.state or "Telangana"
             if language == "te":
                 tel_req = _TELUGU_DISTRICT_MAP.get(req_name, req_name)
+                if tel_req == req_name:
+                    for tel, eng in TELUGU_TO_ENGLISH_PLACES.items():
+                        if eng.lower() == req_name.lower():
+                            tel_req = tel
+                            break
+                state_disp = "తెలంగాణ" if (state_name or "").lower() == "telangana" else ("ఆంధ్రప్రదేశ్" if (state_name or "").lower() == "andhra pradesh" else state_name)
                 lines = [
                     f"📍 {tel_req} వద్ద నేరుగా {commodity_display} మార్కెట్/మండి అందుబాటులో లేదు.\n"
-                    f"సమీప మార్కెట్లలో ధరలు ({state_name}):\n\n"
+                    f"సమీప మార్కెట్లలో ధరలు ({state_disp}):\n\n"
                     f"{labels['title'].format(commodity=commodity_display)}"
                 ]
             elif language == "hi":
+                hi_req = _HINDI_DISTRICT_MAP.get(req_name, req_name)
+                if hi_req == req_name:
+                    for hi, eng in HINDI_TO_ENGLISH_PLACES.items():
+                        if eng.lower() == req_name.lower():
+                            hi_req = hi
+                            break
+                state_disp = "तेलंगाना" if (state_name or "").lower() == "telangana" else ("आंध्र प्रदेश" if (state_name or "").lower() == "andhra pradesh" else state_name)
                 lines = [
-                    f"📍 {req_name} में सीधे {commodity_display} की कोई मंडी उपलब्ध नहीं है।\n"
-                    f"निकटतम मंडी भाव ({state_name}):\n\n"
+                    f"📍 {hi_req} में सीधे {commodity_display} की कोई मंडी उपलब्ध नहीं है।\n"
+                    f"निकटतम मंडी भाव ({state_disp}):\n\n"
                     f"{labels['title'].format(commodity=commodity_display)}"
                 ]
             else:
@@ -1437,6 +1704,9 @@ class MarketService:
                 if language == "te":
                     tel_dist = _TELUGU_DISTRICT_MAP.get(query_response.district, query_response.district)
                     dist_str = f"{tel_dist} "
+                elif language == "hi":
+                    hi_dist = _HINDI_DISTRICT_MAP.get(query_response.district, query_response.district)
+                    dist_str = f"{hi_dist} "
                 else:
                     dist_str = f"{query_response.district} "
             lines = [
@@ -1448,8 +1718,20 @@ class MarketService:
 
         for r in deduplicated:
             date_str = r.price_date.strftime("%d %b %Y")
+            state_disp = r.state
+            if language == "te":
+                if (r.state or "").lower() == "telangana":
+                    state_disp = "తెలంగాణ"
+                elif (r.state or "").lower() == "andhra pradesh":
+                    state_disp = "ఆంధ్రప్రదేశ్"
+            elif language == "hi":
+                if (r.state or "").lower() == "telangana":
+                    state_disp = "तेलंगाना"
+                elif (r.state or "").lower() == "andhra pradesh":
+                    state_disp = "आंध्र प्रदेश"
+
             block = (
-                f"\n{labels['market']}: {r.market_name}, {r.state}\n"
+                f"\n{labels['market']}: {r.market_name}, {state_disp}\n"
                 f"{labels['modal']}: ₹{r.modal_price:,.0f}/{labels['unit_suffix']}\n"
                 f"{labels['min']}: ₹{r.min_price:,.0f} | {labels['max']}: ₹{r.max_price:,.0f}\n"
                 f"{labels['date']}: {date_str}"
