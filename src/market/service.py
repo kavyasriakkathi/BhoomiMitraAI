@@ -243,7 +243,7 @@ _MARKET_LOCATION_STOPWORDS = {
     # Generic place words (e.g. 'oorilo', 'in my village')
     "oori", "ooru", "oorilo", "oorlo", "village", "town", "city", "district", "state",
     "apmc", "yard", "area", "region", "place",
-    "ఊరు", "ఊరి", "ఊరిలో", "ఊర్లో", "గ్రామం", "గ్రామంలో", "పట్టణం", "పట్టణంలో", "జిల్లా", "రాష్ట్రం",
+    "ఊరు", "ఊరి", "ఊరిలో", "ఊర్లో", "గ్రామం", "గ్రామంలో", "పట్టణం", "పట్టణంలో", "జిల్లా", "రాష్ట్రం", "పంట",
     # Temporal / time words
     "today", "todays", "today's", "yesterday", "yesterdays", "yesterday's", "tomorrow", "now",
     "current", "latest", "daily", "present", "update", "updates", "info", "details",
