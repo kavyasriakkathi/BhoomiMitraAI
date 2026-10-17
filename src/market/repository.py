@@ -275,26 +275,62 @@ class MarketPriceRepository:
 
     async def upsert_prices(self, prices: List[MarketPriceCreate]) -> int:
         """
-        Insert new price records.
+        Insert new price records in high-performance batch mode.
         Skips records where (commodity, market_name, price_date) already exists
         to avoid duplicates from repeated API calls.
         Returns the count of newly inserted records.
         """
-        inserted = 0
-        for price_data in prices:
-            # Check for existing record with same commodity + market + date
-            exists_result = await self.db.execute(
-                select(MarketPrice.id).where(
-                    and_(
-                        MarketPrice.commodity.ilike(price_data.commodity),
-                        MarketPrice.market_name.ilike(price_data.market_name),
-                        func.date(MarketPrice.price_date) == price_data.price_date.date(),
-                    )
-                )
-            )
-            if exists_result.scalar_one_or_none():
-                continue  # Already stored — skip
+        if not prices:
+            return 0
 
+        # Collect date range from batch to query existing records in ONE SQL statement
+        dates = {p.price_date.date() for p in prices if p.price_date}
+        if not dates:
+            return 0
+
+        min_dt = datetime.combine(min(dates), datetime.min.time())
+        max_dt = datetime.combine(max(dates), datetime.max.time())
+
+        # Fetch existing keys in 1 single fast SELECT query
+        existing_stmt = select(
+            func.lower(MarketPrice.commodity),
+            func.lower(MarketPrice.market_name),
+            func.date(MarketPrice.price_date),
+        ).where(
+            and_(
+                MarketPrice.price_date >= min_dt,
+                MarketPrice.price_date <= max_dt,
+            )
+        )
+        existing_result = await self.db.execute(existing_stmt)
+        existing_keys = set()
+        for row in existing_result.all():
+            comm_val = (row[0] or "").strip().lower()
+            mkt_val = (row[1] or "").strip().lower()
+            dt_val = row[2]
+            if isinstance(dt_val, str):
+                try:
+                    dt_val = datetime.fromisoformat(dt_val).date()
+                except Exception:
+                    pass
+            existing_keys.add((comm_val, mkt_val, dt_val))
+
+        # Track keys seen within this incoming batch to prevent duplicates within the batch itself
+        seen_batch_keys = set()
+        new_records = []
+
+        for price_data in prices:
+            p_date = price_data.price_date.date()
+            key = (
+                price_data.commodity.strip().lower(),
+                price_data.market_name.strip().lower(),
+                p_date,
+            )
+
+            if key in existing_keys or key in seen_batch_keys:
+                continue
+
+            seen_batch_keys.add(key)
             record = MarketPrice(
                 commodity=price_data.commodity,
                 commodity_telugu=price_data.commodity_telugu,
@@ -308,14 +344,14 @@ class MarketPriceRepository:
                 price_date=price_data.price_date,
                 source=price_data.source,
             )
-            self.db.add(record)
-            inserted += 1
+            new_records.append(record)
 
-        if inserted:
+        if new_records:
+            self.db.add_all(new_records)
             await self.db.commit()
-            logger.info(f"[MARKET REPO] Inserted {inserted} new price records.")
+            logger.info(f"[MARKET REPO] Inserted {len(new_records)} new price records in batch.")
 
-        return inserted
+        return len(new_records)
 
     # ------------------------------------------------------------------
     # Read
