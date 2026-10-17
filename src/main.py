@@ -230,6 +230,49 @@ def create_app() -> FastAPI:
             "redis": redis_status,
         }
 
+    # ================================================================
+    # TEMPORARY AGMARKNET / DATA.GOV.IN CONNECTIVITY DEBUG ENDPOINT
+    # ================================================================
+    @app.get("/debug/agmarknet-connectivity", tags=["Debug"])
+    async def debug_agmarknet_connectivity():
+        import httpx
+
+        settings = get_settings()
+        target_url = (
+            settings.agmarknet_api_url
+            or "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
+        )
+        params = {"format": "json", "limit": 1}
+        has_key = bool(settings.data_gov_api_key)
+        if has_key:
+            params["api-key"] = settings.data_gov_api_key
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
+                response = await client.get(target_url, params=params)
+
+            return {
+                "success": response.status_code == 200,
+                "status_code": response.status_code,
+                "has_api_key_configured": has_key,
+                "response_sample": response.text[:200],
+                "message": "Connected to Data.gov.in successfully",
+            }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "has_api_key_configured": has_key,
+                "error_type": type(e).__name__,
+                "error": str(e),
+                "message": "Cannot reach Data.gov.in",
+            }
+
     # ---- Static Files & Web Dashboard Router ----
     # NOTE: /data-deletion, /privacy-policy routes are served by dashboard/router.py (canonical).
     import os
