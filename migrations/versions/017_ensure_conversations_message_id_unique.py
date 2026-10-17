@@ -1,6 +1,6 @@
 """ensure conversations message_id has unique constraint
 
-Revision ID: 017_conversations_message_id_unique
+Revision ID: 017_msg_id_unique
 Revises: 016_maps_url_text
 Create Date: 2026-10-16 16:30:00.000000
 
@@ -9,7 +9,7 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision = '017_conversations_message_id_unique'
+revision = '017_msg_id_unique'
 down_revision = '016_maps_url_text'
 branch_labels = None
 depends_on = None
