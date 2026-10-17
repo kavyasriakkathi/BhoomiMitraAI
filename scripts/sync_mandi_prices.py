@@ -6,20 +6,32 @@ and pushes them to BhoomiMitra on Render.
 """
 import os
 import sys
+from pathlib import Path
 import httpx
+
+# Try loading from local environment files if present
+try:
+    from dotenv import load_dotenv
+    root_dir = Path(__file__).resolve().parent.parent
+    if (root_dir / ".env.sync").exists():
+        load_dotenv(root_dir / ".env.sync")
+    elif (root_dir / ".env").exists():
+        load_dotenv(root_dir / ".env")
+except Exception:
+    pass
 
 def main():
     api_key = os.environ.get("DATA_GOV_API_KEY", "").strip()
     sync_secret = os.environ.get("MARKET_SYNC_SECRET", "").strip()
     app_url = os.environ.get("APP_URL", "https://bhoomimitra-ai-whatsapp.onrender.com").rstrip("/")
 
-    if not api_key:
+    if not api_key and sys.stdin.isatty():
         api_key = input("Enter your DATA_GOV_API_KEY: ").strip()
-    if not sync_secret:
+    if not sync_secret and sys.stdin.isatty():
         sync_secret = input("Enter your MARKET_SYNC_SECRET (or WHATSAPP_VERIFY_TOKEN): ").strip()
 
     if not api_key or not sync_secret:
-        print("ERROR: Both DATA_GOV_API_KEY and sync secret are required.")
+        print("ERROR: Both DATA_GOV_API_KEY and MARKET_SYNC_SECRET are required.")
         sys.exit(1)
 
     base_api = "https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070"
