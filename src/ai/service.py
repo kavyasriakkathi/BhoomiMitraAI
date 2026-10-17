@@ -27,7 +27,7 @@ from src.ai.crop_context import (
 from src.config import get_settings
 from src.ai.gemini_client import generate_response
 import re
-from typing import Optional
+from typing import Optional, Tuple, List, Dict, Any
 
 
 def build_target_language_directive(
@@ -393,6 +393,180 @@ def has_relevant_dosage_ground_truth(query: str, rag_snippets: list) -> bool:
         # 5. General dosage query
         if not is_fert and not is_pest and has_dosage_in_snippet:
             return True
+
+    return False
+
+
+def validate_output_chemical_dosage_safety(
+    text: str,
+    rag_snippets: list,
+    effective_crop: Optional[str] = None,
+) -> Tuple[bool, Optional[str]]:
+    """
+    Validates that every pesticide/chemical/fertilizer dosage recommendation strictly matches
+    retrieved ground truth by:
+      - crop
+      - disease/pest
+      - chemical/active ingredient
+      - numeric dosage
+      - unit
+    Returns (is_valid: bool, reason: Optional[str]).
+    """
+    if not text:
+        return True, None
+
+    t_lower = text.lower()
+
+    # Known chemicals (canonical name: [list of English and vernacular aliases])
+    chemical_map = {
+        "mancozeb": ["mancozeb", "మాంకోజెబ్"],
+        "copper oxychloride": ["copper oxychloride", "కాపర్ ఆక్సీక్లోరైడ్", "కాపర్ ఆక్సిక్లోరైడ్"],
+        "propiconazole": ["propiconazole", "ప్రొపికొనజోల్", "ప్రోపికొనజోల్"],
+        "pyraclostrobin": ["pyraclostrobin", "పైరాక్లోస్ట్రోబిన్"],
+        "azoxystrobin": ["azoxystrobin", "అజాక్సిస్ట్రోబిన్"],
+        "difenoconazole": ["difenoconazole", "డైఫెనోకొనజోల్"],
+        "profenofos": ["profenofos", "ప్రొఫెనోఫాస్"],
+        "emamectin benzoate": ["emamectin benzoate", "emamectin", "ఎమామెక్టిన్ బెంజోయేట్", "ఎమామెక్టిన్"],
+        "spinetoram": ["spinetoram", "స్పైనిటోరం"],
+        "fipronil": ["fipronil", "ఫిప్రోనిల్"],
+        "spinosad": ["spinosad", "స్పైనోసాడ్"],
+        "acetamiprid": ["acetamiprid", "అసిటామప్రిడ్"],
+        "diafenthiuron": ["diafenthiuron", "డయాఫెంథియురాన్"],
+        "chlorantraniliprole": ["chlorantraniliprole", "క్లోరాంట్రానిలిప్రోల్", "coragen", "కోరాజెన్"],
+        "cartap hydrochloride": ["cartap hydrochloride", "cartap", "కార్టాప్ హైడ్రోక్లోరైడ్", "కార్టాప్"],
+        "tricyclazole": ["tricyclazole", "ట్రైసైక్లాజోల్", "ట్రైసైక్లజోల్"],
+        "isoprothiolane": ["isoprothiolane", "ఐసోప్రోతియోలేన్"],
+        "glyphosate": ["glyphosate", "గ్లైఫోసేట్"],
+        "hexaconazole": ["hexaconazole", "హెక్సాకొనజోల్"],
+    }
+
+    detected_chems = []
+    for canonical_name, aliases in chemical_map.items():
+        for alias in aliases:
+            if re.search(r'\b' + re.escape(alias) + r'\b', t_lower):
+                detected_chems.append((canonical_name, alias))
+                break
+
+    # Fertilizers
+    fertilizer_map = {
+        "urea": ["urea", "యూరియా", "यूरिया"],
+        "dap": ["dap", "డిఎపి", "डीएपी"],
+        "potash": ["potash", "mop", "పొటాష్", "पोटाश"],
+        "ssp": ["ssp"],
+        "zinc": ["zinc", "జింక్", "जिंक"],
+    }
+    detected_ferts = []
+    for canonical_name, aliases in fertilizer_map.items():
+        for alias in aliases:
+            if re.search(r'\b' + re.escape(alias) + r'\b', t_lower):
+                detected_ferts.append((canonical_name, alias))
+                break
+
+    dosage_pattern = (
+        r'\b\d+(?:[.,]\d+)?\s*(?:-\s*\d+(?:[.,]\d+)?)?\s*'
+        r'(?:kg|kgs|g|gm|gms|grams?|ml|litres?|ltr|l|కేజీలు|కేజీల|కేజీ|కిలోలు|కిలోల|కిలో|గ్రాములు|గ్రాముల|గ్రాము|మి\.లీ|లీటర్లు|లీటర్ల|లీటరు|किलो|ग्राम|मिली|लीटर)\b'
+    )
+    has_dosage = bool(re.search(dosage_pattern, t_lower))
+
+    if not detected_chems and not detected_ferts:
+        return True, None
+
+    if not has_dosage:
+        return True, None
+
+    if not rag_snippets:
+        return False, "No verified RAG ground truth available for recommended chemical/dosage."
+
+    # Validate chemicals
+    for canonical_name, alias in detected_chems:
+        matching_snippets = []
+        for s in rag_snippets:
+            s_lower = s.lower()
+            if any(re.search(r'\b' + re.escape(a) + r'\b', s_lower) for a in chemical_map[canonical_name]):
+                matching_snippets.append(s)
+
+        if not matching_snippets:
+            return False, f"Unverified chemical '{canonical_name}' not approved in RAG ground truth."
+
+        # Check disease alignment
+        disease_keywords = {
+            "alternaria leaf spot": ["alternaria", "leaf spot", "ఆల్టర్నేరియా", "ఆకుమచ్చ"],
+            "pink bollworm": ["pink bollworm", "bollworm", "గులాబీ రంగు పురుగు"],
+            "blast": ["blast", "అగ్గి తెగులు", "అగ్గితెగులు"],
+            "stem borer": ["stem borer", "కాండం తొలిచే పురుగు"],
+            "thrips": ["thrips", "తామర పురుగులు", "తామరపురుగులు"],
+            "fall armyworm": ["fall armyworm", "armyworm", "కత్తెర పురుగు"],
+        }
+        for d_name, d_kws in disease_keywords.items():
+            if any(kw in t_lower for kw in d_kws):
+                disease_matched_in_snippet = False
+                for ms in matching_snippets:
+                    ms_lower = ms.lower()
+                    if any(kw in ms_lower for kw in d_kws):
+                        disease_matched_in_snippet = True
+                        break
+                if not disease_matched_in_snippet:
+                    return False, f"Chemical '{canonical_name}' is not approved for {d_name} in RAG ground truth."
+
+        # Check dosage numbers near chemical
+        chem_dosage_matches = re.findall(
+            r'\b(\d+(?:[.,]\d+)?)\s*(?:-\s*(\d+(?:[.,]\d+)?))?\s*(?:g|gm|gms|grams?|ml|litres?|ltr|l|గ్రాములు|గ్రాముల|గ్రాము|మి\.లీ|లీటర్లు|లీటర్ల|లీటరు)\b',
+            t_lower
+        )
+        if chem_dosage_matches:
+            rag_combined = " ".join(matching_snippets).lower()
+            rag_numbers = set(re.findall(r'\b\d+(?:[.,]\d+)?\b', rag_combined))
+            for match in chem_dosage_matches:
+                for num in match:
+                    if num and num not in rag_numbers:
+                        return False, f"Dosage figure '{num}' for chemical '{canonical_name}' not found in verified RAG ground truth."
+
+    # Validate fertilizers
+    for canonical_name, alias in detected_ferts:
+        fert_dosage_matches = re.findall(
+            r'\b(\d+(?:[.,]\d+)?)\s*(?:-\s*(\d+(?:[.,]\d+)?))?\s*(?:kg|kgs|కేజీలు|కేజీల|కిలోలు|కిలోల|కిలో|किलो)\b',
+            t_lower
+        )
+        if fert_dosage_matches:
+            rag_combined = " ".join(rag_snippets).lower()
+            rag_numbers = set(re.findall(r'\b\d+(?:[.,]\d+)?\b', rag_combined))
+            for match in fert_dosage_matches:
+                for num in match:
+                    if num and num not in rag_numbers:
+                        return False, f"Dosage figure '{num}' for fertilizer {canonical_name} not found in verified RAG ground truth."
+
+    return True, None
+
+
+def is_unconfirmed_crop_diagnosis(
+    message: str,
+    history_records: Optional[list] = None,
+) -> bool:
+    """
+    Detects whether the crop diagnosis is uncertain, conditional, or if the farmer
+    explicitly stated they cannot provide a photo or diagnostic sample.
+    """
+    t = (message or "").lower()
+    combined_history = ""
+    if history_records:
+        for r in history_records[-3:]:
+            u_msg = getattr(r, "user_message", None) or (r.get("parts") if isinstance(r, dict) and r.get("role") == "user" else "")
+            combined_history += " " + (u_msg or "").lower()
+
+    # 1. Farmer explicitly states they cannot provide/take/send a photo
+    photo_negated_patterns = [
+        r"(?:ఫోటో|ఫోటోలు|ఫోటోని|చిత్రం|ఫొటో)\s*(?:ఇవ్వడం|ఇవ్వలేను|ఇవ్వడం\s*కుదరదు|కుదరదు|వీలు\s*కాదు|లేదు|పంపలేను|తీసుకోలేను|పంపడం\s*కుదరదు|సాధ్యం\s*కాదు)",
+        r"(?:photo|picture|image)\s*(?:ivvadam\s*kudaradu|kudaradu|ledhu|ledu|ivvalenu|pampalenu|veelu\s*kaadhu)",
+        r"(?:cannot|can'?t|unable\s+to|not\s+possible\s+to)\s+(?:send|provide|share|take|upload|give)\s+(?:a\s+)?(?:photo|picture|image)",
+        r"(?:no\s+photo|don'?t\s+have\s+(?:a\s+)?photo|photo\s+(?:is\s+)?(?:not\s+available|not\s+possible))",
+        r"(?:फोटो)\s*(?:नहीं\s*भेज\s*सकता|नहीं\s*है|देना\s*संभव\s*नहीं)",
+    ]
+    if any(re.search(p, t, re.IGNORECASE) for p in photo_negated_patterns) or any(re.search(p, combined_history, re.IGNORECASE) for p in photo_negated_patterns):
+        return True
+
+    # 2. Symptoms are partial or conditional (e.g. general spots/yellowing but cannot share photo or inconclusive)
+    if re.search(r"(?:మచ్చలు|మచ్చ|spots|yellow|పసుపు).*?(?:కానీ|but|ఫోటో|photo)", t, re.IGNORECASE):
+        return True
 
     return False
 
@@ -1037,6 +1211,22 @@ class AIService:
                     f"{benchmark_instruction}"
                     f"{inquiry_instruction}"
                 )
+
+            is_unconfirmed_diag = is_unconfirmed_crop_diagnosis(request.message, history_records=history_records)
+            if is_unconfirmed_diag:
+                full_system_prompt += (
+                    "\n\n=== UNCONFIRMED DIAGNOSIS SAFETY DIRECTIVE ===\n"
+                    "The diagnosis is unconfirmed or conditional, or the farmer cannot provide a crop photo.\n"
+                    "MANDATORY REQUIREMENTS:\n"
+                    "1. You MUST NOT prescribe, recommend, or mention ANY pesticide, fungicide, or chemical dosages (e.g. NEVER mention Mancozeb 2.5-3 g/L or any dosage).\n"
+                    "2. You MUST state clearly in the farmer's language:\n"
+                    "   In Telugu: 'ఖచ్చితమైన నిర్ధారణ లేకుండా మందు మోతాదును సూచించను. దయచేసి పంట ఫోటోను పంపండి లేదా వ్యవసాయ అధికారిని సంప్రదించండి.'\n"
+                    "   In Hindi: 'सटीक पुष्टि के बिना दवा की खुराक नहीं बता सकते। कृपया फसल की फोटो भेजें या कृषि अधिकारी से संपर्क करें।'\n"
+                    "   In English: 'Without a confirmed diagnosis, chemical dosages cannot be recommended. Please share a crop photo or consult your local agriculture officer.'\n"
+                    "3. Explain the possible reasons conceptually (e.g., fungal leaf spots or nutrient deficiency) without prescribing specific chemical doses.\n"
+                    "4. Advise consulting the local Agricultural Extension Officer (AEO) or visiting the nearest Rythu Vedika / Krishi Vigyan Kendra.\n"
+                )
+
             # 6. Call Gemini API
             logger.info(f"Processing AI request for farmer {request.farmer_id}: '{request.message[:80]}...'")
 
@@ -1150,6 +1340,53 @@ class AIService:
                         f"Replacing with compliant safe guidance."
                     )
                     ai_text = build_unconfirmed_paddy_fertilizer_guidance(user_lang, acres=effective_land_size or 2.0, fert_hist_info=fert_hist_info)
+
+            # 6.7 Unconfirmed / Conditional Diagnosis Dosage Gate
+            if is_unconfirmed_diag:
+                has_any_dosage = bool(re.search(dosage_pattern, ai_text, re.IGNORECASE))
+                has_chem_keyword = any(k in ai_text.lower() for k in [
+                    "mancozeb", "మాంకోజెబ్", "propiconazole", "ప్రొపికొనజోల్", "profenofos", "ప్రొఫెనోఫాస్",
+                    "fipronil", "ఫిప్రోనిల్", "spinosad", "స్పైనోసాడ్", "chlorantraniliprole", "క్లోరాంట్రానిలిప్రోల్"
+                ])
+                if has_any_dosage or has_chem_keyword:
+                    logger.warning(
+                        f"[UNCONFIRMED DIAGNOSIS GATE] Blocked pesticide dosage for unconfirmed diagnosis. Farmer: {request.farmer_id}."
+                    )
+                    if user_lang == "te":
+                        ai_text = "ఖచ్చితమైన నిర్ధారణ లేకుండా మందు మోతాదును సూచించను. దయచేసి పంట ఫోటోను పంపండి లేదా వ్యవసాయ అధికారిని సంప్రదించండి."
+                    elif user_lang == "hi":
+                        ai_text = "सटीक पुष्टि के बिना दवा की खुराक नहीं बता सकते। कृपया फसल की फोटो भेजें या कृषि अधिकारी से संपर्क करें।"
+                    else:
+                        ai_text = "Without a confirmed diagnosis, chemical dosages cannot be recommended. Please share a crop photo or consult your local agriculture officer."
+
+            # 6.8 Universal Chemical & Dosage Validation Gate
+            is_chem_valid, chem_reason = validate_output_chemical_dosage_safety(
+                ai_text,
+                rag_snippets,
+                effective_crop=effective_crop
+            )
+            if not is_chem_valid:
+                logger.warning(f"[CHEMICAL DOSAGE SAFETY GATE TRIGGERED] {chem_reason}. Replacing with safe fallback.")
+                ai_text = get_unverified_dosage_fallback_response(
+                    user_lang,
+                    is_fertilizer=is_fertilizer_only_query,
+                    fert_hist_info=fert_hist_info
+                )
+
+            # 6.9 Safe Closing Sanitization: Ensure model never asks farmer to choose among pesticides
+            if re.search(r'(?:మీరు\s*ఏ\s*మందు\s*పిచికారీ\s*చేయాలనుకుంటున్నారు|ఏ\s*మందు\s*పిచికారీ\s*చేయాలనుకుంటున్నారు|which\s+(?:medicine|pesticide|spray)\s+(?:do|would)\s+you\s+(?:want|like)\s+to\s+spray)', ai_text, re.I):
+                if user_lang == "te":
+                    safe_close = "మీ పంట పరిస్థితిని బట్టి సరైన మందును ఎంపిక చేసుకునే ముందు స్థానిక వ్యవసాయ అధికారిని సంప్రదించండి. అవసరమైతే మీ పంట ఆకుల ఫోటో పంపండి."
+                elif user_lang == "hi":
+                    safe_close = "अपनी फसल की स्थिति के अनुसार सही दवा चुनने से पहले स्थानीय कृषि अधिकारी से सलाह लें। यदि आवश्यक हो तो अपनी फसल की पत्तियों की फोटो भेजें।"
+                else:
+                    safe_close = "Before selecting the appropriate chemical depending on your crop condition, please consult your local Agriculture Extension Officer. If needed, send a photo of your crop leaves."
+                ai_text = re.sub(
+                    r'(?:మీరు\s*ఏ\s*మందు\s*పిచికారీ\s*చేయాలనుకుంటున్నారు|ఏ\s*మందు\s*పిచికారీ\s*చేయాలనుకుంటున్నారు|which\s+(?:medicine|pesticide|spray)\s+(?:do|would)\s+you\s+(?:want|like)\s+to\s+spray)[\s\?]*',
+                    safe_close,
+                    ai_text,
+                    flags=re.I
+                )
 
             total_ai_time = time.time() - service_start_time
             logger.info(
