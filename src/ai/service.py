@@ -568,6 +568,18 @@ def is_unconfirmed_crop_diagnosis(
     if re.search(r"(?:మచ్చలు|మచ్చ|spots|yellow|పసుపు).*?(?:కానీ|but|ఫోటో|photo)", t, re.IGNORECASE):
         return True
 
+    # 3. Farmer is describing generic visual symptoms (spots, yellowing, drying, curling) without a confirmed disease name
+    has_symptoms = any(k in t for k in [
+        "మచ్చలు", "మచ్చ", "పసుపు", "ముడుచు", "ఎండిపో", "రాలిపో", "పురుగులు వస్తున్నాయి",
+        "spots", "yellow", "yellowing", "curling", "drying", "falling", "dying"
+    ])
+    has_confirmed_disease = any(k in t for k in [
+        "alternaria", "ఆల్టర్నేరియా", "blast", "అగ్గి తెగులు", "stem borer", "కాండం తొలిచే",
+        "pink bollworm", "గులాబీ రంగు", "thrips", "తామర పురుగులు", "fall armyworm", "కత్తెర పురుగు"
+    ])
+    if has_symptoms and not has_confirmed_disease:
+        return True
+
     return False
 
 
@@ -1352,12 +1364,34 @@ class AIService:
                     logger.warning(
                         f"[UNCONFIRMED DIAGNOSIS GATE] Blocked pesticide dosage for unconfirmed diagnosis. Farmer: {request.farmer_id}."
                     )
-                    if user_lang == "te":
-                        ai_text = "ఖచ్చితమైన నిర్ధారణ లేకుండా మందు మోతాదును సూచించను. దయచేసి పంట ఫోటోను పంపండి లేదా వ్యవసాయ అధికారిని సంప్రదించండి."
-                    elif user_lang == "hi":
-                        ai_text = "सटीक पुष्टि के बिना दवा की खुराक नहीं बता सकते। कृपया फसल की फोटो भेजें या कृषि अधिकारी से संपर्क करें।"
+                    combined_u_hist = ""
+                    if history_records:
+                        for r in history_records[-3:]:
+                            u_msg = getattr(r, "user_message", None) or (r.get("parts") if isinstance(r, dict) and r.get("role") == "user" else "")
+                            combined_u_hist += " " + (u_msg or "").lower()
+                    is_photo_neg = bool(re.search(r"(?:ఫోటో|చిత్రం|photo).*?(?:కుదరదు|లేదు|పంపలేను|cannot|not|వీలు|ఇవ్వలేను|సాధ్యం)", request.message + " " + combined_u_hist, re.I))
+                    if is_photo_neg or "కుదరదు" in request.message or "లేదు" in request.message:
+                        if user_lang == "te":
+                            ai_text = "ఖచ్చితమైన నిర్ధారణ లేకుండా మందు మోతాదును సూచించను. దయచేసి పంట ఫోటోను పంపండి లేదా వ్యవసాయ అధికారిని సంప్రదించండి."
+                        elif user_lang == "hi":
+                            ai_text = "सटीक पुष्टि के बिना दवा की खुराक नहीं बता सकते। कृपया फसल की फोटो भेजें या कृषि अधिकारी से संपर्क करें।"
+                        else:
+                            ai_text = "Without a confirmed diagnosis, chemical dosages cannot be recommended. Please share a crop photo or consult your local agriculture officer."
                     else:
-                        ai_text = "Without a confirmed diagnosis, chemical dosages cannot be recommended. Please share a crop photo or consult your local agriculture officer."
+                        crop_name_te = "పంట"
+                        if effective_crop:
+                            if any(k in effective_crop.lower() for k in ["cotton", "పత్తి"]):
+                                crop_name_te = "పత్తి"
+                            elif any(k in effective_crop.lower() for k in ["paddy", "rice", "వరి"]):
+                                crop_name_te = "వరి"
+                            elif any(k in effective_crop.lower() for k in ["chilli", "mirchi", "మిరప"]):
+                                crop_name_te = "మిరప"
+                        if user_lang == "te":
+                            ai_text = f"{crop_name_te} ఆకులపై పసుపు మరియు గోధుమ మచ్చలు ఆల్టర్నేరియా ఆకుమచ్చ తెగులు లేదా పోషకాల లోపం వల్ల రావచ్చు. ఖచ్చితమైన నిర్ధారణ లేకుండా మందు మోతాదును సూచించను. దయచేసి ఆకులపై ఏకకేంద్ర వలయాలు ఉన్నాయో గమనించండి లేదా స్పష్టమైన పంట ఆకుల ఫోటో పంపండి."
+                        elif user_lang == "hi":
+                            ai_text = "फसल की पत्तियों पर पीले व भूरे धब्बे कई कारणों से हो सकते हैं। सटीक पुष्टि के बिना दवा की खुराक नहीं बता सकते। कृपया पत्तियों की स्पष्ट फोटो भेजें या कृषि अधिकारी से संपर्क करें।"
+                        else:
+                            ai_text = "Without confirmed diagnosis, chemical dosage cannot be recommended. Please share a clear photo of the affected leaves or consult your local agriculture officer."
 
             # 6.8 Universal Chemical & Dosage Validation Gate
             is_chem_valid, chem_reason = validate_output_chemical_dosage_safety(

@@ -253,3 +253,38 @@ async def test_safe_closing_replaces_farmer_choice_question():
         assert "మీరు ఏ మందు పిచికారీ చేయాలనుకుంటున్నారు" not in resp.response_text
         assert "స్థానిక వ్యవసాయ అధికారిని సంప్రదించండి" in resp.response_text
 
+
+@pytest.mark.asyncio
+async def test_unconfirmed_crop_symptoms_turn1_blocks_dosage():
+    """Verify that describing generic symptoms (Turn 1: yellowing, brown spots) without confirmed disease blocks chemical dosage."""
+    mock_ai_repo = AsyncMock()
+    mock_ai_repo.get_farmer_profile.return_value = None
+    mock_ai_repo.get_conversation_history.return_value = []
+    mock_ai_repo.session = AsyncMock()
+
+    service = AIService(mock_ai_repo)
+    req = AIGenerateRequest(
+        farmer_id=uuid4(),
+        message="పత్తి ఆకులు పసుపుగా మారి గోధుమ రంగు మచ్చలు ఉన్నాయి."
+    )
+
+    mock_rag_item = AsyncMock()
+    mock_rag_item.document_title = "ICAR / PJTSAU Cotton Disease Guide"
+    mock_rag_item.source = "ICAR-CICR"
+    mock_rag_item.crop = "Cotton"
+    mock_rag_item.chunk_text = "Cotton Alternaria Leaf Spot: Mancozeb 75% WP @ 2.5 to 3.0 g/L."
+
+    # If LLM attempts to prescribe Mancozeb 2.5–3 g/L in Turn 1
+    with patch("src.ai.service.generate_response", return_value="మీ పత్తి పంటలో పసుపు రంగు మరియు గోధుమ రంగు మచ్చలు ఉండటం ఆల్టర్నేరియా ఆకుమచ్చ తెగులు లక్షణం. దీని నివారణకు మాంకోజెబ్ 75% WP: లీటరు నీటికి 2.5 నుండి 3.0 గ్రాములు కలిపి పిచికారీ చేయండి."), \
+         patch("src.rag.service.RAGService.search_knowledge", return_value=[mock_rag_item]), \
+         patch("src.memory.service.FarmerMemoryService.format_memory_for_system_prompt", return_value=""), \
+         patch("src.memory.service.FarmerMemoryService.extract_and_update_memory", return_value=None):
+
+        resp = await service.generate_ai_response(req)
+        # Dosage numbers must NOT appear
+        assert "2.5" not in resp.response_text
+        assert "3.0" not in resp.response_text
+        # Safe refusal must appear
+        assert "ఖచ్చితమైన నిర్ధారణ లేకుండా మందు మోతాదును సూచించను" in resp.response_text
+
+
