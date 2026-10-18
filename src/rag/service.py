@@ -4,6 +4,8 @@ import math
 import re
 import hashlib
 import uuid
+import asyncio
+import threading
 from typing import List, Optional, Tuple, Dict, Any
 try:
     import pypdf
@@ -168,6 +170,50 @@ DEFAULT_VERIFIED_AGRI_KNOWLEDGE: List[Dict[str, Any]] = [
         ),
     },
 ]
+
+
+# ------------------------------------------------------------------
+# Thread-safe In-Memory Cache for Default Verified Baseline Embeddings
+# (Avoids redundant external Gemini Embedding API calls on every request)
+# ------------------------------------------------------------------
+_STATIC_BASELINE_EMBEDDINGS: Dict[int, List[float]] = {}
+_STATIC_BASELINE_LOCK = threading.Lock()
+
+
+def get_cached_baseline_embedding(rag_service: "RAGService", idx: int, chunk_text: str) -> List[float]:
+    """
+    Retrieves or safely computes and caches the embedding vector for a
+    DEFAULT_VERIFIED_AGRI_KNOWLEDGE static baseline chunk.
+
+    Guarantees:
+    - Thread-safe double-checked locking prevents concurrent duplicate generation during startup.
+    - Embedded only once per process lifecycle; subsequent RAG requests reuse the cached vector.
+    - If the embedding API is temporarily unavailable, gracefully falls back to deterministic local embedding.
+    """
+    if idx in _STATIC_BASELINE_EMBEDDINGS:
+        return _STATIC_BASELINE_EMBEDDINGS[idx]
+
+    with _STATIC_BASELINE_LOCK:
+        if idx in _STATIC_BASELINE_EMBEDDINGS:
+            return _STATIC_BASELINE_EMBEDDINGS[idx]
+
+        try:
+            vec = rag_service.generate_embedding(chunk_text)
+        except Exception as err:
+            logger.warning(
+                f"Failed to generate embedding for baseline chunk {idx}; "
+                f"falling back to local deterministic vector: {err}"
+            )
+            vec = rag_service._deterministic_local_embedding(chunk_text)
+
+        _STATIC_BASELINE_EMBEDDINGS[idx] = vec
+        return vec
+
+
+def clear_static_baseline_cache() -> None:
+    """Clear the cached static baseline embeddings (used for tests and process resets)."""
+    with _STATIC_BASELINE_LOCK:
+        _STATIC_BASELINE_EMBEDDINGS.clear()
 
 
 class RAGService:
@@ -342,6 +388,21 @@ class RAGService:
             )
 
         # Local Deterministic Cosine-compatible Feature Hashing Embedding Vector
+        return self._deterministic_local_embedding(text, dimension)
+
+    async def generate_embedding_async(self, text: str, dimension: int = 768) -> List[float]:
+        """
+        Asynchronously generates embedding vector by offloading the blocking
+        synchronous Gemini/local embedding operation to a worker thread via asyncio.to_thread.
+        """
+        return await asyncio.to_thread(self.generate_embedding, text, dimension)
+
+    # Alias for a_generate_embedding
+    a_generate_embedding = generate_embedding_async
+
+    @staticmethod
+    def _deterministic_local_embedding(text: str, dimension: int = 768) -> List[float]:
+        """Generate deterministic cosine-compatible local feature hashing embedding."""
         vec = [0.0] * dimension
         words = text.lower().split()
         if not words:
@@ -488,7 +549,7 @@ class RAGService:
         farmer_crop = crop or (farmer_memory.get("primary_crops", [None])[0] if farmer_memory and farmer_memory.get("primary_crops") else None)
         farmer_state = state or (farmer_memory.get("state") if farmer_memory else None)
 
-        query_vec = self.generate_embedding(query)
+        query_vec = await self.generate_embedding_async(query)
         chunks_data = []
         if self.repository:
             try:
@@ -555,13 +616,13 @@ class RAGService:
             hybrid_results.append(result)
 
         # Evaluate verified baseline agricultural guides
-        for item in DEFAULT_VERIFIED_AGRI_KNOWLEDGE:
+        for idx, item in enumerate(DEFAULT_VERIFIED_AGRI_KNOWLEDGE):
             doc_crop = item.get("crop")
             doc_state = item.get("state")
             chunk_text = item.get("chunk_text", "")
 
-            # Generate synthetic vector for verified baseline chunk
-            item_vec = self.generate_embedding(chunk_text)
+            # Retrieve cached synthetic vector for verified baseline chunk
+            item_vec = get_cached_baseline_embedding(self, idx, chunk_text)
             v_score = self.cosine_similarity(query_vec, item_vec)
             k_score = self.calculate_keyword_score(query, chunk_text)
             m_score = self.calculate_metadata_score(
@@ -664,7 +725,7 @@ class RAGService:
         chunk_records = self.chunk_pages(pages)
         chunks_with_vectors = []
         for item in chunk_records:
-            vec = self.generate_embedding(item["chunk_text"])
+            vec = await self.generate_embedding_async(item["chunk_text"])
             chunks_with_vectors.append({
                 "chunk_index": item["chunk_index"],
                 "page_number": item["page_number"],
@@ -712,7 +773,7 @@ class RAGService:
             chunk_records = self.chunk_pages(pages)
             chunks_with_vectors = []
             for item in chunk_records:
-                vec = self.generate_embedding(item["chunk_text"])
+                vec = await self.generate_embedding_async(item["chunk_text"])
                 chunks_with_vectors.append({
                     "chunk_index": item["chunk_index"],
                     "page_number": item["page_number"],

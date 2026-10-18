@@ -7,6 +7,8 @@ and orchestrating the full pipeline (STT -> AI -> Outbound).
 """
 
 import time
+import threading
+import uuid
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,14 +39,122 @@ from src.ai.prompts import (
 )
 
 
+_REDIS_INFLIGHT_PREFIX = "bhoomimitra:inflight:"
+_REDIS_RELEASE_LUA = """
+if redis.call("get", KEYS[1]) == ARGV[1] then
+    return redis.call("del", KEYS[1])
+else
+    return 0
+end
+"""
+
 # In-memory in-flight lock registry to prevent concurrent execution races across background tasks
 _IN_FLIGHT_MESSAGE_IDS: set[str] = set()
+_LOCAL_INFLIGHT_CACHE: dict[str, float] = {}
+_LOCAL_INFLIGHT_LOCK = threading.Lock()
+
+
+def _check_and_acquire_local_inflight(message_id: str, ttl_seconds: float = 120.0) -> bool:
+    """Process-level in-flight check to prevent simultaneous duplicate execution when Redis is unavailable."""
+    now = time.time()
+    with _LOCAL_INFLIGHT_LOCK:
+        # Purge expired entries
+        expired = [k for k, exp in _LOCAL_INFLIGHT_CACHE.items() if exp < now]
+        for k in expired:
+            _LOCAL_INFLIGHT_CACHE.pop(k, None)
+
+        if message_id in _LOCAL_INFLIGHT_CACHE:
+            return False
+
+        _LOCAL_INFLIGHT_CACHE[message_id] = now + ttl_seconds
+        return True
+
+
+def _release_local_inflight(message_id: str) -> None:
+    """Release process-level in-flight lock."""
+    with _LOCAL_INFLIGHT_LOCK:
+        _LOCAL_INFLIGHT_CACHE.pop(message_id, None)
+
+
+async def acquire_redis_inflight_lock(message_id: str) -> tuple:
+    """
+    Acquire a Redis distributed lock for a WhatsApp message ID.
+    Returns (acquired: bool, token: str | None, redis_client: Redis | None).
+    If Redis is unavailable, falls back to process-level in-flight lock.
+    """
+    if not message_id:
+        return True, None, None
+
+    # Step 1: Check process-level local in-flight lock (always active, zero overhead)
+    if not _check_and_acquire_local_inflight(message_id):
+        logger.warning(
+            f"[DUPLICATE DETECTED: LOCAL_INFLIGHT] Message ID '{message_id}' "
+            "is already being processed by this worker. Skipping."
+        )
+        return False, None, None
+
+    settings = get_settings()
+    token = str(uuid.uuid4())
+    lock_key = f"{_REDIS_INFLIGHT_PREFIX}{message_id}"
+
+    try:
+        import redis.asyncio as aioredis
+        redis_client = aioredis.from_url(settings.redis_url, decode_responses=True)
+        acquired = await redis_client.set(lock_key, token, nx=True, ex=120)
+        if acquired:
+            logger.info(f"[REDIS LOCK ACQUIRED] key={lock_key} token={token[:8]}...")
+            return True, token, redis_client
+        else:
+            logger.warning(
+                f"[DUPLICATE DETECTED: REDIS_INFLIGHT] Message ID '{message_id}' "
+                "is already being processed by another worker. Skipping."
+            )
+            _release_local_inflight(message_id)
+            await redis_client.aclose()
+            return False, None, None
+    except Exception as redis_err:
+        logger.debug(
+            f"[REDIS LOCK UNAVAILABLE] Could not acquire Redis lock for '{message_id}': {redis_err}. "
+            "Proceeding with process-level lock and DB unique constraint safety net."
+        )
+        return True, None, None
+
+
+async def release_redis_inflight_lock(
+    message_id: str, token, redis_client
+) -> None:
+    """
+    Owner-safe release of the Redis distributed lock.
+    Uses a Lua script to atomically check-and-delete only if the key still holds this worker's token.
+    """
+    if message_id:
+        _release_local_inflight(message_id)
+
+    if not message_id or not token or not redis_client:
+        return
+
+    lock_key = f"{_REDIS_INFLIGHT_PREFIX}{message_id}"
+    try:
+        result = await redis_client.eval(_REDIS_RELEASE_LUA, 1, lock_key, token)
+        if result:
+            logger.info(f"[REDIS LOCK RELEASED] key={lock_key} token={token[:8]}...")
+        else:
+            logger.debug(f"[REDIS LOCK ALREADY EXPIRED] key={lock_key} (token mismatch or TTL expired)")
+    except Exception as release_err:
+        logger.warning(f"[REDIS LOCK RELEASE ERROR] key={lock_key}: {release_err}")
+    finally:
+        try:
+            await redis_client.aclose()
+        except Exception:
+            pass
 
 
 def acquire_in_flight_lock(message_id: str) -> bool:
     """Atomically acquires in-flight lock for a message ID. Returns False if already in-flight."""
     if not message_id:
         return True
+    if not _check_and_acquire_local_inflight(message_id):
+        return False
     if message_id in _IN_FLIGHT_MESSAGE_IDS:
         return False
     _IN_FLIGHT_MESSAGE_IDS.add(message_id)
@@ -54,6 +164,7 @@ def acquire_in_flight_lock(message_id: str) -> bool:
 def release_in_flight_lock(message_id: str) -> None:
     """Releases in-flight lock for a message ID."""
     if message_id:
+        _release_local_inflight(message_id)
         _IN_FLIGHT_MESSAGE_IDS.discard(message_id)
 
 

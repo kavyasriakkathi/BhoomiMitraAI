@@ -20,6 +20,31 @@ META_BASE_URL = f"https://graph.facebook.com/{META_API_VERSION}"
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 1
 
+# Tracks (Business Account, Consumer Account) pairs that hit Meta rate limit 131056
+_PAIR_RATE_LIMITED_NUMBERS: dict[str, float] = {}
+
+
+def record_pair_rate_limit(phone: str, cooldown_seconds: float = 60.0) -> None:
+    """Record that a phone number has hit Meta pair rate limit 131056, suppressing further outbound bursts."""
+    if phone:
+        clean_phone = str(phone).replace("whatsapp:", "").strip().lstrip("+")
+        _PAIR_RATE_LIMITED_NUMBERS[clean_phone] = time.time() + cooldown_seconds
+        _PAIR_RATE_LIMITED_NUMBERS[phone] = time.time() + cooldown_seconds
+
+
+def is_pair_rate_limited(phone: str) -> bool:
+    """Check if a phone number is currently in the pair rate limit cooldown window."""
+    if not phone:
+        return False
+    clean_phone = str(phone).replace("whatsapp:", "").strip().lstrip("+")
+    expiry = _PAIR_RATE_LIMITED_NUMBERS.get(clean_phone) or _PAIR_RATE_LIMITED_NUMBERS.get(phone)
+    if expiry:
+        if time.time() < expiry:
+            return True
+        _PAIR_RATE_LIMITED_NUMBERS.pop(clean_phone, None)
+        _PAIR_RATE_LIMITED_NUMBERS.pop(phone, None)
+    return False
+
 
 class WhatsApp24HourWindowExceeded(Exception):
     """Raised when Meta returns error 131047 (more than 24 hours passed since customer last replied)."""
@@ -91,6 +116,13 @@ async def send_text_message(
 
     masked_phone = to_phone[:4] + "****" + to_phone[-4:] if len(to_phone) >= 7 else "***"
 
+    if is_pair_rate_limited(to_phone):
+        logger.warning(
+            f"[WHATSAPP OUTBOUND SUPPRESSED: PAIR_RATE_LIMIT] Skipping send to {masked_phone}: "
+            f"Number is in Meta pair rate limit cooldown (error 131056)."
+        )
+        return None
+
     logger.info(
         f"[WHATSAPP OUTBOUND START]\n"
         f"  URL             : {url}\n"
@@ -160,7 +192,8 @@ async def send_text_message(
                 try:
                     res_json = response.json()
                     err_obj = res_json.get("error", {})
-                    if err_obj.get("code") == 131047:
+                    err_code = err_obj.get("code")
+                    if err_code == 131047:
                         logger.warning(
                             f"[WHATSAPP OUTBOUND 24H WINDOW] Meta reported error 131047 for {masked_phone}: "
                             f"More than 24 hours have passed since the customer last replied."
@@ -170,6 +203,13 @@ async def send_text_message(
                                 message=err_obj.get("message", "24-hour window expired"),
                                 details=err_obj,
                             )
+                    elif err_code == 131056:
+                        logger.warning(
+                            f"[WHATSAPP OUTBOUND RATE LIMIT: PAIR_131056] Meta pair rate limit hit for {masked_phone}: "
+                            f"Too many messages sent to this number in a short period. Activating 60s cooldown."
+                        )
+                        record_pair_rate_limit(to_phone, cooldown_seconds=60.0)
+                        return None
                 except WhatsApp24HourWindowExceeded:
                     raise
                 except Exception:
@@ -651,6 +691,14 @@ async def send_audio_message(
     }
 
     masked_phone = to_phone[:4] + "****" + to_phone[-4:] if len(to_phone) >= 7 else "***"
+
+    if is_pair_rate_limited(to_phone):
+        logger.warning(
+            f"[WHATSAPP AUDIO OUTBOUND SUPPRESSED: PAIR_RATE_LIMIT] Skipping audio send to {masked_phone}: "
+            f"Number is in Meta pair rate limit cooldown (error 131056)."
+        )
+        return None
+
     logger.info(f"[WHATSAPP AUDIO OUTBOUND START] Recipient: {masked_phone}, Media: {media_id or audio_url}")
 
     wa_timeout = float(getattr(settings, "whatsapp_api_timeout_seconds", 15.0))
@@ -674,6 +722,20 @@ async def send_audio_message(
                 import asyncio
                 await asyncio.sleep(RETRY_DELAY_SECONDS * attempt)
                 continue
+
+            if response.status_code == 400:
+                try:
+                    res_json = response.json()
+                    err_obj = res_json.get("error", {})
+                    if err_obj.get("code") == 131056:
+                        logger.warning(
+                            f"[WHATSAPP AUDIO OUTBOUND RATE LIMIT: PAIR_131056] Meta pair rate limit hit for {masked_phone}. "
+                            f"Activating 60s cooldown."
+                        )
+                        record_pair_rate_limit(to_phone, cooldown_seconds=60.0)
+                        return None
+                except Exception:
+                    pass
 
             logger.error(
                 f"[WHATSAPP AUDIO OUTBOUND ERROR] HTTP {response.status_code} for {masked_phone}: {response.text}"

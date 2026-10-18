@@ -367,6 +367,8 @@ _MARKET_LOCATION_STOPWORDS = {
     "ఆకు", "ఆకులు", "ఆకుల్లో", "ఆకులలో", "ఆకులపై",
     "పురుగు", "పురుగులు", "పురుగుల", "పురుగుల్లో", "పురుగులలో",
     "తెగులు", "తెగుళ్ళు", "తెగుళ్లలో", "తెగులులో",
+    "ఆకుమచ్చ", "ఆకుమచ్చలు", "ముడత", "తామర", "లద్దెపురుగు", "కత్తెరపురుగు", "గులాబీరంగు", "మచ్చ", "మచ్చలు",
+    "వస్తున్నాయి", "వస్తుంది", "ఉన్నాయి", "ఉంది",
     "ఎరువు", "ఎరువులు", "ఎరువుల్లో", "ఎరువులలో",
     "మందు", "మందులు", "మందుల్లో", "మందులలో",
     "రసాయనం", "రసాయనాలు", "పిచికారీ", "నివారణ", "సలహా", "సలహాలు",
@@ -432,6 +434,29 @@ def normalize_extracted_location(loc: Optional[str]) -> Optional[str]:
             return canon
 
     return loc[0].upper() + loc[1:] if len(loc) > 1 and loc.isascii() else loc
+
+
+def is_known_place(loc: Optional[str]) -> bool:
+    """Check if loc unambiguously matches a known market, district, or town."""
+    if not loc or not isinstance(loc, str):
+        return False
+    loc = loc.strip()
+    loc_clean = strip_zero_width_chars(loc)
+    loc_lower = loc_clean.lower()
+    if loc in TELUGU_TO_ENGLISH_PLACES or loc_clean in TELUGU_TO_ENGLISH_PLACES:
+        return True
+    if any(tel == loc or strip_zero_width_chars(tel) == loc_clean or eng.lower() == loc_lower for tel, eng in TELUGU_TO_ENGLISH_PLACES.items()):
+        return True
+    if loc in HINDI_TO_ENGLISH_PLACES or loc_clean in HINDI_TO_ENGLISH_PLACES:
+        return True
+    if any(hi == loc or strip_zero_width_chars(hi) == loc_clean or eng.lower() == loc_lower for hi, eng in HINDI_TO_ENGLISH_PLACES.items()):
+        return True
+    from src.weather.service import _KNOWN_DISTRICTS
+    if any(kw == loc or strip_zero_width_chars(kw) == loc_clean or kw.lower() == loc_lower for kw in _KNOWN_DISTRICTS):
+        return True
+    if loc_lower in TELANGANA_DISTRICTS or loc_lower in ANDHRA_PRADESH_DISTRICTS:
+        return True
+    return False
 
 
 def extract_market_explicit_location(query_text: Optional[str]) -> Optional[str]:
@@ -539,10 +564,11 @@ def extract_market_explicit_location(query_text: Optional[str]) -> Optional[str]
         "टमाटर", "धान", "चावल", "कपास", "मक्का", "मिर्च", "मूंगफली", "सोयाबीन", "हल्दी", "गेहूं", "प्याज"
     ])
     price_keywords = "price|prices|rate|rates|mandi|market|ధర|ధరలు|రేటు|రేట్లు|ఖరీదు|dhara|dhare|भाव|दाम|रेट|मंडी"
-    m_cp = re.search(rf"\b([A-Za-z\u0900-\u097F\u0C00-\u0C7F]+)\s+(?:lo\s+|में\s+|मे\s+)?(?:{crop_keywords})\s+(?:{price_keywords})\b", q, re.IGNORECASE)
+    m_cp = re.search(rf"\b([A-Za-z\u0900-\u097F\u0C00-\u0C7F]+)\s+(lo\s+|में\s+|मे\s+)?(?:{crop_keywords})\s+(?:{price_keywords})\b", q, re.IGNORECASE)
     if m_cp:
         c = clean_location_candidate(m_cp.group(1))
-        if c:
+        has_postposition = bool(m_cp.group(2))
+        if c and (has_postposition or is_known_place(c)):
             norm = normalize_extracted_location(c)
             if norm:
                 return norm
@@ -553,9 +579,10 @@ def extract_market_explicit_location(query_text: Optional[str]) -> Optional[str]
         w_clean = clean_location_candidate(w)
         if not w_clean:
             continue
-        norm = normalize_extracted_location(w_clean)
-        if norm and norm.lower() not in _MARKET_LOCATION_STOPWORDS:
-            return norm
+        if is_known_place(w_clean):
+            norm = normalize_extracted_location(w_clean)
+            if norm and norm.lower() not in _MARKET_LOCATION_STOPWORDS:
+                return norm
 
     return None
 
@@ -673,7 +700,7 @@ def normalize_district_name(raw_district: Optional[str]) -> Optional[str]:
 def infer_state_from_district(district: Optional[str], current_state: Optional[str] = None) -> Optional[str]:
     """
     If current_state is NULL/empty, safely infer Telangana only when the district
-    is unambiguously a known Telangana district, or Andhra Pradesh when known AP district.
+    is unambiguously a known Telangana district.
     """
     if current_state and current_state.strip():
         return current_state.strip()
@@ -682,8 +709,6 @@ def infer_state_from_district(district: Optional[str], current_state: Optional[s
     canon = normalize_district_name(district)
     if canon and canon.lower() in TELANGANA_DISTRICTS:
         return "Telangana"
-    if canon and canon.lower() in ANDHRA_PRADESH_DISTRICTS:
-        return "Andhra Pradesh"
     return None
 
 
