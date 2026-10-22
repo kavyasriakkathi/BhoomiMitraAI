@@ -11,7 +11,7 @@ SAFETY RULES:
 - All exceptions are caught; the WhatsApp pipeline is never interrupted.
 """
 import re
-from typing import Optional, List
+from typing import Optional, List, Tuple, Set, Dict
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -76,7 +76,10 @@ COMMODITY_MAP = {
     "ఉల్లిపాయ": "Onion", "ఉల్లి": "Onion",
     # Cotton
     "cotton": "Cotton", "kapas": "Cotton", "patti": "Cotton", "patthi": "Cotton",
+    "cotton lint": "Cotton", "cotton (lint)": "Cotton", "cottonlint": "Cotton",
+    "raw cotton": "Cotton", "lint": "Cotton", "cotton seed": "Cotton", "raw kapas": "Cotton",
     "పత్తి": "Cotton", "కాపాస్": "Cotton", "ఖరీఫ్ పత్తి": "Cotton",
+    "పత్తి లింట్": "Cotton", "దూది": "Cotton", "పత్తి గింజలు": "Cotton", "పత్తి దూది": "Cotton",
     # Maize / Corn
     "maize": "Maize", "corn": "Maize",
     "మొక్కజొన్న": "Maize",
@@ -459,65 +462,86 @@ def is_known_place(loc: Optional[str]) -> bool:
     return False
 
 
-def extract_market_explicit_location(query_text: Optional[str]) -> Optional[str]:
+KNOWN_STATES = {
+    "telangana": "Telangana",
+    "తెలంగాణ": "Telangana",
+    "तेलंगाना": "Telangana",
+    "andhra pradesh": "Andhra Pradesh",
+    "andhra": "Andhra Pradesh",
+    "ap": "Andhra Pradesh",
+    "ఆంధ్రప్రదేశ్": "Andhra Pradesh",
+    "ఆంధ్ర": "Andhra Pradesh",
+    "आंध्र प्रदेश": "Andhra Pradesh",
+    "आंध्र": "Andhra Pradesh",
+}
+
+
+def extract_market_locations(query_text: Optional[str]) -> Tuple[Optional[str], List[str]]:
     """
-    Extract explicitly requested location from farmer's market-price query text.
-    Handles ANY location mentioned (village, town, mandal, district, city, APMC, or mandi).
-    Supports English, Tanglish, Telugu, and Hindi patterns:
-      - 'Korutla lo' / 'metpally lo' / 'Jagtial lo' / 'Warangal lo'
-      - 'కోరుట్లలో' / 'మెట్పల్లిలో' / 'జగిత్యాలలో' / 'వరంగల్లో' / 'మహబూబ్నగర్లో'
-      - 'महबूबनगर में' / 'वारंगल में' / 'में महबूबनगर'
-      - 'at Korutla' / 'in Korutla' / 'near Korutla'
-      - 'Korutla market' / 'Korutla mandi' / 'కోరుట్ల మార్కెట్' / 'महबूबनगर मंडी'
-      - 'Korutla lo cotton rate' / 'Korutla cotton price'
-      - 'Sircilla lo patti dhara entha?'
-    Returns None if no explicit place was specified.
+    Extract state and all explicitly mentioned market locations (districts, mandis, towns)
+    from the user query.
+    Returns:
+        (state, [location1, location2, ...])
     """
     if not query_text or not isinstance(query_text, str):
-        return None
+        return None, []
     q = strip_zero_width_chars(query_text.strip())
+    q_lower = q.lower()
 
-    # 1. Hindi Pattern: <Place> में / <Place> मे
+    # 1. State detection
+    found_state = None
+    for kw, s_name in KNOWN_STATES.items():
+        if kw.isascii():
+            if re.search(rf"\b{re.escape(kw)}\b", q_lower):
+                found_state = s_name
+                break
+        else:
+            if kw in q:
+                found_state = s_name
+                break
+
+    # 2. Extract explicitly mentioned places (ordered by occurrence in query)
+    found_places: List[Tuple[int, str]] = []
+    seen_norm: Set[str] = set()
+
+    def _add_candidate(pos: int, raw_cand: Optional[str]):
+        nonlocal found_state
+        if not raw_cand:
+            return
+        c = clean_location_candidate(raw_cand)
+        if not c:
+            return
+        if c.lower() in KNOWN_STATES:
+            if not found_state:
+                found_state = KNOWN_STATES[c.lower()]
+            return
+        norm = normalize_extracted_location(c)
+        if norm and norm.lower() not in seen_norm and norm.lower() not in KNOWN_STATES:
+            seen_norm.add(norm.lower())
+            found_places.append((pos, norm))
+
+    # A. Hindi Pattern: <Place> में / <Place> मे
     for m in re.finditer(r"([A-Za-z\u0900-\u097F\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0900-\u097F\u0C00-\u0C7F]+)?)\s+(?:में|मे)(?:\s+|$|[?.,!])", q):
-        c = clean_location_candidate(m.group(1))
-        if c:
-            norm = normalize_extracted_location(c)
-            if norm:
-                return norm
+        _add_candidate(m.start(), m.group(1))
 
-    # 2. Hindi Pattern: में <Place> / मे <Place>
+    # B. Hindi Pattern: में <Place> / मे <Place>
     for m in re.finditer(r"(?:में|मे)\s+([A-Za-z\u0900-\u097F\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0900-\u097F\u0C00-\u0C7F]+)?)(?:\s+|$|[?.,!])", q):
-        c = clean_location_candidate(m.group(1))
-        if c:
-            norm = normalize_extracted_location(c)
-            if norm:
-                return norm
+        _add_candidate(m.start(), m.group(1))
 
-    # 3. Pattern: <Place> lo / <Place>lo (Romanized or Telugu with space)
+    # C. Pattern: <Place> lo / <Place>lo (Romanized or Telugu with space)
     for m in re.finditer(r"\b([A-Za-z\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0C00-\u0C7F]+)?)\s+lo(?:\s+|$|[?.,!])", q, re.IGNORECASE):
-        c = clean_location_candidate(m.group(1))
-        if c:
-            norm = normalize_extracted_location(c)
-            if norm:
-                return norm
+        _add_candidate(m.start(), m.group(1))
 
     for m in re.finditer(r"\b([A-Za-z]{3,})lo(?:\s+|$|[?.,!])", q, re.IGNORECASE):
-        c = clean_location_candidate(m.group(1))
-        if c:
-            norm = normalize_extracted_location(c)
-            if norm:
-                return norm
+        _add_candidate(m.start(), m.group(1))
 
-    # 4. Pattern: <Place> లో
+    # D. Pattern: <Place> లో
     for m in re.finditer(r"([A-Za-z\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0C00-\u0C7F]+)?)\s+లో(?:\s+|$|[?.,!])", q):
-        c = clean_location_candidate(m.group(1))
-        if c:
-            norm = normalize_extracted_location(c)
-            if norm:
-                return norm
+        _add_candidate(m.start(), m.group(1))
 
-    # 5. Telugu script words ending in 'లో' or 'ల్లో' or 'లొ' (e.g. కోరుట్లలో, మెట్పల్లిలో, జగిత్యాలలో, వరంగల్లో, మహబూబ్నగర్లో)
-    for word in q.split():
+    # E. Telugu script words ending in 'లో' or 'ల్లో' or 'లొ'
+    for m in re.finditer(r"\b([^\s.,!?]+)\b", q):
+        word = m.group(1)
         clean_w = re.sub(r"[^\w\u0C00-\u0C7F]", "", word)
         clean_w = strip_zero_width_chars(clean_w)
         if not clean_w or clean_w.lower() in _MARKET_LOCATION_STOPWORDS:
@@ -525,66 +549,66 @@ def extract_market_explicit_location(query_text: Optional[str]) -> Optional[str]
         if clean_w.endswith("ల్లో"):
             candidate_stems = [clean_w[:-len("ల్లో")] + "ల్", clean_w[:-len("ల్లో")]]
             for st in candidate_stems:
-                c = clean_location_candidate(st)
-                if c:
-                    norm = normalize_extracted_location(c)
-                    if norm:
-                        return norm
+                _add_candidate(m.start(), st)
         elif clean_w.endswith("లో") or clean_w.endswith("లొ"):
             suffix_len = len("లో") if clean_w.endswith("లో") else len("లొ")
             stem = clean_w[:-suffix_len]
-            c = clean_location_candidate(stem)
-            if c:
-                norm = normalize_extracted_location(c)
-                if norm:
-                    return norm
+            _add_candidate(m.start(), stem)
 
-    # 6. Pattern: at <Place> / in <Place> / near <Place> / around <Place>
+    # F. Pattern: at <Place> / in <Place> / near <Place> / around <Place>
     for m in re.finditer(r"\b(?:at|in|near|around)\s+([A-Za-z\u0900-\u097F\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0900-\u097F\u0C00-\u0C7F]+)?)(?:\s+|$|[?.,!])", q, re.IGNORECASE):
-        c = clean_location_candidate(m.group(1))
-        if c:
-            norm = normalize_extracted_location(c)
-            if norm:
-                return norm
+        _add_candidate(m.start(), m.group(1))
 
-    # 7. Pattern: <Place> market / <Place> mandi / <Place> మార్కెట్ / <Place> మండి / <Place> मंडी / <Place> बाजार
+    # G. Pattern: <Place> market / <Place> mandi / <Place> మార్కెట్ / <Place> మండి
     for m in re.finditer(r"\b([A-Za-z\u0900-\u097F\u0C00-\u0C7F]+(?:\s+[A-Za-z\u0900-\u097F\u0C00-\u0C7F]+)?)\s+(?:market|mandi|మార్కెట్|మండి|मंडी|बाजार)(?:\s+|$|[?.,!])", q, re.IGNORECASE):
-        c = clean_location_candidate(m.group(1))
-        if c:
-            norm = normalize_extracted_location(c)
-            if norm:
-                return norm
+        _add_candidate(m.start(), m.group(1))
 
-    # 8. Pattern: <Place> [lo/में] <crop> price / rate / भाव
-    crop_keywords = "|".join([
-        "cotton", "kapas", "paddy", "rice", "chilli", "chili", "maize", "corn", "turmeric",
-        "soybean", "groundnut", "wheat", "onion", "tomato", "sugarcane", "banana", "jowar",
-        "పత్తి", "కాపాస్", "వరి", "ధాన్యం", "మిర్చి", "మొక్కజొన్న", "పసుపు", "సోయాబీన్",
-        "వేరుశనగ", "గోధుమ", "ఉల్లి", "ఉల్లిపాయ", "టమాటా", "చెరుకు", "అరటి", "జొన్న", "శనగ", "patti", "patthi",
-        "टमाटर", "धान", "चावल", "कपास", "मक्का", "मिर्च", "मूंगफली", "सोयाबीन", "हल्दी", "गेहूं", "प्याज"
-    ])
-    price_keywords = "price|prices|rate|rates|mandi|market|ధర|ధరలు|రేటు|రేట్లు|ఖరీదు|dhara|dhare|भाव|दाम|रेट|मंडी"
-    m_cp = re.search(rf"\b([A-Za-z\u0900-\u097F\u0C00-\u0C7F]+)\s+(lo\s+|में\s+|मे\s+)?(?:{crop_keywords})\s+(?:{price_keywords})\b", q, re.IGNORECASE)
-    if m_cp:
-        c = clean_location_candidate(m_cp.group(1))
-        has_postposition = bool(m_cp.group(2))
-        if c and (has_postposition or is_known_place(c)):
-            norm = normalize_extracted_location(c)
-            if norm:
-                return norm
+    # H. Scan query for all known towns/districts/mandis
+    from src.weather.service import _KNOWN_DISTRICTS
+    all_place_candidates = set()
+    for d in TELANGANA_DISTRICTS:
+        all_place_candidates.add(d)
+    for d in ANDHRA_PRADESH_DISTRICTS:
+        all_place_candidates.add(d)
+    for tel, eng in TELUGU_TO_ENGLISH_PLACES.items():
+        all_place_candidates.add(tel)
+        all_place_candidates.add(eng)
+    for hi, eng in HINDI_TO_ENGLISH_PLACES.items():
+        all_place_candidates.add(hi)
+        all_place_candidates.add(eng)
+    for kw in _KNOWN_DISTRICTS:
+        all_place_candidates.add(kw)
 
-    # 9. Fallback to known districts/towns if mentioned standalone
-    q_words = re.findall(r"[A-Za-z\u0900-\u097F\u0C00-\u0C7F]+", q)
-    for w in q_words:
-        w_clean = clean_location_candidate(w)
-        if not w_clean:
+    for p in sorted(all_place_candidates, key=lambda x: len(x), reverse=True):
+        p_clean = strip_zero_width_chars(p).strip()
+        if not p_clean or len(p_clean) < 3 or p_clean.lower() in _MARKET_LOCATION_STOPWORDS or p_clean.lower() in KNOWN_STATES:
             continue
-        if is_known_place(w_clean):
-            norm = normalize_extracted_location(w_clean)
-            if norm and norm.lower() not in _MARKET_LOCATION_STOPWORDS:
-                return norm
+        p_lower = p_clean.lower()
+        if p_clean.isascii():
+            matches = list(re.finditer(rf"\b{re.escape(p_lower)}\b", q_lower))
+        else:
+            matches = [m for m in re.finditer(re.escape(p_clean), q)]
+        for match in matches:
+            _add_candidate(match.start(), p_clean)
 
-    return None
+    # Sort found places by appearance in the query
+    found_places.sort(key=lambda x: x[0])
+    locations = [p[1] for p in found_places]
+
+    if not found_state and locations:
+        found_state = infer_state_from_district(locations[0], None)
+
+    return found_state, locations
+
+
+def extract_market_explicit_location(query_text: Optional[str]) -> Optional[str]:
+    """
+    Extract explicitly requested location from farmer's market-price query text.
+    Handles ANY location mentioned (village, town, mandal, district, city, APMC, or mandi).
+    Returns None if no explicit place was specified or if only a state was specified.
+    """
+    _, locations = extract_market_locations(query_text)
+    return locations[0] if locations else None
 
 
 def resolve_gps_to_nearest_district(lat: float, lon: float) -> Optional[str]:
@@ -946,6 +970,7 @@ class MarketService:
         is_today_requested: bool = False,
         explicit_location: Optional[str] = None,
         raw_commodity: Optional[str] = None,
+        locations: Optional[List[str]] = None,
     ) -> MarketPriceQueryResponse:
         """
         1. Try the Agmarknet API first (passing is_today_requested).
@@ -971,8 +996,88 @@ class MarketService:
 
         logger.info(
             f"[MARKET SERVICE] Query start -> commodity='{commodity}', district='{district}', "
-            f"state='{state}', is_today_requested={is_today_requested}, explicit_location='{explicit_location}', today_ist={today_ist}"
+            f"state='{state}', is_today_requested={is_today_requested}, explicit_location='{explicit_location}', locations={locations}, today_ist={today_ist}"
         )
+
+        # Handle multi-mandi comparison query (e.g. Warangal, Khammam, Adilabad)
+        if locations and len(locations) > 1 and commodity:
+            combined_results = []
+            for loc in locations:
+                norm_loc = normalize_district_name(loc) or loc
+                # Try local DB first
+                db_loc_records = await self.repository.get_prices_by_commodity(
+                    commodity=commodity,
+                    district=norm_loc,
+                    state=state,
+                    strict_location=True,
+                    exact_location=norm_loc,
+                )
+                if db_loc_records:
+                    newest_record = sorted(
+                        db_loc_records,
+                        key=lambda r: getattr(r, "price_date", datetime.min) or datetime.min,
+                        reverse=True,
+                    )[0]
+                    combined_results.append(MarketPriceResponse.model_validate(newest_record))
+                else:
+                    # If not in DB, try live API for this location
+                    try:
+                        api_loc_records = await self.client.fetch_prices(
+                            commodity=commodity,
+                            state=state,
+                            district=norm_loc,
+                            is_today_requested=is_today_requested,
+                        )
+                        if api_loc_records:
+                            await self._upsert_api_records(api_loc_records, commodity)
+                            r = api_loc_records[0]
+                            arr_dt = r.get("arrival_date")
+                            if not isinstance(arr_dt, datetime):
+                                try:
+                                    arr_dt = datetime.fromisoformat(str(arr_dt))
+                                except Exception:
+                                    arr_dt = datetime.utcnow()
+                            combined_results.append(
+                                MarketPriceResponse(
+                                    id=uuid4(),
+                                    commodity=commodity,
+                                    market_name=r.get("market", f"{norm_loc} Mandi"),
+                                    district=r.get("district", norm_loc),
+                                    state=r.get("state", state or "Telangana"),
+                                    min_price=float(r.get("min_price", 0)),
+                                    max_price=float(r.get("max_price", 0)),
+                                    modal_price=float(r.get("modal_price", 0)),
+                                    unit=r.get("unit", "Quintal"),
+                                    price_date=arr_dt,
+                                    source="agmarknet_api",
+                                    created_at=datetime.utcnow(),
+                                    updated_at=datetime.utcnow(),
+                                )
+                            )
+                    except Exception as loc_err:
+                        logger.warning(f"[MARKET SERVICE] Live API fetch for loc '{norm_loc}' failed: {loc_err}")
+
+            if combined_results:
+                dates = [
+                    r.price_date
+                    for r in combined_results
+                    if getattr(r, "price_date", None) and isinstance(r.price_date, datetime)
+                ]
+                newest = max(dates) if dates else None
+                freshness_hours = _calculate_freshness_hours(newest)
+                return MarketPriceQueryResponse(
+                    commodity=commodity,
+                    district=district,
+                    state=state,
+                    results=combined_results,
+                    data_available=True,
+                    data_freshness_hours=freshness_hours,
+                    source_note=f"Local database (data is ~{freshness_hours}h old)",
+                    is_live=False,
+                    is_today_requested=is_today_requested,
+                    explicit_location=explicit_location,
+                    raw_commodity=raw_commodity,
+                )
 
         # Handle queries where no commodity is specified (location-level multi-commodity query)
         if not commodity:
@@ -1672,12 +1777,13 @@ class MarketService:
         # Use the most recent record per market
         seen_markets = set()
         deduplicated = []
+        max_market_limit = max(5, len(query_response.results))
         for r in query_response.results:
             key = r.market_name.lower()
             if key not in seen_markets:
                 seen_markets.add(key)
                 deduplicated.append(r)
-            if len(deduplicated) >= 3:
+            if len(deduplicated) >= max_market_limit:
                 break
 
         has_today_data = any(is_record_from_today(r.price_date) for r in deduplicated)
@@ -1739,7 +1845,15 @@ class MarketService:
                 labels["last_available"].format(date=latest_date_str),
             ]
         else:
-            lines = [labels["title"].format(commodity=commodity_display)]
+            if len(deduplicated) > 1:
+                if language == "te":
+                    lines = [f"📊 {commodity_display} మార్కెట్ ధరల పోలిక"]
+                elif language == "hi":
+                    lines = [f"📊 {commodity_display} मंडी भाव तुलना"]
+                else:
+                    lines = [f"📊 {commodity_display} Market Price Comparison"]
+            else:
+                lines = [labels["title"].format(commodity=commodity_display)]
 
         for r in deduplicated:
             date_str = r.price_date.strftime("%d %b %Y")
@@ -1764,6 +1878,16 @@ class MarketService:
             lines.append(block)
 
         lines.append(f"\n📡 {source_str}")
+
+        # If data is older than today, append a clear freshness disclosure notice
+        if not has_today_data:
+            if language == "te":
+                lines.append("\n⚠️ గమనిక: ఇవి మార్కెట్‌లో లభించిన మునుపటి రికార్డు ధరలు (తేదీలను గమనించగలరు). నేటి ధర మార్కెట్ యార్డులో మారవచ్చు.")
+            elif language == "hi":
+                lines.append("\n⚠️ ध्यान दें: ये उपलब्ध रिकॉर्ड के अनुसार पिछले मंडी भाव हैं (कृपया तारीख देखें)। आज के भाव मंडी में भिन्न हो सकते हैं।")
+            else:
+                lines.append("\n⚠️ Note: These are the latest recorded market prices (please note the dates). Today's price in the market yard may vary.")
+
         return "\n".join(lines)
 
 
@@ -1951,14 +2075,15 @@ async def enrich_response_with_market_prices(
             matched_commodity = None
 
     # Step 3: Location resolution with strict priority:
-    # 1. Explicit location mentioned in the CURRENT USER QUERY
+    # 1. Explicit location/state mentioned in the CURRENT USER QUERY
     # 2. Current GPS location
     # 3. Saved farmer location (profile or memory)
     # 4. Existing generic/default behavior
-    explicit_location = extract_market_explicit_location(query_text)
-    district = None
-    state = None
-    is_explicit = bool(explicit_location)
+    extracted_state, extracted_locations = extract_market_locations(query_text)
+    explicit_location = extracted_locations[0] if extracted_locations else None
+    district = explicit_location
+    state = extracted_state
+    is_explicit = bool(extracted_locations or extracted_state)
 
     farmer_lang = getattr(farmer, "preferred_language", "te") or "te"
     from src.language.detector import detect_language
@@ -1966,7 +2091,9 @@ async def enrich_response_with_market_prices(
 
     if explicit_location:
         district = explicit_location
-        logger.info(f"[MARKET ENRICH] Priority 1: Explicit location in query -> '{explicit_location}'")
+        logger.info(f"[MARKET ENRICH] Priority 1: Explicit location in query -> '{explicit_location}' (all locs: {extracted_locations})")
+    elif extracted_state:
+        logger.info(f"[MARKET ENRICH] Priority 1: Explicit state in query -> '{extracted_state}'")
     else:
         # Priority 2: GPS coordinates from FarmerMemory or farmer object
         lat = None
@@ -2118,6 +2245,7 @@ async def enrich_response_with_market_prices(
             is_today_requested=today_requested,
             explicit_location=explicit_location,
             raw_commodity=raw_commodity_word,
+            locations=extracted_locations if len(extracted_locations) > 1 else None,
         )
 
         logger.info(

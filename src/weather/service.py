@@ -530,18 +530,23 @@ async def enrich_response_with_weather(
     # Step 1: Detect weather intent
     from src.ai.decision_engine import WEATHER_KEYWORDS_MULTILINGUAL, WEATHER_KEYWORDS_TANGLISH
     has_weather_intent = (
-        any(kw in query_lower for kw in WEATHER_KEYWORDS_EN) or
+        any(re.search(rf"\b{re.escape(kw)}\b", query_lower) for kw in WEATHER_KEYWORDS_EN) or
         any(kw in query_text for kw in WEATHER_KEYWORDS_TE) or
         any(kw in query_text for kw in WEATHER_KEYWORDS_MULTILINGUAL) or
-        any(kw in query_lower for kw in WEATHER_KEYWORDS_TANGLISH)
+        any(re.search(rf"\b{re.escape(kw)}\b", query_lower) for kw in WEATHER_KEYWORDS_TANGLISH)
     )
 
-    # Also detect if farmer just provided a district name as a follow-up to a previous weather question
+    # Only treat as a location follow-up if query is purely a location/district (<= 3 words without crop/disease words)
+    # AND previous AI prompt specifically asked for the district/location
     query_district = _extract_district_from_query(query_text)
     if not has_weather_intent and query_district:
-        ai_lower = ai_response.lower()
-        if any(kw in ai_lower for kw in WEATHER_KEYWORDS_EN) or any(kw in ai_response for kw in WEATHER_KEYWORDS_TE):
-            has_weather_intent = True
+        words = [w for w in query_text.strip().split() if w]
+        is_short_loc = len(words) <= 3
+        no_crop_words = not any(w in query_lower for w in ["cotton", "paddy", "chilli", "pest", "disease", "purugu", "tegulu", "spots", "photo", "leaf", "plant"])
+        if is_short_loc and no_crop_words and ai_response:
+            ai_lower = ai_response.lower()
+            if any(ask in ai_lower or ask in ai_response for ask in ["జిల్లా", "district", "location", "ప్రాంతం", "వాతావరణం కోసం"]):
+                has_weather_intent = True
 
     if not has_weather_intent:
         return ai_response

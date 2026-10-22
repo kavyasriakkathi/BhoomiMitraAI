@@ -167,6 +167,15 @@ _ROMANIZED_LEXICONS: Dict[str, Set[str]] = {
         "undha", "unda", "undhi", "unnadi", "unnaya", "unnaaya", "lo",
         "dorukutunda", "dorukutundha", "dorukuthunda", "dorukuthundha", "kavali",
         "vundha", "vunda", "vundi", "vundhi",
+        # Common pronouns, inflections, and symptom verbs
+        "naa", "maa", "naaku", "meeku", "pantalo", "pantallo", "chelo", "polamlo", "chenulo",
+        "aakula", "aaku", "meeda", "mida", "unnayi", "unayi", "unnaayi", "unnay", "unte", "untey",
+        "em", "emi", "yem", "yemi", "cheyyali", "cheyali", "cheyala", "cheyyala", "cheyocchu", "cheyandi", "cheyyandi",
+        "vachayi", "vachindi", "pattindi", "pattayi", "vasthayi", "machalu", "matsalu",
+        "mandu", "mandhu", "pasupu", "thellaga", "nallaga", "erraga",
+        "kudaradu", "kudaradhu", "kadu", "kaadhu", "ledu", "ledhu",
+        "choodandi", "cheppandi", "telupandi", "thelusukovali", "cheyyi", "chey", "kooda", "kuda",
+        "dates", "ki", "ku",
     },
     "hi": {
         # Hinglish (Hindi)
@@ -265,6 +274,11 @@ def _classify_romanized_text(text: str) -> Tuple[Optional[str], float]:
     Score romanized text against Indian languages & English.
     Returns (detected_code, confidence).
     """
+    raw_lowered = f" {text.lower()} "
+    # Explicit English request check (e.g. "English lo cheppu", "in english please")
+    if re.search(r"\b(?:in english|english lo|english mein|reply in english|speak in english|tell in english|explain in english)\b", raw_lowered):
+        return "en", 0.99
+
     tokens = [re.sub(r"[^\w]", "", t.lower()) for t in text.split()]
     tokens = [t for t in tokens if t and not t.isdigit()]
     if not tokens:
@@ -279,10 +293,22 @@ def _classify_romanized_text(text: str) -> Tuple[Optional[str], float]:
         for lang, lexicon in _ROMANIZED_LEXICONS.items():
             if token in lexicon:
                 scores[lang] += 2
+            elif lang == "te":
+                # Check Telugu morphological suffixes: -lo (locative), -la (genitive), -ki/-ku (dative)
+                for sfx, base_candidates in [
+                    ("lo", ["panta", "polam", "chenu", "thota", "madi", "ooru", "mandi"]),
+                    ("la", ["aaku", "purugu", "tegulu"]),
+                    ("ki", ["panta", "patti", "vari", "mirapa", "cotton"]),
+                    ("ku", ["panta", "polam", "neeru", "eruvu"]),
+                ]:
+                    if token.endswith(sfx) and len(token) > len(sfx) + 2:
+                        stem = token[:-len(sfx)]
+                        if stem in lexicon or stem in base_candidates:
+                            scores["te"] += 2
+                            break
 
     # Check multi-word phrase patterns
     lowered = f" {' '.join(tokens)} "
-    raw_lowered = f" {text.lower()} "
     if (
         " em fertilizer " in lowered or " em vadali " in lowered or " ela vadali " in lowered
         or " rate entha " in lowered or " ela undi " in lowered or " vari ki " in lowered
@@ -293,6 +319,10 @@ def _classify_romanized_text(text: str) -> Tuple[Optional[str], float]:
         or " stock vundha " in lowered or " stock vunda " in lowered or " stock vundi " in lowered
         or " stock vundhi " in lowered or " lo urea " in lowered
         or " em fertilizer " in raw_lowered or " em vadali " in raw_lowered
+        or " em cheyyali " in lowered or " em cheyali " in lowered or " em cheyala " in lowered
+        or " em cheyyala " in lowered or " spots unnayi " in lowered or " spots unayi " in lowered
+        or " aakula meeda " in lowered or " aakula mida " in lowered or " meeda spots " in lowered
+        or " dates kooda " in lowered or " compare cheyyi " in lowered
     ):
         scores["te"] += 3
     if " kitna pani " in lowered or " kya kare " in lowered or " kitna khad " in lowered or " mandi bhav " in lowered or " ko kitna " in lowered:
@@ -322,12 +352,22 @@ def _classify_romanized_text(text: str) -> Tuple[Optional[str], float]:
     best_lang, best_score = max(scores.items(), key=lambda x: x[1])
     total_tokens = len(tokens)
 
-    # If English matches dominate or no Indian words matched
-    if en_score >= 1 and en_score >= best_score:
+    # If no Indian words matched and at least one English word matched
+    if best_score == 0 and en_score >= 1:
         conf = min(0.95, 0.6 + (en_score / total_tokens))
         return "en", conf
 
-    # If strong Indian romanized signal exists
+    # If Indian romanized signal is present and at least ties or beats English loanwords
+    if best_score >= 2 and best_score >= en_score:
+        conf = min(0.95, 0.5 + (best_score / (total_tokens * 2)))
+        return best_lang, conf
+
+    # If English matches dominate over Indian words
+    if en_score > best_score:
+        conf = min(0.95, 0.6 + (en_score / total_tokens))
+        return "en", conf
+
+    # If at least some Indian signal
     if best_score >= 2:
         conf = min(0.95, 0.5 + (best_score / (total_tokens * 2)))
         return best_lang, conf

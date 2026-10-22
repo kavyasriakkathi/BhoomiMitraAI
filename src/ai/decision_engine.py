@@ -412,7 +412,8 @@ INTENT_KEYWORDS: Dict[FarmerIntent, Dict[str, List[str]]] = {
     },
     FarmerIntent.CROP_HEALTH: {
         "en": [
-            "disease", "pest", "pests", "leaf spot", "yellowing", "yellow", "turning yellow",
+            "disease", "pest", "pests", "leaf spot", "leaf spots", "spots", "black spots", "brown spots",
+            "yellowing", "yellow", "turning yellow",
             "yellow leaves", "yellow leaf", "wilting", "fungus",
             "insects", "bollworm", "aphids", "whitefly", "blight", "rot", "pesticide for",
             "cure", "symptoms", "worms", "bugs", "fungicide", "infestation", "stem borer",
@@ -473,6 +474,7 @@ INTENT_KEYWORDS: Dict[FarmerIntent, Dict[str, List[str]]] = {
             "panta rogamu", "pesticide spray", "cheda", "pulla rali", "pula rali",
             "purugula mandu", "tegulu mandu", "ralipothundi", "pasupuga marutunnayi",
             "keeda", "roga", "rogh", "poka", "puzhu", "poochi", "sundi",
+            "spots", "leaf spots", "aakula meeda spots", "spots unnayi", "machalu", "aakula meeda",
         ],
     },
     FarmerIntent.FERTILIZER: {
@@ -790,8 +792,17 @@ def _matches_intent_keywords(msg: str, intent: FarmerIntent) -> bool:
     lang_map = INTENT_KEYWORDS.get(intent, {})
     for lang, keywords in lang_map.items():
         for kw in keywords:
-            if _normalize_query_text(kw).lower() in msg:
-                return True
+            kw_norm = _normalize_query_text(kw).lower()
+            if not kw_norm:
+                continue
+            if re.search(r"[a-zA-Z0-9]", kw_norm):
+                # ASCII / transliterated keyword - require word boundary to prevent false substring matches
+                if re.search(rf"\b{re.escape(kw_norm)}\b", msg):
+                    return True
+            else:
+                # Indic script keywords (Telugu, Devanagari, etc.)
+                if kw_norm in msg:
+                    return True
     return False
 
 
@@ -931,6 +942,44 @@ class AIDecisionEngine:
         # 9. Harvesting
         if _matches_intent_keywords(msg, FarmerIntent.HARVESTING):
             detected.append(FarmerIntent.HARVESTING)
+
+        # Safeguard: If CROP_HEALTH is present, ensure WEATHER and MARKET_PRICE
+        # are only kept if genuine inquiry words are explicitly in the user's message.
+        # This prevents pure crop-health queries from falsely triggering weather/market enrichments
+        # while strictly preserving genuine multi-intent requests.
+        if FarmerIntent.CROP_HEALTH in detected:
+            if FarmerIntent.WEATHER in detected:
+                weather_inquiry_words = [
+                    "weather", "forecast", "rain", "raining", "rainy", "temperature", "humidity",
+                    "storm", "thunderstorm", "will it rain", "precipitation", "cloudy", "sunny",
+                    "వాతావరణం", "వాతావరణ", "వర్షం", "వర్షాలు", "వాన", "వానలు", "కురుస్తుందా",
+                    "కురుస్తుంది", "ఉష్ణోగ్రత", "తేమ", "ఎండ", "మంచు", "తుఫాను",
+                    "varsham", "varsham paduthunda", "varsham vasthunda", "vana", "weather ela undi",
+                    "repu varsham", "rain paduthunda", "rain", "weather",
+                    "मौसम", "बारिश", "वर्षा", "हवामान", "पाऊस", "வானிலை", "மழை", "ಹವಾಮಾನ", "ಮಳೆ",
+                ]
+                has_explicit_weather = any(
+                    re.search(rf"\b{re.escape(w)}\b", msg) if w.isascii() else w in msg
+                    for w in weather_inquiry_words
+                )
+                if not has_explicit_weather:
+                    detected.remove(FarmerIntent.WEATHER)
+
+            if FarmerIntent.MARKET_PRICE in detected:
+                market_inquiry_words = [
+                    "price", "prices", "mandi", "rate", "rates", "selling price", "quintal",
+                    "market value", "market price", "mandi rate",
+                    "ధర", "ధరలు", "మండి", "రేటు", "రేట్లు", "క్వింటాల్", "క్వింటాలు",
+                    "అమ్ముకోవాలి", "మార్కెట్ ధర", "మండి ధర",
+                    "rate entha", "dhara entha", "mandi rate", "market price", "bhav", "mandi bhav",
+                    "भाव", "मंडी भाव", "दाम", "மண்டி", "விலை", "ಮಂಡಿ", "ಬೆಲೆ",
+                ]
+                has_explicit_market = any(
+                    re.search(rf"\b{re.escape(w)}\b", msg) if w.isascii() else w in msg
+                    for w in market_inquiry_words
+                )
+                if not has_explicit_market:
+                    detected.remove(FarmerIntent.MARKET_PRICE)
 
         # Fallback: if no specific domain matched, identify as general farming or unknown
         if not detected:

@@ -56,7 +56,11 @@ async def test_meta_131056_activates_cooldown_and_suppresses_subsequent_sends():
         }
     }
 
-    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp) as mock_post:
+    mock_cfg = MagicMock()
+    mock_cfg.whatsapp_api_token = "dummy_token"
+    mock_cfg.whatsapp_phone_number_id = "dummy_phone_id"
+    with patch("src.gateway.whatsapp_client.get_settings", return_value=mock_cfg), \
+         patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp) as mock_post:
         res = await send_text_message(to_phone=test_phone, message_text="Hello farmer")
         assert res is None
         assert is_pair_rate_limited(test_phone) is True
