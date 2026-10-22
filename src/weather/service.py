@@ -113,6 +113,9 @@ _KNOWN_DISTRICTS = {
     "నిర్మల్": "Nirmal",
     "medchal": "Medchal-Malkajgiri",
     "మేడ్చల్": "Medchal-Malkajgiri",
+    "ghatkesar": "Ghatkesar",
+    "ఘట్కేసర్": "Ghatkesar",
+    "ఘట్‌కేసర్": "Ghatkesar",
 
     # Andhra Pradesh
     "krishna": "Krishna",
@@ -178,6 +181,16 @@ _KNOWN_DISTRICTS = {
     "అన్నమయ్య": "Annamayya",
     "rayachoty": "Annamayya",
     "రాయచోటి": "Annamayya",
+}
+
+_TELANGANA_DISTRICTS = {
+    "Warangal", "Karimnagar", "Khammam", "Nizamabad", "Nalgonda",
+    "Mahabubnagar", "Medak", "Adilabad", "Rangareddy", "Hyderabad",
+    "Siddipet", "Suryapet", "Jagtial", "Mancherial", "Bhadradri Kothagudem",
+    "Vikarabad", "Sangareddy", "Kamareddy", "Rajanna Sircilla", "Peddapalli",
+    "Wanaparthy", "Jogulamba Gadwal", "Nagarkurnool", "Narayanpet", "Mulugu",
+    "Jayashankar Bhupalpally", "Jangaon", "Yadadri Bhuvanagiri",
+    "Komaram Bheem Asifabad", "Nirmal", "Medchal-Malkajgiri", "Ghatkesar",
 }
 
 
@@ -556,6 +569,8 @@ async def enrich_response_with_weather(
     longitude = None
     district = query_district
     state = None
+    if district:
+        state = "Telangana" if district in _TELANGANA_DISTRICTS else "Andhra Pradesh"
 
     # Check if raw GPS coordinates were provided directly in user query (e.g., "17.409296, 78.649556")
     coord_match = re.search(r'(-?\d{1,2}\.\d{3,7})\s*,\s*(-?\d{1,3}\.\d{3,7})', query_text)
@@ -569,8 +584,8 @@ async def enrich_response_with_weather(
         except (ValueError, TypeError):
             pass
 
-    # Check if farmer object directly has memory attached with GPS coordinates
-    if latitude is None or longitude is None:
+    # Check if farmer object directly has memory attached with GPS coordinates (only if no explicit query district override)
+    if not district and (latitude is None or longitude is None):
         f_mem = getattr(farmer, "memory", None)
         if f_mem and getattr(f_mem, "gps_coordinates", None):
             gps = f_mem.gps_coordinates
