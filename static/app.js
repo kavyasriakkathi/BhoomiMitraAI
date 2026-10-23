@@ -1993,6 +1993,7 @@ async function loadPilotAnalytics() {
     // 1. KPI Cards (Real numbers, no fake defaults)
     setVal('stat-analytics-farmers', summary.total_farmers ?? 0);
     setVal('stat-analytics-total-users', summary.total_users ?? summary.total_farmers ?? 0);
+    setVal('stat-analytics-test-count', summary.test_accounts_count ?? 0);
     setVal('stat-analytics-new-week', summary.new_farmers_this_week ?? 0);
     setVal('stat-analytics-new-month', summary.new_farmers_this_month ?? 0);
 

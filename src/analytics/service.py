@@ -82,6 +82,36 @@ def classify_intent(intent_str: Optional[str]) -> str:
     return "other"
 
 
+def get_clean_farmers_filter():
+    """
+    Excludes test/demo phone patterns, placeholder strings, dummy number sequences,
+    and test farmer profiles from pilot operational metrics.
+    """
+    test_phone_patterns = or_(
+        Farmer.phone_number.in_(["YOUR_FARMER_PHONE", "FARMER_PHONE", "REAL_FARMER_PHONE"]),
+        Farmer.phone_number.like("%FARMER_PHONE%"),
+        Farmer.phone_number.like("+9199999%"),
+        Farmer.phone_number.like("9199999%"),
+        Farmer.phone_number.like("99999%"),
+        Farmer.phone_number.like("+9100000%"),
+        Farmer.phone_number.like("00000%"),
+    )
+    test_profile_subquery = (
+        select(FarmerProfile.farmer_id)
+        .where(
+            or_(
+                FarmerProfile.full_name.ilike("%test%"),
+                FarmerProfile.full_name.ilike("%demo%"),
+            )
+        )
+        .scalar_subquery()
+    )
+    return and_(
+        not_(test_phone_patterns),
+        not_(Farmer.id.in_(test_profile_subquery)),
+    )
+
+
 class AnalyticsService:
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -89,7 +119,7 @@ class AnalyticsService:
     async def get_summary(self) -> AnalyticsSummaryResponse:
         """
         Compute high-level pilot KPI summary:
-        1. Total farmers/users
+        1. Total clean farmers/users (excluding dummy/test accounts)
         2. Total questions/messages
         3. Total AI responses
         4. Active users today (DAU) & WAU
@@ -111,8 +141,9 @@ class AnalyticsService:
         past_7d = now - timedelta(days=7)
         past_30d = now - timedelta(days=30)
 
-        # 1. Total Farmers
-        total_farmers_res = await self.db.execute(select(func.count(Farmer.id)))
+        # 1. Total Clean Farmers (excluding test/dummy accounts)
+        clean_farmers_filter = get_clean_farmers_filter()
+        total_farmers_res = await self.db.execute(select(func.count(Farmer.id)).where(clean_farmers_filter))
         total_farmers = total_farmers_res.scalar() or 0
 
         # 2. DAU (Unique farmers active in past 24h)
@@ -199,6 +230,8 @@ class AnalyticsService:
 
         # Default extended values in case of mock exhaustion or query fallback
         total_users = total_farmers
+        total_raw_farmers = total_farmers
+        test_accounts_count = 0
         total_ai_responses = 0
         active_users_today = 0
         mau = wau
@@ -219,27 +252,33 @@ class AnalyticsService:
             acc_count = acc_res.scalar() or 0
             total_users = total_farmers + acc_count
 
+            # Total Raw Farmers & Excluded Test Accounts Count
+            raw_farmers_res = await self.db.execute(select(func.count(Farmer.id)))
+            raw_cnt = raw_farmers_res.scalar() or total_farmers
+            total_raw_farmers = max(raw_cnt, total_farmers)
+            test_accounts_count = max(0, total_raw_farmers - total_farmers)
+
             # MAU (Unique farmers active in past 30 days)
             mau_res = await self.db.execute(
                 select(func.count(distinct(Conversation.farmer_id))).where(Conversation.created_at >= past_30d)
             )
             mau = mau_res.scalar() or 0
 
-            # New farmers registered today
+            # New farmers registered today (excluding test accounts)
             nft_res = await self.db.execute(
-                select(func.count(Farmer.id)).where(Farmer.created_at >= today_start)
+                select(func.count(Farmer.id)).where(and_(clean_farmers_filter, Farmer.created_at >= today_start))
             )
             new_farmers_today = nft_res.scalar() or 0
 
-            # New farmers registered in past 7 days
+            # New farmers registered in past 7 days (excluding test accounts)
             nfw_res = await self.db.execute(
-                select(func.count(Farmer.id)).where(Farmer.created_at >= past_7d)
+                select(func.count(Farmer.id)).where(and_(clean_farmers_filter, Farmer.created_at >= past_7d))
             )
             new_farmers_this_week = nfw_res.scalar() or 0
 
-            # New farmers registered in past 30 days
+            # New farmers registered in past 30 days (excluding test accounts)
             nfm_res = await self.db.execute(
-                select(func.count(Farmer.id)).where(Farmer.created_at >= past_30d)
+                select(func.count(Farmer.id)).where(and_(clean_farmers_filter, Farmer.created_at >= past_30d))
             )
             new_farmers_this_month = nfm_res.scalar() or 0
 
@@ -387,6 +426,8 @@ class AnalyticsService:
 
         return AnalyticsSummaryResponse(
             total_farmers=total_farmers,
+            total_raw_farmers=total_raw_farmers,
+            test_accounts_count=test_accounts_count,
             total_users=total_users,
             total_messages=total_messages,
             total_ai_responses=total_ai_responses,

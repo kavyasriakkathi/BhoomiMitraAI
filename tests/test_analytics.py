@@ -146,19 +146,20 @@ async def test_analytics_service_extended_kpi_calculations():
     # 7. modality -> [("text", 60), ("audio", 30), ("image", 10)]
     # 8. delivery -> [("sent", 95), ("failed", 5)]
     # 9. user accounts -> 2
-    # 10. mau -> 25
-    # 11. new_farmers_today -> 3
-    # 12. new_farmers_this_week -> 7
-    # 13. new_farmers_this_month -> 15
-    # 14. total_ai_responses -> 98
-    # 15. active_users_today -> 10
-    # 16. response time metrics (avg=3.45, slow_count=4)
-    # 17. intents -> [("shops_input_availability", 15), ("fertilizer_nutrient", 20), ("weather_forecast", 10), ("market_price", 12), ("crop_health", 8), ("government_schemes", 5), ("greeting", 30)]
-    # 18. top questions -> [("Urea price?", 15), ("Weather forecast?", 10)]
-    # 19. crop rows -> [("Paddy", 12), ("Cotton", 8)]
-    # 20. profile crop rows -> [("Chilli", 5)]
-    # 21. profile districts -> [("Warangal", 10)]
-    # 22. farm districts -> [("Karimnagar", 8), ("Warangal", 4)]
+    # 10. raw farmers -> 27
+    # 11. mau -> 25
+    # 12. new_farmers_today -> 3
+    # 13. new_farmers_this_week -> 7
+    # 14. new_farmers_this_month -> 15
+    # 15. total_ai_responses -> 98
+    # 16. active_users_today -> 10
+    # 17. response time metrics (avg=3.45, slow_count=4)
+    # 18. intents -> [("shops_input_availability", 15), ("fertilizer_nutrient", 20), ("weather_forecast", 10), ("market_price", 12), ("crop_health", 8), ("government_schemes", 5), ("greeting", 30)]
+    # 19. top questions -> [("Urea price?", 15), ("Weather forecast?", 10)]
+    # 20. crop rows -> [("Paddy", 12), ("Cotton", 8)]
+    # 21. profile crop rows -> [("Chilli", 5)]
+    # 22. profile districts -> [("Warangal", 10)]
+    # 23. farm districts -> [("Karimnagar", 8), ("Warangal", 4)]
 
     mock_db.execute.side_effect = [
         create_mock_result(scalar_val=20),
@@ -170,6 +171,7 @@ async def test_analytics_service_extended_kpi_calculations():
         create_mock_result(all_val=[("text", 60), ("audio", 30), ("image", 10)]),
         create_mock_result(all_val=[("sent", 95), ("failed", 5)]),
         create_mock_result(scalar_val=2),
+        create_mock_result(scalar_val=27),
         create_mock_result(scalar_val=25),
         create_mock_result(scalar_val=3),
         create_mock_result(scalar_val=7),
@@ -199,6 +201,8 @@ async def test_analytics_service_extended_kpi_calculations():
 
     # Core volume KPIs
     assert summary.total_farmers == 20
+    assert summary.total_raw_farmers == 27
+    assert summary.test_accounts_count == 7
     assert summary.total_users == 22
     assert summary.total_messages == 100
     assert summary.total_ai_responses == 98

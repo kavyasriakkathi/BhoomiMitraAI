@@ -61,7 +61,9 @@ class TopDistrictItem(BaseModel):
 
 
 class AnalyticsSummaryResponse(BaseModel):
-    total_farmers: int = Field(0, description="Total registered farmers")
+    total_farmers: int = Field(0, description="Total verified/non-test registered farmers")
+    total_raw_farmers: int = Field(0, description="Total raw registered farmer records")
+    test_accounts_count: int = Field(0, description="Count of excluded test/demo accounts")
     total_users: int = Field(0, description="Total platform users (farmers + accounts)")
     total_messages: int = Field(0, description="Total all-time messages / questions")
     total_ai_responses: int = Field(0, description="Total AI responses generated")
