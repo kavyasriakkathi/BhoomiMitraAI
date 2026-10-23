@@ -80,7 +80,7 @@ def classify_intent(intent_str: Optional[str]) -> str:
         "crop_health": "disease",
         "government_schemes": "schemes",
         "greeting": "other",
-        "order_status_notification": "other",
+        "order_status_notification": "shops",
         "dosage_unverified_fallback": "fertilizer",
         "rag_safe_fallback": "other",
         "ai_unavailable_fallback": "other",

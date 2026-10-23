@@ -255,7 +255,7 @@ def test_classify_intent_function():
     assert classify_intent("government_schemes") == "schemes"
     assert classify_intent("pm_kisan_subsidy") == "schemes"
     assert classify_intent("greeting") == "other"
-    assert classify_intent("order_status_notification") == "other"
+    assert classify_intent("order_status_notification") == "shops"
     assert classify_intent(None) == "other"
 
 
