@@ -240,6 +240,9 @@ class AnalyticsService:
         new_farmers_this_month = 0
         avg_response_time_seconds = 0.0
         slow_responses_count = 0
+        inactive_farmers = 0
+        retention_7d_pct = 0.0
+        retention_30d_pct = 0.0
         intents = IntentBreakdown()
         top_questions: List[TopQuestionItem] = []
         top_crops: List[TopCropItem] = []
@@ -418,6 +421,79 @@ class AnalyticsService:
             sorted_districts = sorted(dist_map.items(), key=lambda x: x[1], reverse=True)[:10]
             top_districts = [TopDistrictItem(district=k, count=v) for k, v in sorted_districts]
 
+            # Inactive Farmers (registered but never sent any message)
+            active_farmer_ids_subq = select(distinct(Conversation.farmer_id)).scalar_subquery()
+            inactive_res = await self.db.execute(
+                select(func.count(Farmer.id)).where(
+                    and_(clean_farmers_filter, not_(Farmer.id.in_(active_farmer_ids_subq)))
+                )
+            )
+            inactive_farmers = inactive_res.scalar() or 0
+
+            # Retention Rates: % of farmers who sent a follow-up message (>1 conversation)
+            # 7-day retention: farmers whose FIRST conversation was 7+ days ago AND have 2+ conversations
+            past_7d_cutoff = now - timedelta(days=7)
+            past_30d_cutoff = now - timedelta(days=30)
+
+            # Farmers whose first message was at least 7 days ago (eligible cohort)
+            eligible_7d_subq = (
+                select(Conversation.farmer_id)
+                .group_by(Conversation.farmer_id)
+                .having(func.min(Conversation.created_at) <= past_7d_cutoff)
+                .scalar_subquery()
+            )
+            eligible_7d_res = await self.db.execute(
+                select(func.count(distinct(Conversation.farmer_id))).where(
+                    Conversation.farmer_id.in_(eligible_7d_subq)
+                )
+            )
+            cohort_7d = eligible_7d_res.scalar() or 0
+
+            # Of that cohort, how many have 2+ conversations?
+            retained_7d_subq = (
+                select(Conversation.farmer_id)
+                .where(Conversation.farmer_id.in_(eligible_7d_subq))
+                .group_by(Conversation.farmer_id)
+                .having(func.count(Conversation.id) >= 2)
+                .scalar_subquery()
+            )
+            retained_7d_res = await self.db.execute(
+                select(func.count(distinct(Conversation.farmer_id))).where(
+                    Conversation.farmer_id.in_(retained_7d_subq)
+                )
+            )
+            retained_7d = retained_7d_res.scalar() or 0
+            retention_7d_pct = round((retained_7d / cohort_7d * 100.0) if cohort_7d > 0 else 0.0, 1)
+
+            # 30-day retention
+            eligible_30d_subq = (
+                select(Conversation.farmer_id)
+                .group_by(Conversation.farmer_id)
+                .having(func.min(Conversation.created_at) <= past_30d_cutoff)
+                .scalar_subquery()
+            )
+            eligible_30d_res = await self.db.execute(
+                select(func.count(distinct(Conversation.farmer_id))).where(
+                    Conversation.farmer_id.in_(eligible_30d_subq)
+                )
+            )
+            cohort_30d = eligible_30d_res.scalar() or 0
+
+            retained_30d_subq = (
+                select(Conversation.farmer_id)
+                .where(Conversation.farmer_id.in_(eligible_30d_subq))
+                .group_by(Conversation.farmer_id)
+                .having(func.count(Conversation.id) >= 2)
+                .scalar_subquery()
+            )
+            retained_30d_res = await self.db.execute(
+                select(func.count(distinct(Conversation.farmer_id))).where(
+                    Conversation.farmer_id.in_(retained_30d_subq)
+                )
+            )
+            retained_30d = retained_30d_res.scalar() or 0
+            retention_30d_pct = round((retained_30d / cohort_30d * 100.0) if cohort_30d > 0 else 0.0, 1)
+
         except StopIteration:
             # In unit tests with exact mock side_effects, stop gracefully
             pass
@@ -440,6 +516,9 @@ class AnalyticsService:
             active_users_today=active_users_today,
             messages_today=messages_today,
             avg_response_time_seconds=avg_response_time_seconds,
+            inactive_farmers=inactive_farmers,
+            retention_7d_pct=retention_7d_pct,
+            retention_30d_pct=retention_30d_pct,
             slow_responses_count=slow_responses_count,
             languages=languages,
             modality=modality,

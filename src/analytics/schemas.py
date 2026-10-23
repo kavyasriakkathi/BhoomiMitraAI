@@ -76,6 +76,9 @@ class AnalyticsSummaryResponse(BaseModel):
     active_users_today: int = Field(0, description="Active farmers today since midnight UTC")
     messages_today: int = Field(0, description="Total conversational messages received today")
     avg_response_time_seconds: float = Field(0.0, description="Average AI response time in seconds")
+    inactive_farmers: int = Field(0, description="Farmers registered but who never sent any message")
+    retention_7d_pct: float = Field(0.0, description="% of farmers who messaged again within 7 days of first message")
+    retention_30d_pct: float = Field(0.0, description="% of farmers who messaged again within 30 days of first message")
     slow_responses_count: int = Field(0, description="Count of slow responses (>10s)")
     languages: LanguageBreakdown
     modality: ModalityBreakdown

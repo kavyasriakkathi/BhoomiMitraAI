@@ -2008,6 +2008,13 @@ async function loadPilotAnalytics() {
     setVal('stat-analytics-avg-response-time', (avgRt != null && avgRt > 0) ? `${avgRt}s` : '—');
     setVal('stat-analytics-slow-responses', summary.slow_responses_count ?? 0);
 
+    // Retention & Engagement
+    const ret7d = summary.retention_7d_pct;
+    const ret30d = summary.retention_30d_pct;
+    setVal('stat-analytics-retention-7d', (ret7d != null) ? `${ret7d}%` : '—');
+    setVal('stat-analytics-retention-30d', (ret30d != null) ? `${ret30d}%` : '—');
+    setVal('stat-analytics-inactive-farmers', summary.inactive_farmers ?? 0);
+
     // 2. Language breakdown
     const teCount = (summary.languages && summary.languages.telugu) || 0;
     const enCount = (summary.languages && summary.languages.english) || 0;
