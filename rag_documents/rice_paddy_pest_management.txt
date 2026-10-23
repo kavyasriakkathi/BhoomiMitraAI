@@ -1,0 +1,112 @@
+RICE AND PADDY PEST MANAGEMENT GUIDE
+Source: ICAR (Indian Council of Agricultural Research)
+State: Telangana | Crop: Rice / Paddy
+Language: English (Telugu translation available via BhoomiMitra)
+
+=============================================================
+1. MAJOR PESTS OF RICE/PADDY IN TELANGANA
+=============================================================
+
+1.1 STEM BORER (కాండం తొలుచు పురుగు)
+- Symptoms: Dead hearts in vegetative stage, white ears at heading stage
+- Control:
+  * Remove and destroy egg masses from seedlings before transplanting
+  * Apply Cartap Hydrochloride 4G @ 18 kg/acre at 15 days after transplanting
+  * Spray Chlorantraniliprole 18.5% SC @ 60 ml per acre
+  * Spray Monocrotophos 36 SL @ 400 ml/acre mixed in 200 litres water
+- Biological control: Release Trichogramma japonicum @ 1 lakh/acre at egg laying stage
+
+1.2 LEAF FOLDER (ఆకు చుట్టు పురుగు)
+- Symptoms: Leaves rolled longitudinally, whitish papery streaks
+- Control:
+  * Spray Chlorpyriphos 20 EC @ 400 ml/acre
+  * Spray Quinalphos 25 EC @ 400 ml/acre
+  * Spray Indoxacarb 14.5 SC @ 160 ml/acre
+  * Avoid excess nitrogen application
+
+1.3 BROWN PLANT HOPPER (BPH) (గోధుమ రంగు రసం పీల్చే పురుగు)
+- Most dangerous pest - causes "hopper burn"
+- Symptoms: Plants dry out in circular patches (hopper burn)
+- Control:
+  * Spray Buprofezin 25 SC @ 400 ml/acre
+  * Spray Thiamethoxam 25 WG @ 40 g/acre
+  * Spray Pymetrozine 50 WG @ 120 g/acre
+  * Do NOT spray synthetic pyrethroids - they increase BPH population
+  * Keep field bunds clean, avoid water stagnation
+
+1.4 GALL MIDGE (పిత్త దోమ)
+- Symptoms: Central shoot turns into a tubular gall (silver shoot / onion shoot)
+- Control:
+  * Use resistant varieties: MTU 1010, MTU 7029, Rajendra Mahsuri
+  * Apply Carbofuran 3G @ 10 kg/acre
+  * Spray Monocrotophos 36 SL @ 400 ml/acre
+
+1.5 THRIPS (తీగె పురుగు)
+- Symptoms: Leaf tips rolled, silvery streaks on leaves
+- Control:
+  * Spray Acephate 75 SP @ 300 g/acre
+  * Spray Fipronil 5 SC @ 400 ml/acre
+  * Flood irrigate the field if possible
+
+=============================================================
+2. MAJOR DISEASES OF RICE/PADDY
+=============================================================
+
+2.1 BLAST DISEASE (బ్లాస్ట్ వ్యాధి)
+- Most serious disease in Telangana
+- Symptoms: Diamond-shaped lesions on leaves with grey centre and brown border
+- Control:
+  * Seed treatment with Carbendazim 50 WP @ 2g/kg seed
+  * Spray Tricyclazole 75 WP @ 120 g/acre at first sign
+  * Spray Isoprothiolane 40 EC @ 300 ml/acre
+  * Use resistant varieties: MTU 1010, BPT 5204 (Samba Mahsuri)
+
+2.2 BACTERIAL LEAF BLIGHT (BLB) (బ్యాక్టీరియా పత్ర వాడకం)
+- Symptoms: Water-soaked yellowing from leaf tips and margins
+- Control:
+  * No chemical control is fully effective
+  * Use resistant varieties
+  * Spray Copper Oxychloride 50 WP @ 500 g/acre
+  * Avoid excess nitrogen fertilizer
+  * Drain water from field
+
+2.3 SHEATH BLIGHT (తొడిమ కుళ్ళు)
+- Symptoms: Oval lesions on leaf sheath with grey center and brown border
+- Control:
+  * Spray Propiconazole 25 EC @ 200 ml/acre
+  * Spray Hexaconazole 5 SC @ 300 ml/acre
+  * Spray Carbendazim 50 WP @ 400 g/acre
+  * Avoid dense planting, ensure proper spacing
+
+=============================================================
+3. INTEGRATED PEST MANAGEMENT (IPM) FOR PADDY
+=============================================================
+
+Preventive Measures:
+- Use certified, disease-free seeds
+- Seed treatment before sowing
+- Balanced fertilizer application (do not over-apply nitrogen)
+- Proper spacing: 20x15 cm for transplanting
+- Field sanitation: remove crop debris after harvest
+- Install pheromone traps @ 5/acre for stem borer monitoring
+- Light traps @ 1/acre to monitor pest populations
+- Maintain water level at 5 cm to discourage BPH
+
+Spray Calendar for Paddy:
+- 15 DAT: Stem borer spray (if needed)
+- 30 DAT: Check for BPH and leaf folder
+- 45 DAT: Blast spray (preventive during monsoon)
+- 60 DAT: Sheath blight spray (if needed)
+- 75 DAT: Final check before harvest
+
+=============================================================
+4. EMERGENCY HELPLINE
+=============================================================
+- Telangana Agriculture Department: 1800-425-1110 (Toll Free)
+- ICAR-IIRR Hyderabad: 040-24591218
+- KVK Jagtial: Contact District Agriculture Office
+
+=============================================================
+NOTE: Always wear protective equipment when spraying pesticides.
+Mix chemicals in recommended doses. Do not spray during flowering.
+=============================================================

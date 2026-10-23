@@ -1,0 +1,120 @@
+PADDY FERTILIZER RECOMMENDATION GUIDE
+Source: Telangana State Agriculture Department & ICAR
+State: Telangana | Crop: Rice / Paddy
+Language: English
+
+=============================================================
+1. RECOMMENDED FERTILIZER DOSES FOR PADDY (PER ACRE)
+=============================================================
+
+General Recommendation (Telangana):
+- Nitrogen (N): 80 kg/acre (as Urea)
+- Phosphorus (P): 40 kg/acre (as DAP or SSP)
+- Potassium (K): 40 kg/acre (as MOP)
+
+Urea Requirement:
+- Total Urea needed = 175 kg/acre
+- Split into 3 doses:
+  * Dose 1 (Basal - at transplanting): 58 kg Urea/acre
+  * Dose 2 (Tillering - 21 days after transplanting): 58 kg Urea/acre
+  * Dose 3 (Panicle initiation - 45 days after transplanting): 58 kg Urea/acre
+
+DAP (Di-Ammonium Phosphate):
+- Apply 87 kg DAP/acre as basal dose before transplanting
+- Mix into soil before puddling
+
+MOP (Muriate of Potash):
+- Apply 67 kg MOP/acre
+- Split: 50% basal + 50% at panicle initiation
+
+=============================================================
+2. ZINC DEFICIENCY (COMMON IN TELANGANA)
+=============================================================
+
+Symptoms of Zinc Deficiency:
+- Brown rusty spots on leaves
+- Stunted plant growth
+- Leaves turn pale yellow to white (khaira disease)
+- Most common in alkaline soils and flooded conditions
+
+Treatment:
+- Apply Zinc Sulphate (ZnSO4) @ 10 kg/acre as basal dose
+- If deficiency appears after transplanting: spray 0.5% ZnSO4 solution
+  (dissolve 500g ZnSO4 in 100 litres water, spray per acre)
+- Apply ZnSO4 once every 3 seasons
+
+=============================================================
+3. BORON DEFICIENCY
+=============================================================
+
+Symptoms:
+- White tips on young leaves
+- Empty grains (poor seed setting)
+
+Treatment:
+- Spray Borax 0.2% solution at panicle initiation stage
+- (Dissolve 200g Borax in 100 litres water)
+
+=============================================================
+4. BASAL FERTILIZER SCHEDULE (BEFORE TRANSPLANTING)
+=============================================================
+
+Step 1 - Soil preparation:
+- Apply 2 tonnes FYM (Farm Yard Manure) or compost per acre
+- Mix well into soil before last ploughing
+
+Step 2 - Basal chemical fertilizers (apply 1 day before transplanting):
+- DAP: 87 kg/acre
+- MOP: 33 kg/acre
+- Zinc Sulphate: 10 kg/acre (if not applied in last 3 seasons)
+
+=============================================================
+5. TOP DRESSING SCHEDULE
+=============================================================
+
+21 Days After Transplanting (Tillering stage):
+- Urea: 58 kg/acre
+- Apply when field has 2-3 cm water
+- Broadcast evenly, do not let water drain for 3 days
+
+45 Days After Transplanting (Panicle initiation):
+- Urea: 58 kg/acre
+- MOP: 33 kg/acre
+- This is the most critical dose for good grain filling
+
+=============================================================
+6. ORGANIC ALTERNATIVES (FOR ORGANIC FARMERS)
+=============================================================
+
+Green Manure:
+- Grow Dhaincha (Sesbania) and incorporate 30 days before transplanting
+- Provides 30-40 kg N/acre equivalent
+
+Bio-fertilizers:
+- Azospirillum: 2 packets (200g each)/acre - apply to nursery or roots before transplanting
+- Blue-Green Algae (BGA): 2 kg/acre - apply to flooded field
+- PSB (Phosphate Solubilizing Bacteria): 2 packets/acre
+
+Jeevamrutham:
+- Mix 10 litres cow urine + 10 kg cow dung + 2 kg jaggery + 2 kg gram flour in 200 litres water
+- Ferment for 7 days, dilute 1:10, apply to field every 21 days
+
+=============================================================
+7. COMMON FERTILIZER MISTAKES TO AVOID
+=============================================================
+
+- Do NOT apply urea on dry soil (evaporation waste)
+- Do NOT apply urea when crop is water stressed
+- Do NOT apply excess nitrogen (increases pest and disease problems)
+- Do NOT mix DAP and Urea together (causes nitrogen loss)
+- Always apply fertilizer in the morning (before 9 AM) or evening (after 4 PM)
+
+=============================================================
+8. SOIL TESTING RECOMMENDATION
+=============================================================
+
+- Test soil every 3 years at nearest Soil Testing Lab
+- Telangana Soil Testing Labs: Available in every district headquarters
+- For custom fertilizer recommendation based on soil test: Contact local Agriculture Officer or KVK
+
+=============================================================

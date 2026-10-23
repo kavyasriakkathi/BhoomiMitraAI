@@ -63,13 +63,35 @@ def classify_intent(intent_str: Optional[str]) -> str:
     """
     Normalizes varied conversational intents into standardized buckets:
     shops, fertilizer, weather, market, disease, schemes, other.
+
+    Maps exact FarmerIntent enum values from decision_engine.py as well as
+    legacy keyword-based strings.
     """
     if not intent_str:
         return "other"
     low = intent_str.lower().strip()
+
+    # Direct enum value matches (from FarmerIntent in decision_engine.py)
+    _EXACT_MAP = {
+        "shops_input_availability": "shops",
+        "fertilizer_nutrient": "fertilizer",
+        "weather": "weather",
+        "market_price": "market",
+        "crop_health": "disease",
+        "government_schemes": "schemes",
+        "greeting": "other",
+        "order_status_notification": "other",
+        "dosage_unverified_fallback": "fertilizer",
+        "rag_safe_fallback": "other",
+        "ai_unavailable_fallback": "other",
+    }
+    if low in _EXACT_MAP:
+        return _EXACT_MAP[low]
+
+    # Keyword-based fallback for any legacy or future intent strings
     if any(k in low for k in ["shop", "store", "dealer", "input_availability", "stock_alert"]):
         return "shops"
-    if any(k in low for k in ["fertilizer", "nutrient", "urea", "dap", "potash", "manure"]):
+    if any(k in low for k in ["fertilizer", "nutrient", "urea", "dap", "potash", "manure", "dosage"]):
         return "fertilizer"
     if any(k in low for k in ["weather", "rain", "temperature", "forecast", "climate"]):
         return "weather"
@@ -77,9 +99,10 @@ def classify_intent(intent_str: Optional[str]) -> str:
         return "market"
     if any(k in low for k in ["disease", "pest", "crop_health", "health", "infection", "symptom"]):
         return "disease"
-    if any(k in low for k in ["scheme", "subsidy", "pm_kisan", "rythu_bandhu", "insurance"]):
+    if any(k in low for k in ["scheme", "subsidy", "pm_kisan", "rythu_bandhu", "insurance", "government"]):
         return "schemes"
     return "other"
+
 
 
 def get_clean_farmers_filter():
