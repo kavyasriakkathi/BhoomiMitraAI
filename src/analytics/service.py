@@ -109,6 +109,7 @@ class AnalyticsService:
         today_start = datetime(now.year, now.month, now.day, 0, 0, 0)
         past_24h = now - timedelta(hours=24)
         past_7d = now - timedelta(days=7)
+        past_30d = now - timedelta(days=30)
 
         # 1. Total Farmers
         total_farmers_res = await self.db.execute(select(func.count(Farmer.id)))
@@ -200,6 +201,10 @@ class AnalyticsService:
         total_users = total_farmers
         total_ai_responses = 0
         active_users_today = 0
+        mau = wau
+        new_farmers_today = 0
+        new_farmers_this_week = 0
+        new_farmers_this_month = 0
         avg_response_time_seconds = 0.0
         slow_responses_count = 0
         intents = IntentBreakdown()
@@ -213,6 +218,30 @@ class AnalyticsService:
             acc_res = await self.db.execute(select(func.count(UserAccount.id)))
             acc_count = acc_res.scalar() or 0
             total_users = total_farmers + acc_count
+
+            # MAU (Unique farmers active in past 30 days)
+            mau_res = await self.db.execute(
+                select(func.count(distinct(Conversation.farmer_id))).where(Conversation.created_at >= past_30d)
+            )
+            mau = mau_res.scalar() or 0
+
+            # New farmers registered today
+            nft_res = await self.db.execute(
+                select(func.count(Farmer.id)).where(Farmer.created_at >= today_start)
+            )
+            new_farmers_today = nft_res.scalar() or 0
+
+            # New farmers registered in past 7 days
+            nfw_res = await self.db.execute(
+                select(func.count(Farmer.id)).where(Farmer.created_at >= past_7d)
+            )
+            new_farmers_this_week = nfw_res.scalar() or 0
+
+            # New farmers registered in past 30 days
+            nfm_res = await self.db.execute(
+                select(func.count(Farmer.id)).where(Farmer.created_at >= past_30d)
+            )
+            new_farmers_this_month = nfm_res.scalar() or 0
 
             # Total AI Responses
             ai_res = await self.db.execute(
@@ -363,6 +392,10 @@ class AnalyticsService:
             total_ai_responses=total_ai_responses,
             dau=dau,
             wau=wau,
+            mau=mau,
+            new_farmers_today=new_farmers_today,
+            new_farmers_this_week=new_farmers_this_week,
+            new_farmers_this_month=new_farmers_this_month,
             active_users_today=active_users_today,
             messages_today=messages_today,
             avg_response_time_seconds=avg_response_time_seconds,

@@ -764,12 +764,15 @@
 
       <!-- 1. KPI Cards Grid (6 Main Metrics) -->
       <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); margin-bottom: 1.5rem;">
-        <!-- Total Farmers -->
+        <!-- Total Farmers (Users Coming & Platform Growth) -->
         <div class="stat-card">
           <div class="stat-icon">👨‍🌾</div>
           <div>
             <div class="stat-value" id="stat-analytics-farmers">0</div>
-            <div class="stat-label">Total Farmers</div>
+            <div class="stat-label">Total Farmers (<span id="stat-analytics-total-users">0</span> Platform Users)</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 3px;">
+              <span id="stat-analytics-growth-badge" style="color: #16a34a; font-weight: 600;">+<span id="stat-analytics-new-week">0</span> new this week</span> (<span id="stat-analytics-new-month">0</span>/mo)
+            </div>
           </div>
         </div>
 
@@ -791,12 +794,15 @@
           </div>
         </div>
 
-        <!-- Active Users Today (DAU) -->
+        <!-- Active Users (Users Using BhoomiMitra: DAU / WAU / MAU) -->
         <div class="stat-card">
           <div class="stat-icon">⚡</div>
           <div>
             <div class="stat-value" id="stat-analytics-dau">0</div>
-            <div class="stat-label">Active Users Today (WAU: <span id="stat-analytics-wau">0</span>)</div>
+            <div class="stat-label">Active Users Today (DAU)</div>
+            <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 3px;">
+              WAU (7d): <b id="stat-analytics-wau" style="color: var(--text-primary);">0</b> | MAU (30d): <b id="stat-analytics-mau" style="color: #2563eb;">0</b>
+            </div>
           </div>
         </div>
 

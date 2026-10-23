@@ -1992,11 +1992,16 @@ async function loadPilotAnalytics() {
 
     // 1. KPI Cards (Real numbers, no fake defaults)
     setVal('stat-analytics-farmers', summary.total_farmers ?? 0);
+    setVal('stat-analytics-total-users', summary.total_users ?? summary.total_farmers ?? 0);
+    setVal('stat-analytics-new-week', summary.new_farmers_this_week ?? 0);
+    setVal('stat-analytics-new-month', summary.new_farmers_this_month ?? 0);
+
     setVal('stat-analytics-total-msgs', summary.total_messages ?? 0);
     setVal('stat-analytics-messages-today', summary.messages_today ?? 0);
     setVal('stat-analytics-ai-responses', summary.total_ai_responses ?? 0);
     setVal('stat-analytics-dau', summary.dau ?? 0);
     setVal('stat-analytics-wau', summary.wau ?? 0);
+    setVal('stat-analytics-mau', summary.mau ?? summary.wau ?? 0);
 
     const avgRt = summary.avg_response_time_seconds;
     setVal('stat-analytics-avg-response-time', (avgRt != null && avgRt > 0) ? `${avgRt}s` : '—');
