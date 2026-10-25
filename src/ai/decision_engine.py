@@ -91,6 +91,34 @@ GREETING_RESPONSES = {
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Automated Service & Third-Party Bot Detection Patterns
+# Detects automated notifications, insurance/banking bot menus, OTPs, etc.
+# to prevent them from falsely triggering greetings or expensive domain models.
+# ─────────────────────────────────────────────────────────────────────────────
+
+AUTOMATED_SERVICE_PATTERNS = [
+    r"\blic\b",
+    r"\bwhatsapp\s+service(?:s)?\b",
+    r"\bterms\s+and\s+conditions\b",
+    r"\bdo\s+not\s+reply\b",
+    r"\bautomated\s+(?:message|notification|service)\b",
+    r"\botp\b",
+    r"\bverification\s+code\b",
+    r"\bpolicy\s+(?:number|status|details)\b",
+    r"\bcustomer\s+care\b",
+    r"\bpremium\s+(?:due|payment|receipt)\b",
+]
+
+
+def is_automated_service_message(text: str) -> bool:
+    """Detect whether a message originates from an automated bot, corporate notification, or spam header."""
+    if not text or not text.strip():
+        return False
+    msg = text.lower()
+    return any(re.search(pat, msg, re.IGNORECASE) for pat in AUTOMATED_SERVICE_PATTERNS)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 11. Stock Alert Keywords (Proactive Input Restock Notifications)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -820,6 +848,9 @@ class AIDecisionEngine:
         if not user_message or not user_message.strip():
             return False
 
+        if is_automated_service_message(user_message):
+            return False
+
         cleaned = _normalize_query_text(user_message)
         if not cleaned:
             return False
@@ -1020,6 +1051,31 @@ class AIDecisionEngine:
         from src.language.detector import detect_language
         pref_fallback = getattr(farmer, "preferred_language", None) or "te"
         language = detect_language(user_message, fallback=pref_fallback)
+
+        # 0. Automated Service / Third-Party Bot Message Guard
+        if is_automated_service_message(user_message):
+            logger.info(f"[DECISION ENGINE] Automated service / bot message detected for farmer {farmer.id}.")
+            if language == "te":
+                reply = (
+                    "నమస్తే! నేను మీ భూమిమిత్ర AI వ్యవసాయ సహాయకుడిని. 🙏\n\n"
+                    "ఇది ఇతర సేవల నుండి వచ్చిన ఆటోమేటెడ్ సందేశంలా ఉంది. పంటలు, ఎరువులు, మార్కెట్ ధరలు లేదా వాతావరణం గురించి సమాచారం కోసం నన్ను అడగవచ్చు."
+                )
+            elif language == "hi":
+                reply = (
+                    "नमस्ते! मैं आपका भूमिमित्र AI कृषि सहायक हूँ। 🙏\n\n"
+                    "यह किसी अन्य सेवा का स्वचालित संदेश प्रतीत होता है। फसलों, खाद, मंडी भाव या मौसम की जानकारी के लिए आप मुझसे पूछ सकते हैं।"
+                )
+            else:
+                reply = (
+                    "Hello! I am your BhoomiMitra AI farming assistant. 🙏\n\n"
+                    "This appears to be an automated message or notification from another service. "
+                    "How can I assist you with your crops, fertilizers, mandi prices, or weather forecasts today?"
+                )
+            conversation.ai_response = reply
+            conversation.intent = "automated_service_notification"
+            db.add(conversation)
+            await db.commit()
+            return reply
 
         # 1. Pure Greeting Shortcut
         if self.is_greeting_only(user_message):

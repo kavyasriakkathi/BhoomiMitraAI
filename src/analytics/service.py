@@ -81,6 +81,7 @@ def classify_intent(intent_str: Optional[str]) -> str:
         "government_schemes": "schemes",
         "greeting": "other",
         "order_status_notification": "shops",
+        "automated_service_notification": "other",
         "dosage_unverified_fallback": "fertilizer",
         "rag_safe_fallback": "other",
         "ai_unavailable_fallback": "other",
@@ -238,7 +239,7 @@ class AnalyticsService:
         )
         del_rows = del_res.all() if hasattr(del_res, "all") else []
         del_map = {row[0]: row[1] for row in del_rows if row and len(row) >= 2}
-        sent_count = del_map.get("sent", 0)
+        sent_count = del_map.get("sent", 0) + del_map.get("delivered", 0) + del_map.get("read", 0)
         failed_count = del_map.get("failed", 0)
         pending_del_count = del_map.get("pending", 0)
         total_delivered = sent_count + failed_count
@@ -330,7 +331,10 @@ class AnalyticsService:
                     select(
                         func.avg(Conversation.response_time_seconds),
                         func.count(Conversation.id).filter(Conversation.response_time_seconds > 10.0),
-                    ).where(Conversation.response_time_seconds.is_not(None))
+                    ).where(
+                        Conversation.response_time_seconds.is_not(None),
+                        Conversation.delivery_status.in_(["sent", "delivered", "read"]),
+                    )
                 )
                 rt_row = rt_res.first() if hasattr(rt_res, "first") else None
                 if rt_row:
@@ -378,7 +382,13 @@ class AnalyticsService:
                 .where(
                     Conversation.user_message.is_not(None),
                     Conversation.user_message != "",
-                    or_(Conversation.intent.is_(None), Conversation.intent != "order_status_notification"),
+                    or_(
+                        Conversation.intent.is_(None),
+                        and_(
+                            Conversation.intent != "order_status_notification",
+                            Conversation.intent != "automated_service_notification",
+                        ),
+                    ),
                     not_(Conversation.user_message.ilike("[Automated%")),
                     not_(Conversation.user_message.ilike("%Thank you for using LIC%")),
                     not_(and_(Conversation.user_message.ilike("%LIC%"), Conversation.user_message.ilike("%WhatsApp%"))),

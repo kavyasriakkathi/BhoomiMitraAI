@@ -806,3 +806,58 @@ async def process_message_pipeline(
                 logger.exception(f"Recovery fallback commit failed: {recovery_err}")
     finally:
         release_in_flight_lock(parsed.message_id)
+
+
+async def update_conversation_delivery_status(status_item: dict) -> bool:
+    """
+    Update Conversation.delivery_status based on Meta WhatsApp delivery status callbacks
+    ('sent', 'delivered', 'read', 'failed').
+
+    Enforces monotonic progression: pending -> sent -> delivered -> read (or failed).
+    """
+    if not status_item or not isinstance(status_item, dict):
+        return False
+
+    outbound_id = status_item.get("id")
+    raw_status = (status_item.get("status") or "").lower().strip()
+    if not outbound_id or not raw_status:
+        return False
+
+    valid_statuses = {"sent", "delivered", "read", "failed"}
+    if raw_status not in valid_statuses:
+        return False
+
+    status_priority = {
+        "pending": 0,
+        "failed": 1,
+        "sent": 2,
+        "delivered": 3,
+        "read": 4,
+    }
+
+    try:
+        async with AsyncSessionLocal() as db:
+            stmt = select(Conversation).where(Conversation.outbound_message_id == outbound_id)
+            res = await db.execute(stmt)
+            conv = res.scalar_one_or_none()
+            if not conv:
+                return False
+
+            current_status = (conv.delivery_status or "pending").lower()
+            current_prio = status_priority.get(current_status, 0)
+            new_prio = status_priority.get(raw_status, 0)
+
+            # Monotonic progression, or explicit failure
+            if raw_status == "failed" or new_prio > current_prio:
+                conv.delivery_status = raw_status
+                db.add(conv)
+                await db.commit()
+                logger.info(
+                    f"[CONVERSATION DELIVERY STATUS UPDATED] Outbound msg_id={outbound_id} "
+                    f"transitioned from '{current_status}' to '{raw_status}'"
+                )
+                return True
+            return False
+    except Exception as err:
+        logger.warning(f"[CONVERSATION DELIVERY UPDATE ERROR] Could not update status for {outbound_id}: {err}")
+        return False

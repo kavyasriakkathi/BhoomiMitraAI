@@ -267,6 +267,11 @@ async def receive_message(
                     recipient_id = status_item.get("recipient_id", "unknown")
                     logger.info(f"[STATUS RECEIPT] Message {msg_id} to {mask_phone_number(recipient_id)} status updated to: '{status_type}'")
                     try:
+                        from src.gateway.service import update_conversation_delivery_status
+                        background_tasks.add_task(update_conversation_delivery_status, status_item=status_item)
+                    except Exception as c_err:
+                        logger.debug(f"Failed to queue conversation status handler: {c_err}")
+                    try:
                         from src.shops.stock_alerts import handle_stock_alert_status_update
                         background_tasks.add_task(handle_stock_alert_status_update, status_item=status_item)
                     except Exception as s_err:
